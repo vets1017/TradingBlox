@@ -1,47 +1,50 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Events = ReplicatedStorage:WaitForChild("Events")
-local TradeEvent = Events:WaitForChild("TradeEvent")
+local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
+local TradeEvent = EventsFolder:WaitForChild("TradeEvent")
 
 TradeEvent.OnServerEvent:Connect(function(player, action, ticker, shares)
 	if type(action) ~= "string" or type(ticker) ~= "string" or type(shares) ~= "number" then
 		return
 	end
+
 	shares = math.floor(shares)
+
 	if shares <= 0 then
 		return
 	end
+
 	ticker = string.upper(ticker)
 
-	local playerData = _G.ActivePlayers[player.UserId]
-	local marketData = _G.LiveData
+	local PlayerData = _G.PlayerData[player.UserId]
+	local LiveMarketData = _G.LiveMarketData
 
-	if not playerData or not marketData or not marketData[ticker] then
+	if not PlayerData or not LiveMarketData or not LiveMarketData[ticker] then
 		warn("Invalid trade attempt by " .. player.Name)
 		return
 	end
 
-	local currentPrice = marketData[ticker].Price
+	local currentPrice = LiveMarketData[ticker].Price
 	local totalValue = currentPrice * shares
 
 	if action == "Buy" then
-		if playerData.Balance >= totalValue then
-			playerData.Balance -= totalValue
-			playerData.Portfolio.Shares[ticker] = (playerData.Portfolio.Shares[ticker] or 0) + shares
+		if PlayerData.Balance >= totalValue then
+			PlayerData.Balance -= totalValue
+			PlayerData.Portfolio.Shares[ticker] = (PlayerData.Portfolio.Shares[ticker] or 0) + shares
 
 			print(player.Name .. " bought " .. shares .. " shares of " .. ticker)
 		else
-			warn(player.Name .. " has insufficient funds to buy " .. shares .. " shares of ")
+			warn(player.Name .. " has insufficient funds to buy " .. shares .. " shares of " .. ticker)
 		end
 	elseif action == "Sell" then
-		local ownedShares = playerData.Portfolio.Shares[ticker] or 0
+		local ownedShares = PlayerData.Portfolio.Shares[ticker] or 0
 
 		if ownedShares >= shares then
-			playerData.Portfolio.Shares[ticker] = ownedShares - shares
-			playerData.Balance += totalValue
+			PlayerData.Portfolio.Shares[ticker] = ownedShares - shares
+			PlayerData.Balance += totalValue
 
-			if playerData.Portfolio.Shares[ticker] == 0 then
-				playerData.Portfolio.Shares[ticker] = nil
+			if PlayerData.Portfolio.Shares[ticker] == 0 then
+				PlayerData.Portfolio.Shares[ticker] = nil
 			end
 
 			print(player.Name .. " sold " .. shares .. " shares of " .. ticker)

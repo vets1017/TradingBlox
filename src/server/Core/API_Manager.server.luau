@@ -1,17 +1,17 @@
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Events = ReplicatedStorage:WaitForChild("Events")
-local RequestChartEvent = Events:WaitForChild("RequestChartEvent")
-local GetMarketDataEvent = Events:WaitForChild("GetMarketDataEvent")
+local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
+local RequestChartEvent = EventsFolder:WaitForChild("RequestChartEvent")
+local GetMarketDataEvent = EventsFolder:WaitForChild("GetMarketDataEvent")
 
-local ServerURL = "https://spicy-dryers-smile.loca.lt/api/stock/AMZN" -- temp
+local SERVER_URL = nil -- temp
 
-_G.LiveData = {}
+_G.LiveMarketData = {}
 
 local function updateMarketData()
 	local success, response = pcall(function()
-		return HttpService:GetAsync(ServerURL)
+		return HttpService:GetAsync(SERVER_URL)
 	end)
 
 	if success then
@@ -24,11 +24,12 @@ local function updateMarketData()
 end
 
 RequestChartEvent.OnServerInvoke = function(player, ticker)
-	local url = ServerURL .. string.upper(ticker)
+	local url = SERVER_URL .. string.upper(ticker)
 
 	local success, response = pcall(function()
 		return HttpService:GetAsync(url)
 	end)
+
 	if success then
 		local decodedData = HttpService:JSONDecode(response)
 		return decodedData
@@ -39,7 +40,7 @@ RequestChartEvent.OnServerInvoke = function(player, ticker)
 end
 
 GetMarketDataEvent.OnServerInvoke = function(player)
-	return _G.LiveData
+	return _G.LiveMarketData
 end
 
 task.spawn(function()
