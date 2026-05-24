@@ -3,6 +3,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Events = ReplicatedStorage:WaitForChild("Events")
 local RequestChartEvent = Events:WaitForChild("RequestChartEvent")
+local GetMarketDataEvent = Events:WaitForChild("GetMarketDataEvent")
 
 local ServerURL = "https://spicy-dryers-smile.loca.lt/api/stock/AMZN" -- temp
 
@@ -35,6 +36,10 @@ RequestChartEvent.OnServerInvoke = function(player, ticker)
 		warn("Failed to fetch chart data for " .. ticker .. ": " .. tostring(response))
 		return nil
 	end
+end
+
+GetMarketDataEvent.OnServerInvoke = function(player)
+	return _G.LiveData
 end
 
 task.spawn(function()
