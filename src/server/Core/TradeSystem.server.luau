@@ -1,4 +1,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
+
+local CalculatorModule = require(ServerScriptService.Modules.CalculatorModule)
 
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
 local TradeEvent = EventsFolder:WaitForChild("TradeEvent")
@@ -29,8 +32,11 @@ TradeEvent.OnServerEvent:Connect(function(player, action, ticker, shares)
 
 	if action == "Buy" then
 		if PlayerData.Balance >= totalValue then
-			PlayerData.Balance -= totalValue
-			PlayerData.Portfolio.Shares[ticker] = (PlayerData.Portfolio.Shares[ticker] or 0) + shares
+			local newBalance = PlayerData.Balance - totalValue
+
+			_G.UpdatePlayerStat(player, "Balance", newBalance)
+			_G.UpdatePortfolio(player, ticker, shares)
+			CalculatorModule.calculateNetWorth(player)
 
 			print(player.Name .. " bought " .. shares .. " shares of " .. ticker)
 		else
@@ -39,13 +45,19 @@ TradeEvent.OnServerEvent:Connect(function(player, action, ticker, shares)
 	elseif action == "Sell" then
 		local ownedShares = PlayerData.Portfolio.Shares[ticker] or 0
 
-		if ownedShares >= shares then
-			PlayerData.Portfolio.Shares[ticker] = ownedShares - shares
-			PlayerData.Balance += totalValue
+		if PlayerData.Portfolio and PlayerData.Portfolio.Shares[ticker] then
+			ownedShares = PlayerData.Portfolio.Shares[ticker]
+		else
+			ownedShares = 0
+		end
 
-			if PlayerData.Portfolio.Shares[ticker] == 0 then
-				PlayerData.Portfolio.Shares[ticker] = nil
-			end
+		if ownedShares >= shares then
+			local totalProceeds = currentPrice * shares
+			local newBalance = PlayerData.Balance + totalProceeds
+
+			_G.UpdatePlayerStat(player, "Balance", newBalance)
+			_G.UpdatePortfolio(player, ticker, -shares)
+			CalculatorModule.calculateNetWorth(player)
 
 			print(player.Name .. " sold " .. shares .. " shares of " .. ticker)
 		else

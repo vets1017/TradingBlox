@@ -2,6 +2,8 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
+local NumberModule = require(ReplicatedStorage.Modules.NumberModule)
+
 local Player = Players.LocalPlayer
 
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
@@ -30,6 +32,12 @@ local DateText = GreetingBar:WaitForChild("DateText")
 
 local DashboardGrid = DashboardScreen:WaitForChild("DashboardGrid")
 local LeftSidebar = DashboardGrid:WaitForChild("LeftSidebar")
+local AccountInfoWidget = LeftSidebar:WaitForChild("AccountInfoWidget")
+
+local OptionPowerValue = AccountInfoWidget:WaitForChild("OptionPowerRow").ValueText
+local NetLiquidityValue = AccountInfoWidget:WaitForChild("NetLiquidityRow").ValueText
+local CashSweepValue = AccountInfoWidget:WaitForChild("CashSweepRow").ValueText
+local AvailableFundsValue = AccountInfoWidget:WaitForChild("AvailableFundsRow").ValueText
 
 local RightSidebar = DashboardGrid:WaitForChild("RightSidebar")
 
@@ -64,7 +72,19 @@ local Tabs = {
 		Frame = ScreenContainer:WaitForChild("OptionsScreen"),
 	},
 }
--- local stockListFrame =
+
+local Holidays = {
+	["01-01"] = true, -- New Year's Day
+	["01-15"] = true, -- Martin Luther King Jr. Day
+	["02-19"] = true, -- Presidents' Day
+	["03-29"] = true, -- Good Friday
+	["05-27"] = true, -- Memorial Day
+	["06-19"] = true, -- Juneteenth
+	["07-04"] = true, -- Independence Day
+	["09-02"] = true, -- Labor Day
+	["11-28"] = true, -- Thanksgiving
+	["12-25"] = true, -- Christmas
+}
 
 local function refreshTerminal()
 	local marketData = GetMarketDataEvent:InvokeServer()
@@ -72,11 +92,11 @@ local function refreshTerminal()
 	if not marketData then
 		return
 	end
-	-- continue after stocklist is done
+	-- continue after stock-list is done
 end
 
 local function switchTab(tabName)
-	for tabName, data in pairs(Tabs) do
+	for _, data in pairs(Tabs) do
 		data.Frame.Visible = false
 		data.Button.TextColor3 = Color3.fromRGB(120, 123, 134)
 	end
@@ -111,6 +131,22 @@ local function updateGreeting()
 	DateText.Text = formattedDate
 end
 
+local function isMarketClosed(currentTime)
+	local date = os.date("!*t", currentTime)
+
+	if date.wday == 1 or date.wday == 7 then
+		return true
+	end
+
+	local dateString = string.format("%02d-%02d", date.month, date.day)
+
+	if Holidays[dateString] then
+		return true
+	end
+
+	return false
+end
+
 local function updateCountdown()
 	local time = os.time()
 	local currentUTC = os.date("!*t", time)
@@ -135,18 +171,22 @@ local function updateCountdown()
 
 	local targetTime
 
-	if time < marketOpen then
-		targetTime = marketOpen
-		TitleText.Text = "NYSE opens in"
-		TitleText.TextColor3 = Color3.fromRGB(120, 123, 134)
-	elseif time >= marketOpen and time < marketClose then
+	if not isMarketClosed(time) and time >= marketOpen and time < marketClose then
 		targetTime = marketClose
-		TitleText.Text = "NYSE closes in"
+		TitleText.Text = "NYSE Closes In"
 		TitleText.TextColor3 = Color3.fromRGB(8, 153, 129)
-	else -- After-hours
-		targetTime = marketOpen + 86400
-		TitleText.Text = "NYSE opens in"
+	else
+		TitleText.Text = "NYSE Opens In"
 		TitleText.TextColor3 = Color3.fromRGB(120, 123, 134)
+		targetTime = marketOpen
+
+		if time >= marketOpen or isMarketClosed(time) then
+			targetTime = targetTime + 86400
+		end
+
+		while isMarketClosed(targetTime) do
+			targetTime = targetTime + 86400
+		end
 	end
 
 	local differenceTime = targetTime - time
@@ -173,5 +213,20 @@ task.spawn(function()
 	end
 end)
 
+local function updateAccountInfo()
+	local currentBalance = Player:GetAttribute("Balance") or 0
+	local currentNetWorth = Player:GetAttribute("NetWorth") or 0
+	local optionPower = currentBalance or 0 -- wip
+
+	OptionPowerValue.Text = NumberModule.format(optionPower)
+	NetLiquidityValue.Text = NumberModule.format(currentNetWorth)
+	CashSweepValue.Text = NumberModule.format(currentBalance)
+	AvailableFundsValue.Text = NumberModule.format(currentBalance)
+end
+
+Player:GetAttributeChangedSignal("Balance"):Connect(updateAccountInfo)
+Player:GetAttributeChangedSignal("NetWorth"):Connect(updateAccountInfo)
+
 switchTab("Dashboard")
 updateGreeting()
+updateAccountInfo()
