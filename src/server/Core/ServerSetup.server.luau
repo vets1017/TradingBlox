@@ -8,19 +8,16 @@ if not EventsFolder then
 	EventsFolder.Parent = ReplicatedStorage
 end
 
-local TradeEvent = Instance.new("RemoteEvent")
-local OptionEvent = Instance.new("RemoteEvent")
-local RequestChartEvent = Instance.new("RemoteFunction")
-local GetMarketDataEvent = Instance.new("RemoteFunction")
+local RequestChartEvent = EventsFolder:FindFirstChild("RequestChartEvent")
+if not RequestChartEvent then
+	RequestChartEvent = Instance.new("RemoteFunction")
+	RequestChartEvent.Name = "RequestChartEvent"
+	RequestChartEvent.Parent = EventsFolder
+end
 
-TradeEvent.Name = "TradeEvent"
-TradeEvent.Parent = EventsFolder
-
-OptionEvent.Name = "OptionEvent"
-OptionEvent.Parent = EventsFolder
-
-RequestChartEvent.Name = "RequestChartEvent"
-RequestChartEvent.Parent = EventsFolder
-
-GetMarketDataEvent.Name = "GetMarketDataEvent"
-GetMarketDataEvent.Parent = EventsFolder
+local GetMarketDataEvent = EventsFolder:FindFirstChild("GetMarketDataEvent")
+if not GetMarketDataEvent then
+	GetMarketDataEvent = Instance.new("RemoteFunction")
+	GetMarketDataEvent.Name = "GetMarketDataEvent"
+	GetMarketDataEvent.Parent = EventsFolder
+end

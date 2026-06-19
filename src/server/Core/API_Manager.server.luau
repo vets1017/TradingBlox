@@ -14,9 +14,7 @@ local CACHE_DURATION = 300
 
 local ChartCache = {}
 
-_G.LiveMarketData = {
-	-- structure will be defined soon
-}
+_G.LiveMarketData = {}
 
 local function updateMarketData()
 	local success, response = pcall(function()
@@ -35,9 +33,9 @@ end
 
 RequestChartEvent.OnServerInvoke = function(player, ticker, timeframe)
 	local targetTicker = string.upper(ticker)
-	local timeframeValue = timeframe or "D"
+	local timeframeValue = timeframe
 
-	local url = CANDLES_ENDPOINT .. targetTicker .. "?tf=" .. timeframeValue
+	local url = CANDLES_ENDPOINT .. targetTicker .. "?timeframe=" .. timeframeValue
 
 	local success, response = pcall(function()
 		return HttpService:GetAsync(url)

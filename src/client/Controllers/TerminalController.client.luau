@@ -54,9 +54,17 @@ local TopToolbar = MainChart:WaitForChild("TopToolbar")
 local CrosshairX = ChartCanvas:WaitForChild("CrosshairX")
 local CrosshairY = ChartCanvas:WaitForChild("CrosshairY")
 local HoverPriceTag = RightAxis:WaitForChild("HoverPriceTag")
-local HoverTimeTag = BottomAxis:WaitForChild("HoverTimeTag")
-local TickerInput = TopToolbar:WaitForChild("TickerInput")
-local ChartTickerLabel = TopToolbar:WaitForChild("ChartTickerLabel")
+local HoverTimeTag = ChartCanvas:WaitForChild("HoverTimeTag")
+local TickerInputBox = TopToolbar:WaitForChild("TickerInputBox")
+local TickerInput = TickerInputBox:WaitForChild("TickerInput")
+local ChartLegend = ChartCanvas:WaitForChild("ChartLegend")
+local ChartTickerLabel = ChartLegend:WaitForChild("ChartTickerLabel")
+local TimeframeDropdown = TopToolbar:WaitForChild("TimeframeDropdown")
+local TimeDropdownList = TimeframeDropdown:WaitForChild("TimeDropdownList")
+local MainTimeframeButton = TimeframeDropdown:WaitForChild("MainTimeframeButton")
+local ScrollTrack = ChartCanvas:WaitForChild("ScrollTrack")
+local ScrollThumb = ScrollTrack:WaitForChild("ScrollThumb")
+local CandlesContainer = ChartCanvas:WaitForChild("CandlesContainer")
 
 local SWEEP_INFO = TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local SLIDE_EASING = TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
@@ -64,9 +72,14 @@ local SLIDE_EASING = TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDire
 local HIDDEN_POSITION = UDim2.new(1, 300, 0.5, 0)
 local VISIBLE_POSITION = UDim2.new(1, -50, 0.5, 0)
 
-local GREEN = Color3.fromRGB(14, 203, 129)
+local GREEN = Color3.fromRGB(8, 153, 129)
 local RED = Color3.fromRGB(242, 54, 69)
 local GRAY = Color3.fromRGB(132, 142, 156)
+
+local COLOR_ACTIVE_BACKGROUND = Color3.fromRGB(38, 166, 154)
+local COLOR_ACTIVE_TEXT = Color3.fromRGB(255, 255, 255)
+local COLOR_INACTIVE_BACKGROUND = Color3.fromRGB(30, 34, 45)
+local COLOR_INACTIVE_TEXT = Color3.fromRGB(132, 142, 156)
 
 -- UI Dragging variables
 local dragging = false
@@ -74,16 +87,31 @@ local dragInput = nil
 local dragStart = nil
 local startPosition = nil
 
-local isActiveTradeVisible = false
-local isCrosshairActive = true
-
 local currentMaxPrice = 200.00
 local currentMinPrice = 150.00
-local currentDisplayedTicker = ""
 
-local currentTimeframe = "D"
+local visibleCandles = 60
+
+local rightOffset = 0
+
+local lastMouseDragX
+
+local currentDisplayedTicker = ""
+local currentTimeframe = "H"
 
 local isFetchingData = false
+local isHoveringChart = false
+local isActiveTradeVisible = false
+local isCrosshairActive = true
+local isDropdownOpen = false
+local isDraggingChart = false
+local isDraggingScroll = false
+
+local scrollDragStartX = 0
+local startRightOffset = 0
+
+local currentChartData = {}
+local masterChartData = {}
 
 local Tabs = {
 	Dashboard = {
@@ -123,6 +151,14 @@ local TimeframeFormats = {
 	["30M"] = "%b %d, %H:%M",
 	["5M"] = "%H:%M",
 	["M"] = "%H:%M",
+}
+
+local TimeDropdownOptions = {
+	[TimeDropdownList:WaitForChild("1MinuteButton")] = { query = "1M" },
+	[TimeDropdownList:WaitForChild("5MinuteButton")] = { query = "5M" },
+	[TimeDropdownList:WaitForChild("30MinuteButton")] = { query = "30M" },
+	[TimeDropdownList:WaitForChild("1HourButton")] = { query = "H" },
+	[TimeDropdownList:WaitForChild("1DayButton")] = { query = "D" },
 }
 
 local function refreshTerminal()
@@ -280,12 +316,10 @@ end
 
 local function renderChart(ticker, chartData)
 	ChartTickerLabel.Text = ticker
+	currentChartData = chartData
 
-	for _, child in pairs(ChartCanvas:GetChildren()) do
-		if string.match(child.Name, "Candle_") then
-			child:Destroy()
-		end
-	end
+	CandlesContainer:ClearAllChildren()
+
 	for _, child in pairs(RightAxis:GetChildren()) do
 		if string.match(child.name, "AxisLabel_") then
 			child:Destroy()
@@ -347,7 +381,7 @@ local function renderChart(ticker, chartData)
 
 		if bodyHeightScale <= 0.002 then
 			bodyHeightScale = 0.002
-		end -- doji
+		end
 
 		local wickFrame = Instance.new("Frame")
 		wickFrame.Name = "Candle_Wick_" .. index
@@ -355,16 +389,17 @@ local function renderChart(ticker, chartData)
 		wickFrame.BorderSizePixel = 0
 		wickFrame.AnchorPoint = Vector2.new(0.5, 0)
 		wickFrame.Size = UDim2.new(0, 1, wickHeightScale, 0)
-		wickFrame.Position = UDim2.new(xPositionScale + (candleWidthScale / 2), 0, wickTopScale, 0)
-		wickFrame.Parent = ChartCanvas
+		wickFrame.Position = UDim2.fromScale(xPositionScale + (candleWidthScale / 2), wickTopScale)
+		wickFrame.Parent = CandlesContainer
 
 		local bodyFrame = Instance.new("Frame")
 		bodyFrame.Name = "Candle_Body_" .. index
 		bodyFrame.BackgroundColor3 = candleColor
 		bodyFrame.BorderSizePixel = 0
-		bodyFrame.Size = UDim2.new(candleWidthScale - paddingScale, 0, bodyHeightScale, 0)
-		bodyFrame.Position = UDim2.new(xPositionScale + (paddingScale / 2), 0, bodyTopScale, 0)
-		bodyFrame.Parent = ChartCanvas
+		bodyFrame.AnchorPoint = Vector2.new(0.5, 0)
+		bodyFrame.Size = UDim2.fromScale(candleWidthScale - paddingScale, bodyHeightScale)
+		bodyFrame.Position = UDim2.fromScale(xPositionScale + (candleWidthScale / 2), bodyTopScale)
+		bodyFrame.Parent = CandlesContainer
 	end
 
 	local numberPriceLabels = 5
@@ -450,8 +485,8 @@ local function renderDailyOverview(ticker, data)
 
 	local priceMarker = Instance.new("Frame")
 	priceMarker.Name = "PriceMarker"
-	priceMarker.Size = UDim2.new(0, 4, 0, 24)
-	priceMarker.Position = UDim2.new(currentPercentage, 0, 0.5, 0)
+	priceMarker.Size = UDim2.fromScale(4, 24)
+	priceMarker.Position = UDim2.fromScale(currentPercentage, 0.5)
 	priceMarker.BackgroundColor3 = color
 	priceMarker.BorderSizePixel = 0
 	priceMarker.Parent = rangeTrack
@@ -460,10 +495,10 @@ local function renderDailyOverview(ticker, data)
 	markerCorner.CornerRadius = UDim.new(1, 0)
 	markerCorner.Parent = priceMarker
 
-	local function createLabel(text, value, xPosition, yPosition, alignment)
+	local function createLabel(text, value, xPosition, yPosition, alignment) -- lowk why dont we use xposition
 		local label = Instance.new("TextLabel")
 		label.Text = text .. "\n$" .. string.format("%.2f", value)
-		label.Size = UDim2.new(0, 100, 0, 20)
+		label.Size = UDim2.fromOffset(100, 20)
 		label.Position = yPosition
 		label.BackgroundTransparency = 1
 		label.TextColor3 = GRAY
@@ -478,12 +513,12 @@ local function renderDailyOverview(ticker, data)
 
 	createLabel("Today's High", data.High, 1, UDim2.new(1, 0, 1, 15), Enum.TextXAlignment.Right)
 
-	createLabel("Open", data.Open, 0, UDim2.new(0, 0, 0, -45), Enum.TextXAlignment.Left)
+	createLabel("Open", data.Open, 0, UDim2.fromOffset(0, -45), Enum.TextXAlignment.Left)
 
 	createLabel("Prev Close", data.PreviousClose, 1, UDim2.new(1, 0, 0, -45), Enum.TextXAlignment.Right)
 
 	local currentLabel = Instance.new("TextLabel")
-	currentLabel.Size = UDim2.new(0, 100, 0, 20)
+	currentLabel.Size = UDim2.fromOffset(100, 20)
 	currentLabel.AnchorPoint = Vector2.new(0.5, 1)
 	currentLabel.Position = UDim2.new(currentPercentage, 0, 0, -15)
 	currentLabel.BackgroundTransparency = 1
@@ -494,6 +529,101 @@ local function renderDailyOverview(ticker, data)
 	currentLabel.Parent = rangeTrack
 end
 
+local function updateScrollBarUI()
+	if #masterChartData == 0 then
+		ScrollTrack.Visible = false
+		return
+	end
+
+	ScrollTrack.Visible = true
+
+	local maxOffset = #masterChartData - visibleCandles
+	local viewRatio = math.clamp(visibleCandles / #masterChartData, 0.05, 1)
+
+	ScrollThumb.Size = UDim2.fromScale(viewRatio, 1)
+
+	if maxOffset > 0 then
+		local availableWidthScale = 1 - viewRatio
+		local scrollAlpha = 1 - (rightOffset / maxOffset)
+
+		ScrollThumb.Position = UDim2.fromScale(scrollAlpha * availableWidthScale, 0)
+	else
+		ScrollThumb.Position = UDim2.fromScale(1 - viewRatio, 0)
+	end
+end
+
+local function updateViewport()
+	if #masterChartData == 0 then
+		return
+	end
+
+	visibleCandles = math.clamp(visibleCandles, 10, #masterChartData)
+	rightOffset = math.clamp(rightOffset, 0, #masterChartData - visibleCandles)
+
+	local startIndex = #masterChartData - rightOffset - visibleCandles + 1
+	local endIndex = #masterChartData - rightOffset
+
+	currentChartData = {}
+
+	for i = startIndex, endIndex do
+		table.insert(currentChartData, masterChartData[i])
+	end
+
+	renderChart(currentDisplayedTicker, currentChartData)
+	updateScrollBarUI()
+end
+
+local function updateTimeframeUI(activeTime)
+	for button, data in pairs(TimeDropdownOptions) do
+		if data.query == activeTime then
+			button.BackgroundColor3 = COLOR_ACTIVE_BACKGROUND
+			button.TextColor3 = COLOR_ACTIVE_TEXT
+		else
+			button.BackgroundColor3 = COLOR_INACTIVE_BACKGROUND
+			button.TextColor3 = COLOR_INACTIVE_TEXT
+		end
+	end
+end
+
+for button, data in pairs(TimeDropdownOptions) do
+	button.MouseButton1Click:Connect(function()
+		isDropdownOpen = false
+		TimeDropdownList.Visible = false
+
+		if isFetchingData then
+			return
+		end
+
+		isFetchingData = true
+		print(data.query)
+		currentTimeframe = data.query
+		updateTimeframeUI(data.query)
+
+		if currentDisplayedTicker then
+			ChartTickerLabel.Text = "Loading"
+
+			updateScrollBarUI()
+
+			local chartData = RequestChartEvent:InvokeServer(currentDisplayedTicker, data.query)
+
+			if chartData then
+				masterChartData = chartData
+				rightOffset = 0
+
+				updateViewport()
+				MainTimeframeButton.Text = data.query
+			end
+		end
+
+		isFetchingData = false
+	end)
+end
+
+MainTimeframeButton.MouseButton1Click:Connect(function()
+	isDropdownOpen = not isDropdownOpen
+	TimeDropdownList.Visible = isDropdownOpen
+end)
+
 ActiveTraderTopBar.InputBegan:Connect(function(input)
 	if not isActiveTradeVisible then
 		return
@@ -503,12 +633,6 @@ ActiveTraderTopBar.InputBegan:Connect(function(input)
 		dragging = true
 		dragStart = input.Position
 		startPosition = ActiveTraderPanel.Position
-
-		input.Changed:Connect(function()
-			if input.UserInputState == Enum.UserInputState.End then
-				dragging = false
-			end
-		end)
 	end
 end)
 
@@ -531,53 +655,124 @@ UserInputService.InputChanged:Connect(function(input)
 	end
 end)
 
-ChartCanvas.InputChanged:Connect(function(input)
-	if not isCrosshairActive then
-		return
-	end
+ChartCanvas.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		isDraggingChart = true
+		lastMouseDragX = input.Position.X
 
-	if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-		local mousePosition = input.Position
-		local canvasPosition = ChartCanvas.AbsolutePosition
-		local canvasSize = ChartCanvas.AbsoluteSize
-
-		local relativeX = mousePosition.X - canvasPosition.X
-		local relativeY = mousePosition.Y - canvasPosition.Y
-
-		if relativeX >= 0 and relativeX <= canvasSize.X and relativeY >= 0 and relativeY <= canvasSize.Y then
-			CrosshairX.Visible = true
-			CrosshairY.Visible = true
-			HoverPriceTag.Visible = true
-			HoverTimeTag.Visible = true
-
-			CrosshairX.Position = UDim2.new(0, relativeX, 0, 0)
-			CrosshairY.Position = UDim2.new(0, 0, 0, relativeY)
-
-			local priceRange = currentMaxPrice - currentMinPrice
-			local yPercentage = relativeY / canvasSize.Y
-			local hoveredPrice = currentMaxPrice - (yPercentage * priceRange)
-
-			HoverPriceTag.Position = UDim2.new(0, 0, 0, relativeY - (HoverPriceTag.AbsoluteSize.Y / 2))
-			HoverPriceTag.Text = string.format("%.2f", hoveredPrice)
-
-			HoverTimeTag.Position = UDim2.new(0, relativeX - (HoverTimeTag.AbsoluteSize.X / 2), 1, 0)
-			HoverTimeTag.Text = "12:34" -- placeholder
-		else
-			CrosshairX.Visible = false
-			CrosshairY.Visible = false
-			HoverPriceTag.Visible = false
-			HoverTimeTag.Visible = false
-		end
-	end
-end)
-
-ChartCanvas.InputEnded:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
 		CrosshairX.Visible = false
 		CrosshairY.Visible = false
 		HoverPriceTag.Visible = false
 		HoverTimeTag.Visible = false
 	end
+end)
+
+ChartCanvas.InputChanged:Connect(function(input)
+	if #masterChartData == 0 then
+		return
+	end
+
+	if input.UserInputType == Enum.UserInputType.MouseWheel then
+		local zoomSpeed = math.max(2, math.floor(visibleCandles * 0.1))
+
+		if input.Position.Z > 0 then
+			visibleCandles = visibleCandles - zoomSpeed
+		else
+			visibleCandles = visibleCandles + zoomSpeed
+		end
+		updateViewport()
+		return
+	end
+
+	if
+		isDraggingChart
+		and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch)
+	then
+		local deltaX = input.Position.X - lastMouseDragX
+		local pixelsPerCandle = ChartCanvas.AbsoluteSize.X / visibleCandles
+
+		if math.abs(deltaX) >= pixelsPerCandle then
+			local shiftAmount = math.floor(deltaX / pixelsPerCandle)
+
+			rightOffset = rightOffset + shiftAmount
+
+			lastMouseDragX = input.Position.X
+
+			updateViewport()
+		end
+		return
+	end
+
+	if not isCrosshairActive then
+		return
+	end
+
+	if not isDraggingChart then
+		if
+			input.UserInputType == Enum.UserInputType.MouseMovement
+			or input.UserInputType == Enum.UserInputType.Touch
+		then
+			if #currentChartData == 0 then
+				return
+			end
+
+			local mousePosition = input.Position
+			local canvasPosition = ChartCanvas.AbsolutePosition
+			local canvasSize = ChartCanvas.AbsoluteSize
+			local canvasWidth = ChartCanvas.AbsoluteSize.X
+
+			local relativeX = mousePosition.X - canvasPosition.X
+			local relativeY = mousePosition.Y - canvasPosition.Y
+
+			if relativeX >= 0 and relativeX <= canvasSize.X and relativeY >= 0 and relativeY <= canvasSize.Y then
+				local percentX = math.clamp(relativeX / canvasWidth, 0, 1)
+				local index = math.ceil(percentX * #currentChartData)
+
+				index = math.clamp(index, 1, #currentChartData)
+
+				local numberCandles = #currentChartData
+				local candleWidthScale = 1 / numberCandles
+				local snapXScale = ((index - 1) * candleWidthScale) + (candleWidthScale / 2)
+
+				CrosshairX.Visible = true
+				CrosshairY.Visible = true
+				HoverPriceTag.Visible = true
+				HoverTimeTag.Visible = true
+
+				CrosshairX.Position = UDim2.fromScale(snapXScale, 0)
+				CrosshairY.Position = UDim2.fromOffset(0, relativeY)
+
+				local priceRange = currentMaxPrice - currentMinPrice
+				local yPercentage = relativeY / canvasSize.Y
+				local hoveredPrice = currentMaxPrice - (yPercentage * priceRange)
+
+				HoverPriceTag.Position = UDim2.fromOffset(0, relativeY - (HoverPriceTag.AbsoluteSize.Y / 2))
+				HoverPriceTag.Text = string.format("%.2f", hoveredPrice)
+
+				local hoverCandle = currentChartData[index]
+				local timestamp = hoverCandle.Timestamp or os.time()
+
+				local formatString = TimeframeFormats and TimeframeFormats[currentTimeframe] or "%b %d, %H:%M"
+
+				HoverTimeTag.Text = os.date(formatString, timestamp)
+
+				HoverTimeTag.Position = UDim2.new(snapXScale, 0, 1, -25)
+			else
+				CrosshairX.Visible = false
+				CrosshairY.Visible = false
+				HoverPriceTag.Visible = false
+				HoverTimeTag.Visible = false
+			end
+		end
+	end
+end)
+
+ChartCanvas.InputEnded:Connect(function()
+	CrosshairX.Visible = false
+	CrosshairY.Visible = false
+	HoverPriceTag.Visible = false
+	HoverTimeTag.Visible = false
+	isDraggingChart = false
 end)
 
 TickerInput.FocusLost:Connect(function(enterPressed)
@@ -599,14 +794,20 @@ TickerInput.FocusLost:Connect(function(enterPressed)
 			TickerInput.Text = " . . . "
 			ChartTickerLabel.Text = "Loading"
 
-			local historicalData = RequestChartEvent:InvokeServer("GOOG", "D")
+			local historicalData = RequestChartEvent:InvokeServer("GOOG", currentTimeframe)
 
 			if historicalData then
 				currentDisplayedTicker = "GOOG"
 				TickerInput.Text = "GOOG"
+				ChartTickerLabel.Text = "GOOG"
 
-				renderChart("GOOG", historicalData)
+				masterChartData = historicalData
+				rightOffset = 0
+				updateViewport()
 			end
+
+			isFetchingData = false
+			return
 		end
 
 		TickerInput.Text = " . . . "
@@ -617,7 +818,7 @@ TickerInput.FocusLost:Connect(function(enterPressed)
 		if newChartData then
 			currentDisplayedTicker = targetTicker
 			TickerInput.Text = targetTicker
-			renderDailyOverview(targetTicker, newChartData[targetTicker])
+			-- renderDailyOverview(targetTicker, newChartData[targetTicker])
 
 			currentDisplayedTicker = targetTicker
 			TickerInput.Text = targetTicker
@@ -631,6 +832,44 @@ TickerInput.FocusLost:Connect(function(enterPressed)
 		end
 
 		isFetchingData = false
+		return
+	end
+end)
+
+ScrollThumb.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		isDraggingScroll = true
+		scrollDragStartX = input.Position.X
+		startRightOffset = rightOffset
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		isDraggingScroll = false
+		dragging = false
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if
+		isDraggingScroll
+		and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch)
+	then
+		local deltaX = input.Position.X - scrollDragStartX
+
+		local trackWidth = ScrollTrack.AbsoluteSize.X
+		local thumbWidth = ScrollThumb.AbsoluteSize.X
+		local maxOffset = #masterChartData - visibleCandles
+
+		if trackWidth > thumbWidth then
+			local candlesPerPixel = maxOffset / (trackWidth - thumbWidth)
+
+			local offsetChange = math.floor(deltaX * candlesPerPixel)
+
+			rightOffset = math.clamp(startRightOffset - offsetChange, 0, maxOffset)
+			updateViewport()
+		end
 	end
 end)
 
