@@ -5,7 +5,6 @@ local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
 local RequestChartEvent = EventsFolder:WaitForChild("RequestChartEvent")
 local GetMarketDataEvent = EventsFolder:WaitForChild("GetMarketDataEvent")
 
-print("ignore error below")
 local SERVER_URL = "https://tradingblox-terminal-backend.onrender.com" -- temp
 local QUOTES_ENDPOINT = SERVER_URL .. "/api/quotes"
 local CANDLES_ENDPOINT = SERVER_URL .. "/api/candles/"
@@ -31,11 +30,15 @@ local function updateMarketData()
 	end
 end
 
-RequestChartEvent.OnServerInvoke = function(player, ticker, timeframe)
+RequestChartEvent.OnServerInvoke = function(player, ticker, timeframe, mode)
 	local targetTicker = string.upper(ticker)
 	local timeframeValue = timeframe
 
-	local url = CANDLES_ENDPOINT .. targetTicker .. "?timeframe=" .. timeframeValue
+	local url = CANDLES_ENDPOINT .. targetTicker .. "?tf=" .. timeframeValue
+
+	if mode then
+		url = url .. "&mode=" .. mode .. "&cb=" .. os.time()
+	end
 
 	local success, response = pcall(function()
 		return HttpService:GetAsync(url)
@@ -44,52 +47,18 @@ RequestChartEvent.OnServerInvoke = function(player, ticker, timeframe)
 	if success then
 		return HttpService:JSONDecode(response)
 	else
-		warn(response)
+		local jsonSuccess, decodedError = pcall(function()
+			return HttpService:JSONDecode(response)
+		end)
+
+		if jsonSuccess and decodedError and decodedError.error then
+			warn("Server Error: ", decodedError.error)
+		else
+			warn("Roblox Network HTTP Fetch Error: ", tostring(response))
+		end
 		return nil
 	end
 end
-
--- RequestChartEvent.OnServerInvoke = function(player, ticker)
--- 	ticker = string.upper(ticker)
-
--- 	local currentTime = os.time()
-
--- 	if ChartCache[ticker] then
--- 		local timeSinceLastFetch = currentTime - ChartCache[ticker].LastUpdated
-
--- 		if timeSinceLastFetch < CACHE_DURATION then
--- 			print("Serving chart data for " .. ticker .. " from cache.")
-
--- 			return ChartCache[ticker].Data
--- 		else
--- 			print("Cache expired")
--- 		end
--- 	end
-
--- 	local url = CANDLES_ENDPOINT .. ticker
-
--- 	local success, response = pcall(function()
--- 		return HttpService:GetAsync(url)
--- 	end)
-
--- 	if success then
--- 		local decodedData = HttpService:JSONDecode(response)
-
--- 		ChartCache[ticker] = {
--- 			Data = decodedData,
--- 			LastUpdated = currentTime,
--- 		}
-
--- 		return decodedData
--- 	else
--- 		warn("Failed to fetch chart data for " .. ticker .. ": " .. tostring(response))
--- 		if ChartCache[ticker] then
--- 			print("Serving stale chart data for " .. ticker .. " from cache due to fetch failure.")
--- 			return ChartCache[ticker].Data
--- 		end
--- 		return nil
--- 	end
--- end
 
 GetMarketDataEvent.OnServerInvoke = function(player)
 	return _G.LiveMarketData

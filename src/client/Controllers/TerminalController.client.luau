@@ -873,6 +873,39 @@ UserInputService.InputChanged:Connect(function(input)
 	end
 end)
 
+task.spawn(function()
+	while true do
+		task.wait(5)
+
+		if #masterChartData > 0 and not isFetchingData and rightOffset == 0 and currentDisplayedTicker ~= "" then
+			local liveData = RequestChartEvent:InvokeServer(currentDisplayedTicker, currentTimeframe, "live")
+
+			if liveData and #liveData > 0 then
+				local incomingLiveCandle = liveData[#liveData]
+				local currentLastCandle = masterChartData[#masterChartData]
+
+				if incomingLiveCandle.Timestamp == currentLastCandle.Timestamp then
+					currentLastCandle.Close = incomingLiveCandle.Close
+
+					if incomingLiveCandle.Close > currentLastCandle.High then
+						currentLastCandle.High = incomingLiveCandle.Close
+					end
+
+					if incomingLiveCandle.Close < currentLastCandle.Low then
+						currentLastCandle.Low = incomingLiveCandle.Close
+					end
+
+					masterChartData[#masterChartData] = currentLastCandle
+				elseif incomingLiveCandle.Timestamp > currentLastCandle.Timestamp then
+					table.insert(masterChartData, incomingLiveCandle)
+				end
+
+				updateViewport()
+			end
+		end
+	end
+end)
+
 Player:GetAttributeChangedSignal("Balance"):Connect(updateAccountInfo)
 Player:GetAttributeChangedSignal("NetWorth"):Connect(updateAccountInfo)
 
