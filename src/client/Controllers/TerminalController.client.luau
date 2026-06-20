@@ -1,5 +1,7 @@
+local ExperienceStateRecordingService = game:GetService("ExperienceStateRecordingService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TouchInputService = game:GetService("TouchInputService")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
@@ -65,6 +67,7 @@ local MainTimeframeButton = TimeframeDropdown:WaitForChild("MainTimeframeButton"
 local ScrollTrack = ChartCanvas:WaitForChild("ScrollTrack")
 local ScrollThumb = ScrollTrack:WaitForChild("ScrollThumb")
 local CandlesContainer = ChartCanvas:WaitForChild("CandlesContainer")
+local GridContainer = ChartCanvas:WaitForChild("GridContainer")
 
 local SWEEP_INFO = TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local SLIDE_EASING = TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
@@ -319,6 +322,7 @@ local function renderChart(ticker, chartData)
 	currentChartData = chartData
 
 	CandlesContainer:ClearAllChildren()
+	GridContainer:ClearAllChildren()
 
 	for _, child in pairs(RightAxis:GetChildren()) do
 		if string.match(child.name, "AxisLabel_") then
@@ -402,26 +406,59 @@ local function renderChart(ticker, chartData)
 		bodyFrame.Parent = CandlesContainer
 	end
 
-	local numberPriceLabels = 5
+	local numberPriceLabels = 10
+	local numberTimeLabels = 4
+
+	local containerHeight = MainChart.AbsoluteSize.Y
+
+	if containerHeight and containerHeight > 0 then
+		numberPriceLabels = math.clamp(math.floor(containerHeight / 55), 3, 10)
+	end
+
+	if numberCandles > 150 then
+		numberTimeLabels = 8
+	elseif numberCandles > 80 then
+		numberTimeLabels = 6
+	else
+		numberTimeLabels = 4
+	end
+
+	if numberTimeLabels >= numberCandles then
+		numberTimeLabels = math.max(1, numberCandles - 1)
+	end
 
 	for index = 0, numberPriceLabels do
 		local percentage = index / numberPriceLabels
 		local priceValue = minimumPrice + (priceRange * percentage)
+		local yScale = 1 - percentage
 
-		local priceLabel = Instance.new("TextLabel")
-		priceLabel.Name = "AxisLabel_Price_" .. index
-		priceLabel.Text = string.format("%.2f", priceValue)
-		priceLabel.Size = UDim2.new(1, -10, 0, 20)
-		priceLabel.Position = UDim2.new(0, 5, 1 - percentage, -10)
-		priceLabel.BackgroundTransparency = 1
-		priceLabel.TextColor3 = Color3.fromRGB(132, 142, 156)
-		priceLabel.Parent = RightAxis
-		priceLabel.Font = Enum.Font.SourceSans
-		priceLabel.TextSize = 11
-		priceLabel.TextXAlignment = Enum.TextXAlignment.Right
+		if index > 0 and index < numberPriceLabels then
+			local priceLabel = Instance.new("TextLabel")
+
+			priceLabel.Name = "AxisLabel_Price_" .. index
+			priceLabel.Text = string.format("%.2f", priceValue)
+			priceLabel.Size = UDim2.fromOffset(80, 20)
+			priceLabel.Position = UDim2.new(1, -85, yScale, -10)
+			priceLabel.BackgroundTransparency = 1
+			priceLabel.TextColor3 = Color3.fromRGB(132, 142, 156)
+			priceLabel.Parent = RightAxis
+			priceLabel.Font = Enum.Font.SourceSans
+			priceLabel.TextSize = 13
+			priceLabel.TextXAlignment = Enum.TextXAlignment.Right
+		end
+
+		if index > 0 and index < numberPriceLabels then
+			local hGrid = Instance.new("Frame")
+
+			hGrid.Name = "HorizontalGrid_" .. index
+			hGrid.Size = UDim2.new(1, 0, 0, 1)
+			hGrid.Position = UDim2.fromScale(0, yScale)
+			hGrid.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+			hGrid.BackgroundTransparency = 0.95
+			hGrid.ZIndex = 1
+			hGrid.Parent = GridContainer
+		end
 	end
-
-	local numberTimeLabels = 4
 
 	for index = 0, numberTimeLabels do
 		local dataIndex = math.floor((index / numberTimeLabels) * (numberCandles - 1)) + 1
@@ -429,104 +466,113 @@ local function renderChart(ticker, chartData)
 		if chartData[dataIndex] then
 			local timeLabel = Instance.new("TextLabel")
 			timeLabel.Name = "AxisLabel_Time_" .. index
-			timeLabel.Size = UDim2.new(0, 60, 1, 0)
-			timeLabel.Position = UDim2.new((index / numberTimeLabels), -30, 0, 0)
 			timeLabel.BackgroundTransparency = 1
+			timeLabel.Size = UDim2.new(0, 60, 1, 0)
 
-			local formatString = TimeframeFormats[currentTimeframe] or "%b %d"
+			local candleXPositionScale = (dataIndex - 1) * candleWidthScale
+			local candleCenterScale = candleXPositionScale + (candleWidthScale / 2)
+
+			if index == 0 then
+				timeLabel.AnchorPoint = Vector2.new(0, 0)
+				timeLabel.Position = UDim2.fromOffset(5, 0)
+				timeLabel.TextXAlignment = Enum.TextXAlignment.Left
+			elseif index == numberTimeLabels then
+				timeLabel.AnchorPoint = Vector2.new(1, 0)
+				timeLabel.Position = UDim2.new(1, -5, 0, 0)
+				timeLabel.TextXAlignment = Enum.TextXAlignment.Right
+			else
+				timeLabel.AnchorPoint = Vector2.new(0.5, 0)
+				timeLabel.Position = UDim2.fromScale(candleCenterScale, 0)
+				timeLabel.TextXAlignment = Enum.TextXAlignment.Center
+			end
+
 			local timestamp = chartData[dataIndex].Timestamp or os.time()
-			local dateString = os.date(formatString, timestamp)
+			local dateString = ""
+
+			if currentTimeframe == "D" then
+				dateString = os.date("%b %d", timestamp)
+			else
+				local timeData = os.date("*t", timestamp)
+				dateString = string.format("%02d:%02d", timeData.hour, timeData.min)
+			end
 
 			timeLabel.Text = dateString
 			timeLabel.TextColor3 = Color3.fromRGB(132, 142, 156)
 			timeLabel.Parent = BottomAxis
 			timeLabel.Font = Enum.Font.SourceSans
-			timeLabel.TextSize = 11
+			timeLabel.TextSize = 13
+
+			if index > 0 and index < numberTimeLabels then
+				local Grid = Instance.new("Frame")
+
+				Grid.Name = "VerticalGrid_" .. index
+				Grid.Size = UDim2.new(0, 1, 1, 0)
+				Grid.Position = UDim2.fromScale(candleCenterScale, 0)
+				Grid.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+				Grid.BackgroundTransparency = 0.95
+				Grid.ZIndex = 1
+				Grid.Parent = GridContainer
+			end
 		end
 	end
-end
 
-local function renderDailyOverview(ticker, data)
-	ChartTickerLabel.Text = ticker .. " - Daily Overview"
+	local lastCandle = chartData[numberCandles]
 
-	for _, child in pairs(ChartCanvas:GetChildren()) do
-		if child:IsA("Frame") or child:IsA("TextLabel") then
-			child:Destroy()
-		end
+	if lastCandle then
+		local currentPrice = lastCandle.Close
+		local isBullish = lastCandle.Close >= lastCandle.Open
+		local color = isBullish and GREEN or RED
+
+		local yScale = (maximumPrice - currentPrice) / priceRange
+
+		local PriceLine = Instance.new("ImageLabel")
+		PriceLine.Name = "LivePriceLine"
+		PriceLine.Size = UDim2.new(1, 0, 0, 2)
+		PriceLine.Position = UDim2.fromScale(0, yScale)
+		PriceLine.BackgroundTransparency = 1
+		PriceLine.ZIndex = 3
+		PriceLine.Parent = GridContainer
+		PriceLine.Image = "rbxassetid://83871845664366"
+		PriceLine.ImageColor3 = color
+		PriceLine.ScaleType = Enum.ScaleType.Tile
+		PriceLine.TileSize = UDim2.new(0, 8, 1, 0)
+
+		local PriceBadge = Instance.new("Frame")
+		PriceBadge.Name = "AxisLabel_LiveBadge"
+		PriceBadge.Size = UDim2.fromOffset(55, 24)
+		PriceBadge.AnchorPoint = Vector2.new(0, 0.5)
+		PriceBadge.Position = UDim2.new(0, 5, yScale, 0)
+		PriceBadge.BackgroundColor3 = color
+		PriceBadge.BorderSizePixel = 0
+		PriceBadge.ZIndex = 4
+		PriceBadge.Parent = RightAxis
+
+		local BadgeText = Instance.new("TextLabel")
+		BadgeText.Name = "PriceText"
+		BadgeText.Text = string.format("%.2f", currentPrice)
+		BadgeText.Size = UDim2.new(1, -6, 0, 12)
+		BadgeText.Position = UDim2.fromOffset(3, 1)
+		BadgeText.BackgroundTransparency = 1
+		BadgeText.TextColor3 = Color3.fromRGB(255, 255, 255)
+		BadgeText.Font = Enum.Font.SourceSansBold
+		BadgeText.TextSize = 13
+		BadgeText.TextXAlignment = Enum.TextXAlignment.Center
+		BadgeText.Parent = PriceBadge
+		BadgeText.ZIndex = 5
+
+		local TimerText = Instance.new("TextLabel")
+		TimerText.Name = "CountdownText"
+		TimerText.Text = "00:00"
+		TimerText.Size = UDim2.new(1, -6, 0, 12)
+		TimerText.Position = UDim2.fromOffset(3, 11)
+		TimerText.BackgroundTransparency = 1
+		TimerText.TextColor3 = Color3.fromRGB(240, 240, 240)
+		TimerText.Font = Enum.Font.SourceSans
+		TimerText.TextSize = 11
+		TimerText.TextXAlignment = Enum.TextXAlignment.Center
+		TimerText.Parent = PriceBadge
+		TimerText.ZIndex = 5
 	end
-
-	if not data then
-		return
-	end
-
-	local range = data.High - data.Low
-
-	if range == 0 then
-		range = 0.01
-	end
-
-	local currentPercentage = (data.Price - data.Low) / range
-	currentPercentage = math.clamp(currentPercentage, 0, 1)
-
-	local isBullish = data.Price >= data.Open
-	local color = isBullish and GREEN or RED
-
-	local rangeTrack = Instance.new("Frame")
-	rangeTrack.Name = "RangeTrack"
-	rangeTrack.Size = UDim2.new(0.8, 0, 0, 6)
-	rangeTrack.Position = UDim2.new(0.1, 0, 0.5, -3)
-	rangeTrack.BackgroundColor3 = Color3.fromRGB(43, 54, 69)
-	rangeTrack.BorderSizePixel = 0
-	rangeTrack.Parent = ChartCanvas
-
-	local trackCorner = Instance.new("UICorner")
-	trackCorner.CornerRadius = UDim.new(1, 0)
-	trackCorner.Parent = rangeTrack
-
-	local priceMarker = Instance.new("Frame")
-	priceMarker.Name = "PriceMarker"
-	priceMarker.Size = UDim2.fromScale(4, 24)
-	priceMarker.Position = UDim2.fromScale(currentPercentage, 0.5)
-	priceMarker.BackgroundColor3 = color
-	priceMarker.BorderSizePixel = 0
-	priceMarker.Parent = rangeTrack
-
-	local markerCorner = Instance.new("UICorner")
-	markerCorner.CornerRadius = UDim.new(1, 0)
-	markerCorner.Parent = priceMarker
-
-	local function createLabel(text, value, xPosition, yPosition, alignment) -- lowk why dont we use xposition
-		local label = Instance.new("TextLabel")
-		label.Text = text .. "\n$" .. string.format("%.2f", value)
-		label.Size = UDim2.fromOffset(100, 20)
-		label.Position = yPosition
-		label.BackgroundTransparency = 1
-		label.TextColor3 = GRAY
-		label.Font = Enum.Font.SourceSans
-		label.TextSize = 14
-		label.TextXAlignment = alignment
-		label.Parent = rangeTrack
-		return label
-	end
-
-	createLabel("Today's Low", data.Low, 0, UDim2.new(0, 0, 1, 15), Enum.TextXAlignment.Left)
-
-	createLabel("Today's High", data.High, 1, UDim2.new(1, 0, 1, 15), Enum.TextXAlignment.Right)
-
-	createLabel("Open", data.Open, 0, UDim2.fromOffset(0, -45), Enum.TextXAlignment.Left)
-
-	createLabel("Prev Close", data.PreviousClose, 1, UDim2.new(1, 0, 0, -45), Enum.TextXAlignment.Right)
-
-	local currentLabel = Instance.new("TextLabel")
-	currentLabel.Size = UDim2.fromOffset(100, 20)
-	currentLabel.AnchorPoint = Vector2.new(0.5, 1)
-	currentLabel.Position = UDim2.new(currentPercentage, 0, 0, -15)
-	currentLabel.BackgroundTransparency = 1
-	currentLabel.Text = "$" .. string.format("%.2f", data.Price)
-	currentLabel.TextColor3 = color
-	currentLabel.Font = Enum.Font.SourceSans
-	currentLabel.TextSize = 18
-	currentLabel.Parent = rangeTrack
 end
 
 local function updateScrollBarUI()
@@ -901,6 +947,46 @@ task.spawn(function()
 				end
 
 				updateViewport()
+			end
+		end
+	end
+end)
+
+task.spawn(function()
+	while true do
+		task.wait(1)
+
+		local PriceBadge = RightAxis:FindFirstChild("AxisLabel_LiveBadge")
+
+		if PriceBadge then
+			local CountdownText = PriceBadge:FindFirstChild("CountdownText")
+
+			if CountdownText and currentChartData and #currentChartData > 0 then
+				local currentUnixTime = os.time()
+				local lastCandle = currentChartData[#currentChartData]
+
+				local timeframeStep = 60
+
+				if currentTimeframe == "5M" then
+					timeframeStep = 300
+				elseif currentTimeframe == "30M" then
+					timeframeStep = 1800
+				elseif currentTimeframe == "1H" then
+					timeframeStep = 3600
+				end
+
+				local candleStartTime = lastCandle.Timestamp
+				local candleEndTime = candleStartTime + timeframeStep
+				local secondsRemaining = candleEndTime - currentUnixTime
+
+				if secondsRemaining <= 0 then
+					CountdownText.Text = "00:00"
+				else
+					local minutes = math.floor(secondsRemaining / 60)
+					local seconds = secondsRemaining % 60
+
+					CountdownText.Text = string.format("%02d:%02d", minutes, seconds)
+				end
 			end
 		end
 	end
