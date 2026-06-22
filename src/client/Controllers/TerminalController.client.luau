@@ -1,11 +1,11 @@
-local ExperienceStateRecordingService = game:GetService("ExperienceStateRecordingService")
+local EncodingService = game:GetService("EncodingService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TouchInputService = game:GetService("TouchInputService")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
 local NumberModule = require(ReplicatedStorage.Modules.NumberModule)
+local MarketHoursModule = require(ReplicatedStorage.Modules.MarketHoursModule)
 
 local Player = Players.LocalPlayer
 
@@ -135,19 +135,6 @@ local Tabs = {
 	},
 }
 
-local Holidays = {
-	["01-01"] = true, -- New Year's Day
-	["01-15"] = true, -- Martin Luther King Jr. Day
-	["02-19"] = true, -- Presidents' Day
-	["03-29"] = true, -- Good Friday
-	["05-27"] = true, -- Memorial Day
-	["06-19"] = true, -- Juneteenth
-	["07-04"] = true, -- Independence Day
-	["09-02"] = true, -- Labor Day
-	["11-28"] = true, -- Thanksgiving
-	["12-25"] = true, -- Christmas
-}
-
 local TimeframeFormats = {
 	["D"] = "%b %d, %Y",
 	["H"] = "%b %d, %H:%M",
@@ -209,62 +196,17 @@ local function updateGreeting()
 	DateText.Text = formattedDate
 end
 
-local function isMarketClosed(currentTime)
-	local date = os.date("!*t", currentTime)
-
-	if date.wday == 1 or date.wday == 7 then
-		return true
-	end
-
-	local dateString = string.format("%02d-%02d", date.month, date.day)
-
-	if Holidays[dateString] then
-		return true
-	end
-
-	return false
-end
-
 local function updateCountdown()
 	local time = os.time()
-	local currentUTC = os.date("!*t", time)
 
-	local marketOpen = os.time({
-		year = currentUTC.year,
-		month = currentUTC.month,
-		day = currentUTC.day,
-		hour = 13,
-		minute = 30,
-		second = 0,
-	})
+	local isOpen, targetTime = MarketHoursModule.getMarketStatus(time)
 
-	local marketClose = os.time({
-		year = currentUTC.year,
-		month = currentUTC.month,
-		day = currentUTC.day,
-		hour = 20,
-		minute = 0,
-		second = 0,
-	})
-
-	local targetTime
-
-	if not isMarketClosed(time) and time >= marketOpen and time < marketClose then
-		targetTime = marketClose
+	if isOpen then
 		TitleText.Text = "NYSE Closes In"
 		TitleText.TextColor3 = Color3.fromRGB(8, 153, 129)
 	else
 		TitleText.Text = "NYSE Opens In"
 		TitleText.TextColor3 = Color3.fromRGB(120, 123, 134)
-		targetTime = marketOpen
-
-		if time >= marketOpen or isMarketClosed(time) then
-			targetTime = targetTime + 86400
-		end
-
-		while isMarketClosed(targetTime) do
-			targetTime = targetTime + 86400
-		end
 	end
 
 	local differenceTime = targetTime - time
@@ -702,6 +644,10 @@ UserInputService.InputChanged:Connect(function(input)
 end)
 
 ChartCanvas.InputBegan:Connect(function(input)
+	if isDraggingScroll then
+		return
+	end
+
 	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 		isDraggingChart = true
 		lastMouseDragX = input.Position.X
@@ -709,7 +655,7 @@ ChartCanvas.InputBegan:Connect(function(input)
 		CrosshairX.Visible = false
 		CrosshairY.Visible = false
 		HoverPriceTag.Visible = false
-		HoverTimeTag.Visible = false
+		HoverTimeTag.Visisble = false
 	end
 end)
 
@@ -732,6 +678,7 @@ ChartCanvas.InputChanged:Connect(function(input)
 
 	if
 		isDraggingChart
+		and not isDraggingScroll
 		and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch)
 	then
 		local deltaX = input.Position.X - lastMouseDragX
@@ -835,26 +782,6 @@ TickerInput.FocusLost:Connect(function(enterPressed)
 		end
 
 		isFetchingData = true
-
-		if targetTicker == "GOOG" then
-			TickerInput.Text = " . . . "
-			ChartTickerLabel.Text = "Loading"
-
-			local historicalData = RequestChartEvent:InvokeServer("GOOG", currentTimeframe)
-
-			if historicalData then
-				currentDisplayedTicker = "GOOG"
-				TickerInput.Text = "GOOG"
-				ChartTickerLabel.Text = "GOOG"
-
-				masterChartData = historicalData
-				rightOffset = 0
-				updateViewport()
-			end
-
-			isFetchingData = false
-			return
-		end
 
 		TickerInput.Text = " . . . "
 		ChartTickerLabel.Text = "Loading"
