@@ -1,18 +1,21 @@
-local EncodingService = game:GetService("EncodingService")
+-- Services
 local Players = game:GetService("Players")
+local Player = Players.LocalPlayer
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
+-- Modules
 local NumberModule = require(ReplicatedStorage.Modules.NumberModule)
 local MarketHoursModule = require(ReplicatedStorage.Modules.MarketHoursModule)
+local ChartRenderer = require(ReplicatedStorage.Modules.ChartRenderer)
 
-local Player = Players.LocalPlayer
-
+-- Remotes
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
 local RequestChartEvent = EventsFolder:WaitForChild("RequestChartEvent")
 local GetMarketDataEvent = EventsFolder:WaitForChild("GetMarketDataEvent")
 
+-- UI Instances
 local PlayerGui = Player:WaitForChild("PlayerGui")
 local TerminalGui = PlayerGui:WaitForChild("TerminalGui")
 local MainBackground = TerminalGui:WaitForChild("MainBackground")
@@ -69,12 +72,15 @@ local ScrollThumb = ScrollTrack:WaitForChild("ScrollThumb")
 local CandlesContainer = ChartCanvas:WaitForChild("CandlesContainer")
 local GridContainer = ChartCanvas:WaitForChild("GridContainer")
 
+-- Tween Constants
 local SWEEP_INFO = TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local SLIDE_EASING = TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
 
+-- Position Constants
 local HIDDEN_POSITION = UDim2.new(1, 300, 0.5, 0)
 local VISIBLE_POSITION = UDim2.new(1, -50, 0.5, 0)
 
+-- RGB Constants
 local GREEN = Color3.fromRGB(8, 153, 129)
 local RED = Color3.fromRGB(242, 54, 69)
 local GRAY = Color3.fromRGB(132, 142, 156)
@@ -90,18 +96,18 @@ local dragInput = nil
 local dragStart = nil
 local startPosition = nil
 
-local currentMaxPrice = 200.00
-local currentMinPrice = 150.00
-
-local visibleCandles = 60
-
-local rightOffset = 0
-
+-- Variables
+local currentMaxPrice
+local currentMinPrice
+local visibleCandles = 60 -- How much candles should be rendered
+local rightOffset = 0 -- UI Offset for graph
 local lastMouseDragX
-
 local currentDisplayedTicker = ""
-local currentTimeframe = "H"
+local currentTimeframe = "H" -- Default Timeframe
+local scrollDragStartX = 0
+local startRightOffset = 0 -- UI Offset for Scroll
 
+-- Booleans
 local isFetchingData = false
 local isHoveringChart = false
 local isActiveTradeVisible = false
@@ -110,11 +116,21 @@ local isDropdownOpen = false
 local isDraggingChart = false
 local isDraggingScroll = false
 
-local scrollDragStartX = 0
-local startRightOffset = 0
-
-local currentChartData = {}
+local currentChartData = {} -- Data of current chart
 local masterChartData = {}
+local viewportUpdateScheduled = false
+
+local TIMEFRAME_SECONDS = {
+	M = 60,
+	["5M"] = 300,
+	["30M"] = 1800,
+	H = 3600,
+	D = 86400,
+}
+
+local function getTimeframeStep(timeframe)
+	return TIMEFRAME_SECONDS[timeframe] or 60
+end
 
 local Tabs = {
 	Dashboard = {
@@ -135,14 +151,6 @@ local Tabs = {
 	},
 }
 
-local TimeframeFormats = {
-	["D"] = "%b %d, %Y",
-	["H"] = "%b %d, %H:%M",
-	["30M"] = "%b %d, %H:%M",
-	["5M"] = "%H:%M",
-	["M"] = "%H:%M",
-}
-
 local TimeDropdownOptions = {
 	[TimeDropdownList:WaitForChild("1MinuteButton")] = { query = "1M" },
 	[TimeDropdownList:WaitForChild("5MinuteButton")] = { query = "5M" },
@@ -151,6 +159,7 @@ local TimeDropdownOptions = {
 	[TimeDropdownList:WaitForChild("1DayButton")] = { query = "D" },
 }
 
+-- Unfinished
 local function refreshTerminal()
 	local marketData = GetMarketDataEvent:InvokeServer()
 
@@ -160,6 +169,25 @@ local function refreshTerminal()
 	-- continue after stock-list is done
 end
 
+local function renderChart(ticker, chartData)
+	local liveCandle = #masterChartData > 0 and masterChartData[#masterChartData] or nil
+
+	local minPrice, maxPrice = ChartRenderer.render({
+		ChartTickerLabel = ChartTickerLabel,
+		CandlesContainer = CandlesContainer,
+		GridContainer = GridContainer,
+		RightAxis = RightAxis,
+		BottomAxis = BottomAxis,
+		MainChart = MainChart,
+	}, ticker, chartData, currentTimeframe, liveCandle)
+
+	if minPrice and maxPrice then
+		currentMinPrice = minPrice
+		currentMaxPrice = maxPrice
+	end
+end
+
+-- Switching tab function
 local function switchTab(tabName)
 	for _, data in pairs(Tabs) do
 		data.Frame.Visible = false
@@ -173,21 +201,24 @@ local function switchTab(tabName)
 		AccentGradient.Offset = Vector2.new(-1, 0)
 
 		local sweepTween = TweenService:Create(AccentGradient, SWEEP_INFO, { Offset = Vector2.new(1, 0) })
-		sweepTween:Play()
+		sweepTween:Play() -- Gradient effect in TopBar when switching tab
 	end
 end
 
+-- Changes Greeting Text on Dashboard based on time
 local function updateGreeting()
 	local timeData = os.date("*t")
 	local hour = timeData.hour
 
-	local greeting = "Welcome back,"
+	local greeting
 	if hour >= 5 and hour < 12 then
 		greeting = "Good morning,"
 	elseif hour >= 12 and hour < 17 then
 		greeting = "Good afternoon,"
 	elseif hour >= 17 and hour < 22 then
 		greeting = "Good evening,"
+	else
+		greeting = "Good night,"
 	end
 
 	local formattedDate = os.date("%A, %d %B %Y")
@@ -196,6 +227,7 @@ local function updateGreeting()
 	DateText.Text = formattedDate
 end
 
+-- Updates NYSE Countdown
 local function updateCountdown()
 	local time = os.time()
 
@@ -220,19 +252,7 @@ local function updateCountdown()
 	SecondsNumber.Text = string.format("%02d", seconds)
 end
 
-for tabName, data in pairs(Tabs) do
-	data.Button.MouseButton1Click:Connect(function()
-		switchTab(tabName)
-	end)
-end
-
-task.spawn(function()
-	while true do
-		updateCountdown()
-		task.wait(1)
-	end
-end)
-
+-- Updates Account Info on Dashboard
 local function updateAccountInfo()
 	local currentBalance = Player:GetAttribute("Balance") or 0
 	local currentNetWorth = Player:GetAttribute("NetWorth") or 0
@@ -244,13 +264,14 @@ local function updateAccountInfo()
 	AvailableFundsValue.Text = NumberModule.format(currentBalance)
 end
 
+-- Toggle for ActiveTrader window
 local function toggleActiveTrader()
 	isActiveTradeVisible = not isActiveTradeVisible
 
 	local targetPosition = isActiveTradeVisible and VISIBLE_POSITION or HIDDEN_POSITION
 
 	local slideTween = TweenService:Create(ActiveTraderPanel, SLIDE_EASING, { Position = targetPosition })
-	slideTween:Play()
+	slideTween:Play() -- Tween slide for ActiveTrader window
 
 	if isActiveTradeVisible then
 		ToggleActiveTraderButton.Text = "Hide Active Trader"
@@ -259,264 +280,7 @@ local function toggleActiveTrader()
 	end
 end
 
-local function renderChart(ticker, chartData)
-	ChartTickerLabel.Text = ticker
-	currentChartData = chartData
-
-	CandlesContainer:ClearAllChildren()
-	GridContainer:ClearAllChildren()
-
-	for _, child in pairs(RightAxis:GetChildren()) do
-		if string.match(child.name, "AxisLabel_") then
-			child:Destroy()
-		end
-	end
-	for _, child in pairs(BottomAxis:GetChildren()) do
-		if string.match(child.name, "AxisLabel_") then
-			child:Destroy()
-		end
-	end
-
-	if not chartData or #chartData == 0 then
-		print("Failed Chart Check")
-		return
-	end
-
-	local minimumPrice = math.huge
-	local maximumPrice = -math.huge
-
-	for _, candle in ipairs(chartData) do
-		if candle.Low < minimumPrice then
-			minimumPrice = candle.Low
-		end
-		if candle.High > maximumPrice then
-			maximumPrice = candle.High
-		end
-	end
-
-	local priceRange = maximumPrice - minimumPrice
-
-	if priceRange == 0 then
-		priceRange = 1
-	end
-
-	maximumPrice = maximumPrice + (priceRange * 0.05)
-	minimumPrice = minimumPrice - (priceRange * 0.05)
-	priceRange = maximumPrice - minimumPrice
-	currentMaxPrice = maximumPrice
-	currentMinPrice = minimumPrice
-
-	local numberCandles = #chartData
-	local candleWidthScale = 1 / numberCandles
-	local paddingScale = candleWidthScale * 0.2
-
-	for index, candle in ipairs(chartData) do
-		local isBullish = candle.Close >= candle.Open
-		local candleColor = isBullish and GREEN or RED
-
-		local xPositionScale = (index - 1) * candleWidthScale
-
-		local wickTopScale = (maximumPrice - candle.High) / priceRange
-		local wickHeightScale = (candle.High - candle.Low) / priceRange
-
-		local bodyTopPrice = isBullish and candle.Close or candle.Open
-		local bodyBottomPrice = isBullish and candle.Open or candle.Close
-
-		local bodyTopScale = (maximumPrice - bodyTopPrice) / priceRange
-		local bodyHeightScale = (bodyTopPrice - bodyBottomPrice) / priceRange
-
-		if bodyHeightScale <= 0.002 then
-			bodyHeightScale = 0.002
-		end
-
-		local wickFrame = Instance.new("Frame")
-		wickFrame.Name = "Candle_Wick_" .. index
-		wickFrame.BackgroundColor3 = candleColor
-		wickFrame.BorderSizePixel = 0
-		wickFrame.AnchorPoint = Vector2.new(0.5, 0)
-		wickFrame.Size = UDim2.new(0, 1, wickHeightScale, 0)
-		wickFrame.Position = UDim2.fromScale(xPositionScale + (candleWidthScale / 2), wickTopScale)
-		wickFrame.Parent = CandlesContainer
-
-		local bodyFrame = Instance.new("Frame")
-		bodyFrame.Name = "Candle_Body_" .. index
-		bodyFrame.BackgroundColor3 = candleColor
-		bodyFrame.BorderSizePixel = 0
-		bodyFrame.AnchorPoint = Vector2.new(0.5, 0)
-		bodyFrame.Size = UDim2.fromScale(candleWidthScale - paddingScale, bodyHeightScale)
-		bodyFrame.Position = UDim2.fromScale(xPositionScale + (candleWidthScale / 2), bodyTopScale)
-		bodyFrame.Parent = CandlesContainer
-	end
-
-	local numberPriceLabels = 10
-	local numberTimeLabels = 4
-
-	local containerHeight = MainChart.AbsoluteSize.Y
-
-	if containerHeight and containerHeight > 0 then
-		numberPriceLabels = math.clamp(math.floor(containerHeight / 55), 3, 10)
-	end
-
-	if numberCandles > 150 then
-		numberTimeLabels = 8
-	elseif numberCandles > 80 then
-		numberTimeLabels = 6
-	else
-		numberTimeLabels = 4
-	end
-
-	if numberTimeLabels >= numberCandles then
-		numberTimeLabels = math.max(1, numberCandles - 1)
-	end
-
-	for index = 0, numberPriceLabels do
-		local percentage = index / numberPriceLabels
-		local priceValue = minimumPrice + (priceRange * percentage)
-		local yScale = 1 - percentage
-
-		if index > 0 and index < numberPriceLabels then
-			local priceLabel = Instance.new("TextLabel")
-
-			priceLabel.Name = "AxisLabel_Price_" .. index
-			priceLabel.Text = string.format("%.2f", priceValue)
-			priceLabel.Size = UDim2.fromOffset(80, 20)
-			priceLabel.Position = UDim2.new(1, -85, yScale, -10)
-			priceLabel.BackgroundTransparency = 1
-			priceLabel.TextColor3 = Color3.fromRGB(132, 142, 156)
-			priceLabel.Parent = RightAxis
-			priceLabel.Font = Enum.Font.SourceSans
-			priceLabel.TextSize = 13
-			priceLabel.TextXAlignment = Enum.TextXAlignment.Right
-		end
-
-		if index > 0 and index < numberPriceLabels then
-			local hGrid = Instance.new("Frame")
-
-			hGrid.Name = "HorizontalGrid_" .. index
-			hGrid.Size = UDim2.new(1, 0, 0, 1)
-			hGrid.Position = UDim2.fromScale(0, yScale)
-			hGrid.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-			hGrid.BackgroundTransparency = 0.95
-			hGrid.ZIndex = 1
-			hGrid.Parent = GridContainer
-		end
-	end
-
-	for index = 0, numberTimeLabels do
-		local dataIndex = math.floor((index / numberTimeLabels) * (numberCandles - 1)) + 1
-
-		if chartData[dataIndex] then
-			local timeLabel = Instance.new("TextLabel")
-			timeLabel.Name = "AxisLabel_Time_" .. index
-			timeLabel.BackgroundTransparency = 1
-			timeLabel.Size = UDim2.new(0, 60, 1, 0)
-
-			local candleXPositionScale = (dataIndex - 1) * candleWidthScale
-			local candleCenterScale = candleXPositionScale + (candleWidthScale / 2)
-
-			if index == 0 then
-				timeLabel.AnchorPoint = Vector2.new(0, 0)
-				timeLabel.Position = UDim2.fromOffset(5, 0)
-				timeLabel.TextXAlignment = Enum.TextXAlignment.Left
-			elseif index == numberTimeLabels then
-				timeLabel.AnchorPoint = Vector2.new(1, 0)
-				timeLabel.Position = UDim2.new(1, -5, 0, 0)
-				timeLabel.TextXAlignment = Enum.TextXAlignment.Right
-			else
-				timeLabel.AnchorPoint = Vector2.new(0.5, 0)
-				timeLabel.Position = UDim2.fromScale(candleCenterScale, 0)
-				timeLabel.TextXAlignment = Enum.TextXAlignment.Center
-			end
-
-			local timestamp = chartData[dataIndex].Timestamp or os.time()
-			local dateString = ""
-
-			if currentTimeframe == "D" then
-				dateString = os.date("%b %d", timestamp)
-			else
-				local timeData = os.date("*t", timestamp)
-				dateString = string.format("%02d:%02d", timeData.hour, timeData.min)
-			end
-
-			timeLabel.Text = dateString
-			timeLabel.TextColor3 = Color3.fromRGB(132, 142, 156)
-			timeLabel.Parent = BottomAxis
-			timeLabel.Font = Enum.Font.SourceSans
-			timeLabel.TextSize = 13
-
-			if index > 0 and index < numberTimeLabels then
-				local Grid = Instance.new("Frame")
-
-				Grid.Name = "VerticalGrid_" .. index
-				Grid.Size = UDim2.new(0, 1, 1, 0)
-				Grid.Position = UDim2.fromScale(candleCenterScale, 0)
-				Grid.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-				Grid.BackgroundTransparency = 0.95
-				Grid.ZIndex = 1
-				Grid.Parent = GridContainer
-			end
-		end
-	end
-
-	local lastCandle = chartData[numberCandles]
-
-	if lastCandle then
-		local currentPrice = lastCandle.Close
-		local isBullish = lastCandle.Close >= lastCandle.Open
-		local color = isBullish and GREEN or RED
-
-		local yScale = (maximumPrice - currentPrice) / priceRange
-
-		local PriceLine = Instance.new("ImageLabel")
-		PriceLine.Name = "LivePriceLine"
-		PriceLine.Size = UDim2.new(1, 0, 0, 2)
-		PriceLine.Position = UDim2.fromScale(0, yScale)
-		PriceLine.BackgroundTransparency = 1
-		PriceLine.ZIndex = 3
-		PriceLine.Parent = GridContainer
-		PriceLine.Image = "rbxassetid://83871845664366"
-		PriceLine.ImageColor3 = color
-		PriceLine.ScaleType = Enum.ScaleType.Tile
-		PriceLine.TileSize = UDim2.new(0, 8, 1, 0)
-
-		local PriceBadge = Instance.new("Frame")
-		PriceBadge.Name = "AxisLabel_LiveBadge"
-		PriceBadge.Size = UDim2.fromOffset(55, 24)
-		PriceBadge.AnchorPoint = Vector2.new(0, 0.5)
-		PriceBadge.Position = UDim2.new(0, 5, yScale, 0)
-		PriceBadge.BackgroundColor3 = color
-		PriceBadge.BorderSizePixel = 0
-		PriceBadge.ZIndex = 4
-		PriceBadge.Parent = RightAxis
-
-		local BadgeText = Instance.new("TextLabel")
-		BadgeText.Name = "PriceText"
-		BadgeText.Text = string.format("%.2f", currentPrice)
-		BadgeText.Size = UDim2.new(1, -6, 0, 12)
-		BadgeText.Position = UDim2.fromOffset(3, 1)
-		BadgeText.BackgroundTransparency = 1
-		BadgeText.TextColor3 = Color3.fromRGB(255, 255, 255)
-		BadgeText.Font = Enum.Font.SourceSansBold
-		BadgeText.TextSize = 13
-		BadgeText.TextXAlignment = Enum.TextXAlignment.Center
-		BadgeText.Parent = PriceBadge
-		BadgeText.ZIndex = 5
-
-		local TimerText = Instance.new("TextLabel")
-		TimerText.Name = "CountdownText"
-		TimerText.Text = "00:00"
-		TimerText.Size = UDim2.new(1, -6, 0, 12)
-		TimerText.Position = UDim2.fromOffset(3, 11)
-		TimerText.BackgroundTransparency = 1
-		TimerText.TextColor3 = Color3.fromRGB(240, 240, 240)
-		TimerText.Font = Enum.Font.SourceSans
-		TimerText.TextSize = 11
-		TimerText.TextXAlignment = Enum.TextXAlignment.Center
-		TimerText.Parent = PriceBadge
-		TimerText.ZIndex = 5
-	end
-end
-
+-- ScrollBar Logic
 local function updateScrollBarUI()
 	if #masterChartData == 0 then
 		ScrollTrack.Visible = false
@@ -540,6 +304,7 @@ local function updateScrollBarUI()
 	end
 end
 
+-- Zoom and Scroll logic
 local function updateViewport()
 	if #masterChartData == 0 then
 		return
@@ -559,6 +324,17 @@ local function updateViewport()
 
 	renderChart(currentDisplayedTicker, currentChartData)
 	updateScrollBarUI()
+end
+
+local function scheduleViewportUpdate()
+	if viewportUpdateScheduled then
+		return
+	end
+	viewportUpdateScheduled = true
+	task.defer(function()
+		viewportUpdateScheduled = false
+		updateViewport()
+	end)
 end
 
 local function updateTimeframeUI(activeTime)
@@ -587,7 +363,7 @@ for button, data in pairs(TimeDropdownOptions) do
 		currentTimeframe = data.query
 		updateTimeframeUI(data.query)
 
-		if currentDisplayedTicker then
+		if currentDisplayedTicker ~= "" then
 			ChartTickerLabel.Text = "Loading"
 
 			updateScrollBarUI()
@@ -604,6 +380,12 @@ for button, data in pairs(TimeDropdownOptions) do
 		end
 
 		isFetchingData = false
+	end)
+end
+
+for tabName, data in pairs(Tabs) do
+	data.Button.MouseButton1Click:Connect(function()
+		switchTab(tabName)
 	end)
 end
 
@@ -655,7 +437,7 @@ ChartCanvas.InputBegan:Connect(function(input)
 		CrosshairX.Visible = false
 		CrosshairY.Visible = false
 		HoverPriceTag.Visible = false
-		HoverTimeTag.Visisble = false
+		HoverTimeTag.Visible = false
 	end
 end)
 
@@ -672,7 +454,7 @@ ChartCanvas.InputChanged:Connect(function(input)
 		else
 			visibleCandles = visibleCandles + zoomSpeed
 		end
-		updateViewport()
+		scheduleViewportUpdate()
 		return
 	end
 
@@ -691,7 +473,7 @@ ChartCanvas.InputChanged:Connect(function(input)
 
 			lastMouseDragX = input.Position.X
 
-			updateViewport()
+			scheduleViewportUpdate()
 		end
 		return
 	end
@@ -718,6 +500,10 @@ ChartCanvas.InputChanged:Connect(function(input)
 			local relativeY = mousePosition.Y - canvasPosition.Y
 
 			if relativeX >= 0 and relativeX <= canvasSize.X and relativeY >= 0 and relativeY <= canvasSize.Y then
+				if not currentMinPrice or not currentMaxPrice then
+					return
+				end
+
 				local percentX = math.clamp(relativeX / canvasWidth, 0, 1)
 				local index = math.ceil(percentX * #currentChartData)
 
@@ -745,7 +531,7 @@ ChartCanvas.InputChanged:Connect(function(input)
 				local hoverCandle = currentChartData[index]
 				local timestamp = hoverCandle.Timestamp or os.time()
 
-				local formatString = TimeframeFormats and TimeframeFormats[currentTimeframe] or "%b %d, %H:%M"
+				local formatString = ChartRenderer.TimeframeFormats[currentTimeframe] or "%b %d, %H:%M"
 
 				HoverTimeTag.Text = os.date(formatString, timestamp)
 
@@ -786,15 +572,14 @@ TickerInput.FocusLost:Connect(function(enterPressed)
 		TickerInput.Text = " . . . "
 		ChartTickerLabel.Text = "Loading"
 
-		local newChartData = GetMarketDataEvent:InvokeServer(targetTicker) -- TEMPORARY
+		local chartData = RequestChartEvent:InvokeServer(targetTicker, currentTimeframe)
 
-		if newChartData then
+		if chartData and #chartData > 0 then
+			masterChartData = chartData
 			currentDisplayedTicker = targetTicker
+			rightOffset = 0
 			TickerInput.Text = targetTicker
-			-- renderDailyOverview(targetTicker, newChartData[targetTicker])
-
-			currentDisplayedTicker = targetTicker
-			TickerInput.Text = targetTicker
+			updateViewport()
 		else
 			TickerInput.Text = " . . . "
 			ChartTickerLabel.Text = "Error"
@@ -841,7 +626,7 @@ UserInputService.InputChanged:Connect(function(input)
 			local offsetChange = math.floor(deltaX * candlesPerPixel)
 
 			rightOffset = math.clamp(startRightOffset - offsetChange, 0, maxOffset)
-			updateViewport()
+			scheduleViewportUpdate()
 		end
 	end
 end)
@@ -873,9 +658,16 @@ task.spawn(function()
 					table.insert(masterChartData, incomingLiveCandle)
 				end
 
-				updateViewport()
+				scheduleViewportUpdate()
 			end
 		end
+	end
+end)
+
+task.spawn(function()
+	while true do
+		updateCountdown()
+		task.wait(1)
 	end
 end)
 
@@ -888,19 +680,11 @@ task.spawn(function()
 		if PriceBadge then
 			local CountdownText = PriceBadge:FindFirstChild("CountdownText")
 
-			if CountdownText and currentChartData and #currentChartData > 0 then
+			if CountdownText and #masterChartData > 0 then
 				local currentUnixTime = os.time()
-				local lastCandle = currentChartData[#currentChartData]
+				local lastCandle = masterChartData[#masterChartData]
 
-				local timeframeStep = 60
-
-				if currentTimeframe == "5M" then
-					timeframeStep = 300
-				elseif currentTimeframe == "30M" then
-					timeframeStep = 1800
-				elseif currentTimeframe == "1H" then
-					timeframeStep = 3600
-				end
+				local timeframeStep = getTimeframeStep(currentTimeframe)
 
 				local candleStartTime = lastCandle.Timestamp
 				local candleEndTime = candleStartTime + timeframeStep
