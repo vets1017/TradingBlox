@@ -23,7 +23,7 @@ ChartRenderer.TimeframeFormats = {
 -- }
 --
 -- ticker : string
--- chartData : array  { Open, High, Low, Close, Timstamp}
+-- chartData : array  { Open, High, Low, Close, Timestamp}
 -- timeframe : string matching TimeframeFormats keys
 -- liveCandle : optional latest candle (full series); used for price badge when viewport is scrolled
 --
