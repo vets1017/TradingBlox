@@ -150,8 +150,34 @@ RequestChartEvent.OnServerInvoke = function(player, ticker, timeframe, mode)
 end
 
 -- GetMarketDataEvent
-GetMarketDataEvent.OnServerInvoke = function(player)
-	return LiveMarketData
+-- No ticker -> full quotes dataset
+-- With ticker -> specific quote
+GetMarketDataEvent.OnServerInvoke = function(player, ticker)
+	if not ticker then
+		return LiveMarketData
+	end
+
+	local targetTicker = string.upper(ticker)
+
+	local direct = LiveMarketData[targetTicker]
+
+	if direct then
+		return direct
+	end
+
+	if type(LiveMarketData) == "table" then
+		for _, quote in pairs(LiveMarketData) do
+			if type(quote) == "table" then
+				local quoteTicker = quote.ticker or quote.symbol
+
+				if quoteTicker and string.upper(quoteTicker) == targetTicker then
+					return quote
+				end
+			end
+		end
+	end
+
+	return nil
 end
 
 -- Tasks
