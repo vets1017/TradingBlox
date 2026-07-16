@@ -6,9 +6,9 @@ local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
 -- Modules
-local NumberModule = require(ReplicatedStorage.Modules.NumberModule)
-local MarketHoursModule = require(ReplicatedStorage.Modules.MarketHoursModule)
-local ChartRenderer = require(ReplicatedStorage.Modules.ChartRenderer)
+local NumberModule = require(ReplicatedStorage.Modules.Multi.NumberModule)
+local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursModule)
+local ChartRenderer = require(ReplicatedStorage.Modules.Multi.ChartRenderer)
 
 -- Remotes
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")

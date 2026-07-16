@@ -1,23 +1,49 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local EventsFolder = ReplicatedStorage:FindFirstChild("EventsFolder")
+local EVENTS = {
+	"RequestChartEvent",
+	"GetMarketDataEvent",
+	"GetOptionDatEvent",
+	"GetPositionsEvent",
+	"GetNewsFeedEvent",
+	"PlayerOrder",
+}
 
-if not EventsFolder then
-	EventsFolder = Instance.new("Folder")
-	EventsFolder.Name = "EventsFolder"
-	EventsFolder.Parent = ReplicatedStorage
+local Event = {}
+
+local function getOrCreateFolder(parent, name)
+	local folder = parent:FindFirstChild(name)
+
+	if not folder then
+		folder = Instance.new("Folder")
+		folder.Name = name
+		folder.Parent = parent
+	end
+
+	return folder
 end
 
-local RequestChartEvent = EventsFolder:FindFirstChild("RequestChartEvent")
-if not RequestChartEvent then
-	RequestChartEvent = Instance.new("RemoteFunction")
-	RequestChartEvent.Name = "RequestChartEvent"
-	RequestChartEvent.Parent = EventsFolder
+local function getOrCreateRemote(parent, name, className)
+	local remote = parent:FindFirstChild(name)
+
+	if not remote then
+		remote = Instance.new(className)
+		remote.Name = name
+		remote.Parent = parent
+	end
+
+	return remote
 end
 
-local GetMarketDataEvent = EventsFolder:FindFirstChild("GetMarketDataEvent")
-if not GetMarketDataEvent then
-	GetMarketDataEvent = Instance.new("RemoteFunction")
-	GetMarketDataEvent.Name = "GetMarketDataEvent"
-	GetMarketDataEvent.Parent = EventsFolder
+local EventsFolder = getOrCreateFolder(ReplicatedStorage, "EventsFolder")
+
+for _, eventName in ipairs(EVENTS) do
+	Event[EVENTS] = getOrCreateRemote(EventsFolder, eventName, "RemoteFunction")
 end
+
+local RequestChartEvent = Event.RequestChartEvent
+local GetMarketDataEvent = Event.GetMarketDataEvent
+local GetOptionDataEvent = Event.GetOptionDataEvent
+local GetPositionsEvent = Event.GetPositionsEvent
+local GetNewsFeedEvent = Event.GetNewsFeedEvent
+local PlayerOrderEvent = Event.PlayerOrderEvent

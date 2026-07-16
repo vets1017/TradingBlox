@@ -1,0 +1,909 @@
+-- TradeController.luau
+--
+-- Handles Trade Screen
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+
+local NumberModule = require(ReplicatedStorage.Modules.Multi.NumberModule)
+local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursModule)
+
+local Player = Players.LocalPlayer
+local PlayerGui = Player:WaitForChild("PlayerGui")
+
+-- Remote
+local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
+local GetMarketDataEvent = EventsFolder:WaitForChild("GetMarketDataEvent")
+local RequestChartEvent = EventsFolder:WaitForChild("RequestChartEvent")
+local GetOptionsDataEvent = EventsFolder:WaitForChild("GetOptionsDataEvent")
+local GetPositionsEvent = EventsFolder:WaitForChild("GetPositionsEvent")
+local GetNewsFeedEvent = EventsFolder:WaitForChild("GetNewsFeedEvent")
+local PlaceOrderEvent = EventsFolder:WaitForChild("PlaceOrderEvent")
+
+-- References
+local TerminalGui = PlayerGui:WaitForChild("TerminalGui")
+local MainBackground = TerminalGui:WaitForChild("MainBackground")
+local ScreenContainer = MainBackground:WaitForChild("ScreenContainer")
+local TradeScreen = ScreenContainer:WaitForChild("TradeScreen")
+local HeaderRow = TradeScreen:WaitForChild("HeaderRow")
+local BuyButton = HeaderRow:WaitForChild("BuyButton")
+local SellButton = HeaderRow:WaitForChild("SellButton")
+local CompanyLabel = HeaderRow:WaitForChild("CompanyLabel")
+local TickerLabel = HeaderRow:WaitForChild("TickerLabel")
+local InputRow = TradeScreen:WaitForChild("InputRow")
+local TickerInput = InputRow:WaitForChild("TextBox")
+local MiniChart = TradeScreen:WaitForChild("MiniChart")
+local NewsFeed = TradeScreen:WaitForChild("NewsFeed")
+local OptionChain = TradeScreen:WaitForChild("OptionChain")
+local ChainData = OptionChain:WaitForChild("ChainData")
+local ColumnHeaders = ChainData:WaitForChild("ColumnHeaders")
+local ChainToggle = OptionChain:WaitForChild("Toggle")
+local PositionsTable = TradeScreen:WaitForChild("PositionsTable")
+local TableHeader = PositionsTable:WaitForChild("TableHeader")
+local QuoteDetails = TradeScreen:WaitForChild("QuoteDetails")
+local TabContentContainer = QuoteDetails:WaitForChild("TabContentContainer")
+local TabHeaderContainer = QuoteDetails:WaitForChild("TabHeaderContainer")
+local ContentQuoteDetails = TabContentContainer:WaitForChild("Content_QuoteDetails")
+
+-- Contants
+local GREEN = Color3.fromRGB(8, 153, 129)
+local RED = Color3.fromRGB(242, 54, 69)
+local GRAY = Color3.fromRGB(132, 142, 156)
+
+local TEXT_PRIMARY = Color3.fromRGB(209, 212, 220)
+local TEXT_SECONDARY = Color3.fromRGB(132, 142, 156)
+local BG_ROW_EVEN = Color3.fromRGB(22, 26, 35)
+local BG_ROW_ODD = Color3.fromRGB(18, 22, 30)
+local BG_ITM = Color3.fromRGB(28, 40, 58) -- In-The-Money
+local BG_OTM = Color3.fromRGB(18, 22, 30) -- Out-The-Money
+
+local COLOR_TAB_ACTIVE = Color3.fromRGB(209, 212, 220)
+local COLOR_TAB_INACTIVE = Color3.fromRGB(120, 123, 134)
+
+local TWEEN_FAST = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+local TWEEN_MED = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+
+local QUOTE_FIELDS = {
+	{ label = "Volume", key = "volume", format = "number" },
+	{ label = "Beta", key = "beta", format = "decimal2" },
+	{ label = "Market Cap", key = "marketCap", format = "auto" },
+	{ label = "Yield", key = "yield", format = "percent" },
+	{ label = "VWAP", key = "vwap", format = "price" },
+	{ label = "IV", key = "impliedVolatility", format = "percent" },
+	{ label = "PE", key = "pe", format = "decimal2" },
+	{ label = "Div Amount", key = "divAmount", format = "price" },
+	{ label = "50-Day Avg Vol", key = "avgVolume50", format = "number" },
+	{ label = "EPS", key = "eps", format = "decimal2" },
+	{ label = "Ex Date", key = "exDividendDate", format = "date" },
+	{ label = "Earnings", key = "earningsDate", format = "date" },
+}
+
+local POSITION_COLUMNS = {
+	{ key = "mark", format = "price", label = "Mark", width = 70 },
+	{ key = "markChange", format = "change", label = "Chng $", width = 70 },
+	{ key = "plDay", format = "change", label = "P/L Day", width = 80 },
+	{ key = "plOpen", format = "change", label = "P/L Open", width = 80 },
+	{ key = "netLiq", format = "price", label = "Net Liq", width = 70 },
+	{ key = "tradePrice", format = "price", label = "Trade Price", width = 85 },
+	{ key = "cost", format = "price", label = "Cost", width = 70 },
+	{ key = "delta", format = "decimal2", label = "Delta", width = 55 },
+	{ key = "theta", format = "decimal2", label = "Theta", width = 55 },
+	{ key = "plOpenPct", format = "percent", label = "P/L Open %", width = 75 },
+}
+
+-- State
+local currentTicker = ""
+local currentPrice = 0
+local currentPrevClose = 0
+local currentQuoteData = nil
+local currentOptionData = nil
+local isFetchingData = false
+local activeTabName = ""
+local chainExpanded = true
+local orderQuantity = 1
+
+-- Map
+local TabButtons = {
+	QuoteDetails = TabHeaderContainer:WaitForChild("QuoteDetailsTab"),
+	AnalystReports = TabHeaderContainer:WaitForChild("AnalystReportsTab"),
+	Fundamentals = TabHeaderContainer:WaitForChild("FundamentalsTab"),
+	OptionStats = TabHeaderContainer:WaitForChild("OptionStatsTab"),
+}
+
+local TabContents = {
+	QuoteDetails = ContentQuoteDetails,
+	-- AnalystReports = TabContentContainer:WaitForChild("Content_AnalystReports"),
+	-- Fundamentals   = TabContentContainer:WaitForChild("Content_Fundamentals"),
+	-- OptionStats    = TabContentContainer:WaitForChild("Content_OptionStats"),
+}
+
+--
+
+local function formatValue(value, formatType)
+	if value == nil or value == "" then
+		return "—"
+	end
+
+	if formatType == "price" then
+		return string.format("%.2f", value)
+	elseif formatType == "decimal2" then
+		return string.format("%.2f", value)
+	elseif formatType == "percent" then
+		return string.format("%.2f%%", value)
+	elseif formatType == "change" then
+		local sign = value >= 0 and "+" or ""
+
+		return string.format("%s%.2f", sign, value)
+	elseif formatType == "number" then
+		return NumberModule.format(value)
+	elseif formatType == "date" or formatType == "auto" then
+		return tostring(value)
+	end
+
+	return tostring(value)
+end
+
+local function getChangeColor(value)
+	if value == nil then
+		return GRAY
+	end
+	if value > 0 then
+		return GREEN
+	end
+	if value < 0 then
+		return RED
+	end
+	return GRAY
+end
+
+-- Attaches Hover Highlight
+local function attachHover(button, baseColor, hoverColor)
+	button.MouseEnter:Connect(function()
+		TweenService:Create(button, TWEEN_FAST, { BackgroundColor3 = hoverColor }):Play()
+	end)
+
+	button.MouseLeave:Connect(function()
+		TweenService:Create(button, TWEEN_FAST, { BackgroundColor3 = baseColor }):Play()
+	end)
+end
+
+-- Header
+local function updateHeader(data, livePrice)
+	local price = livePrice or (data and data.price) or 0
+	local prevClose = (data and data.prevClose) or price
+	local change = price - prevClose
+	local changePct = prevClose ~= 0 and ((change / prevClose) * 100) or 0
+	local color = change >= 0 and GREEN or RED
+
+	TickerLabel.Text = (data and data.ticker) or currentTicker or "—"
+	CompanyLabel.Text = (data and data.companyName) or "—"
+
+	local priceLabel = HeaderRow:FindFirstChild("PriceLabel")
+	local changeLabel = HeaderRow:FindFirstChild("ChangeLabel")
+
+	if priceLabel then
+		priceLabel.Text = string.format("%.2f", price)
+		priceLabel.TextColor3 = color
+	end
+
+	if changeLabel then
+		changeLabel.Text = string.format("%s%.2f (%.2f%%)", change >= 0 and "+" or "", change, changePct)
+		changeLabel.TextColor3 = color
+	end
+
+	local bid = data and data.bid
+	local ask = data and data.ask
+	local bidSize = data and data.bidSize
+	local askSize = data and data.askSize
+
+	if ask then
+		BuyButton.Text = string.format("Buy  %.2f", ask)
+	end
+	if bid then
+		SellButton.Text = string.format("Sell  %.2f", bid)
+	end
+
+	local bidSizeLabel = HeaderRow:FindFirstChild("BidSizeLabel")
+	local askSizeLabel = HeaderRow:FindFirstChild("AskSizeLabel")
+
+	if bidSizeLabel and bidSize then
+		bidSizeLabel.Text = "Bid size: " .. bidSize
+	end
+	if askSizeLabel and askSize then
+		askSizeLabel.Text = "Ask size: " .. askSize
+	end
+end
+
+-- Quote Details
+local function renderQuoteDetails(data)
+	for _, child in pairs(ContentQuoteDetails:GetChildren()) do
+		if child:IsA("Frame") and string.match(child.Name, "^QF_") then
+			child:Destroy()
+		end
+	end
+
+	if not data then
+		return
+	end
+
+	for i, field in ipairs(QUOTE_FIELDS) do
+		local row = Instance.new("Frame")
+
+		row.Name = "QF_" .. field.key
+		row.Size = UDim2.new(0.5, -4, 0, 22)
+		row.BackgroundTransparency = 1
+		row.LayoutOrder = i
+		row.Parent = ContentQuoteDetails
+
+		local lbl = Instance.new("TextLabel")
+
+		lbl.Name = "Label"
+		lbl.Text = field.label
+		lbl.Size = UDim2.new(0.55, 0, 1, 0)
+		lbl.BackgroundTransparency = 1
+		lbl.TextColor3 = TEXT_SECONDARY
+		lbl.Font = Enum.Font.SourceSans
+		lbl.TextSize = 13
+		lbl.TextXAlignment = Enum.TextXAlignment.Left
+		lbl.Parent = row
+
+		local val = Instance.new("TextLabel")
+
+		val.Name = "Value"
+		val.Text = formatValue(data[field.key], field.format)
+		val.Size = UDim2.new(0.45, 0, 1, 0)
+		val.Position = UDim2.fromScale(0.55, 0)
+		val.BackgroundTransparency = 1
+		val.TextColor3 = TEXT_PRIMARY
+		val.Font = Enum.Font.SourceSansSemibold
+		val.TextSize = 13
+		val.TextXAlignment = Enum.TextXAlignment.Right
+		val.Parent = row
+	end
+end
+
+-- Refresh Quotes
+local function updateQuoteField(key, value, format)
+	local row = ContentQuoteDetails:FindFirstChild("QF_" .. key)
+
+	if not row then
+		return
+	end
+
+	local valLabel = row:FindFirstChild("Value")
+
+	if valLabel then
+		valLabel.Text = formatValue(value, format)
+	end
+end
+
+-- Tabs
+local function switchTab(tabName)
+	if activeTabName == tabName then
+		return
+	end
+
+	activeTabName = tabName
+
+	for name, button in pairs(TabButtons) do
+		local isActive = (name == tabName)
+
+		TweenService:Create(button, TWEEN_FAST, { TextColor3 = isActive and COLOR_TAB_ACTIVE or COLOR_TAB_INACTIVE })
+			:Play()
+
+		local ActiveIndicator = button:FindFirstChild("ActiveIndicator")
+
+		if ActiveIndicator then
+			ActiveIndicator.Visible = isActive
+		end
+	end
+
+	for name, frame in pairs(TabContents) do
+		frame.Visible = (name == tabName)
+	end
+end
+
+-- Row
+local TICKER_COL_WIDTH = 90
+local ROW_HEIGHT_CHAIN = 28
+local ROW_HEIGHT_POS = 24
+local ROW_HEIGHT_NEWS = 44
+
+local function makeLabel(parent, props)
+	local lbl = Instance.new("TextLabel")
+
+	lbl.Name = props.name or "Label"
+	lbl.Text = props.text or ""
+	lbl.Size = props.sz or UDim2.new(1, 0, 1, 0)
+	lbl.Position = props.pos or UDim2.fromOffset(0, 0)
+	lbl.BackgroundTransparency = 1
+	lbl.Font = props.font or Enum.Font.SourceSans
+	lbl.TextSize = props.size or 13
+	lbl.TextColor3 = props.color or TEXT_PRIMARY
+	lbl.TextXAlignment = props.align or Enum.TextXAlignment.Left
+	lbl.TextTruncate = Enum.TextTruncate.AtEnd
+	lbl.ZIndex = props.zindex or 1
+	lbl.Parent = parent
+
+	return lbl
+end
+
+-- separator line
+local function makeSeparator(parent)
+	local sep = Instance.new("Frame")
+
+	sep.Name = "Separator"
+	sep.Size = UDim2.new(1, 0, 0, 1)
+	sep.Position = UDim2.fromScale(0, 0)
+	sep.BackgroundColor3 = Color3.fromRGB(35, 40, 52)
+	sep.BorderSizePixel = 0
+	sep.ZIndex = 2
+	sep.Parent = parent
+
+	return sep
+end
+
+-- s = { strike, callBid, callAsk, putBid, putAsk }
+local function createStrikeRow(parent, index, s, spotPrice)
+	local callITM = spotPrice > s.strike
+	local putITM = spotPrice < s.strike
+	local isATM = math.abs(s.strike - spotPrice) < 0.5
+
+	local row = Instance.new("Frame")
+
+	row.Name = "Strike_" .. index
+	row.Size = UDim2.new(1, 0, 0, ROW_HEIGHT_CHAIN)
+	row.BackgroundColor3 = (callITM or putITM) and BG_ITM or BG_OTM
+	row.BorderSizePixel = 0
+	row.LayoutOrder = index
+	row.Parent = parent
+
+	makeSeparator(row)
+
+	makeLabel(row, {
+		name = "CallBidAsk",
+		text = string.format("%.2f / %.2f", s.callBid or 0, s.callAsk or 0),
+		sz = UDim2.new(0.38, -8, 1, 0),
+		pos = UDim2.fromOffset(8, 0),
+		color = callITM and TEXT_PRIMARY or TEXT_SECONDARY,
+		align = Enum.TextXAlignment.Left,
+	})
+
+	makeLabel(row, {
+		name = "StrikeLabel",
+		text = string.format("%.2f", s.strike),
+		sz = UDim2.new(0.24, 0, 1, 0),
+		pos = UDim2.fromScale(0.38, 0),
+		color = isATM and TEXT_PRIMARY or TEXT_SECONDARY,
+		font = isATM and Enum.Font.SourceSansBold or Enum.Font.SourceSans,
+		align = Enum.TextXAlignment.Center,
+	})
+
+	makeLabel(row, {
+		name = "PutBidAsk",
+		text = string.format("%.2f / %.2f", s.putBid or 0, s.putAsk or 0),
+		sz = UDim2.new(0.38, -8, 1, 0),
+		pos = UDim2.new(0.62, 0, 0, 0),
+		color = putITM and TEXT_PRIMARY or TEXT_SECONDARY,
+		align = Enum.TextXAlignment.Right,
+	})
+
+	return row
+end
+
+local function createPositionsHeader(parent)
+	local existing = parent:FindFirstChild("PosHeader")
+
+	if existing then
+		existing:Destroy()
+	end
+
+	local header = Instance.new("Frame")
+
+	header.Name = "PosHeader"
+	header.Size = UDim2.new(1, 0, 0, ROW_HEIGHT_POS)
+	header.BackgroundColor3 = Color3.fromRGB(25, 29, 40)
+	header.BorderSizePixel = 0
+	header.LayoutOrder = 0
+	header.Parent = parent
+
+	makeLabel(header, {
+		name = "TradeHeader",
+		text = "TRADE",
+		sz = UDim2.new(0, TICKER_COL_WIDTH, 1, 0),
+		pos = UDim2.fromOffset(8, 0),
+		color = TEXT_SECONDARY,
+		font = Enum.Font.SourceSansSemibold,
+		size = 11,
+		align = Enum.TextXAlignment.Left,
+	})
+
+	local xOffset = TICKER_COL_WIDTH + 8
+
+	for _, col in ipairs(POSITION_COLUMNS) do
+		makeLabel(header, {
+			name = col.key .. "_hdr",
+			text = string.upper(col.label),
+			sz = UDim2.new(0, col.width, 1, 0),
+			pos = UDim2.fromOffset(xOffset, 0),
+			color = TEXT_SECONDARY,
+			font = Enum.Font.SourceSansSemibold,
+			size = 11,
+			align = Enum.TextXAlignment.Right,
+		})
+
+		xOffset = xOffset + col.width
+	end
+
+	return header
+end
+
+-- pos = { ticker, quantity, mark, markChange, plDay, plOpen, netLiq, tradePrice, cost, delta, theta, plOpenPct }
+local function createPositionRow(parent, index, pos)
+	local row = Instance.new("Frame")
+
+	row.Name = "Pos_" .. index
+	row.Size = UDim2.new(1, 0, 0, ROW_HEIGHT_POS)
+	row.BackgroundColor3 = index % 2 == 0 and BG_ROW_EVEN or BG_ROW_ODD
+	row.BorderSizePixel = 0
+	row.LayoutOrder = index + 1
+	row.Parent = parent
+
+	makeLabel(row, {
+		name = "TickerLabel",
+		text = string.format("+%d %s", pos.quantity or 0, pos.ticker or ""),
+		sz = UDim2.new(0, TICKER_COL_WIDTH, 1, 0),
+		pos = UDim2.fromOffset(8, 0),
+		color = GREEN,
+		font = Enum.Font.SourceSansSemibold,
+		align = Enum.TextXAlignment.Left,
+	})
+
+	local xOffset = TICKER_COL_WIDTH + 8
+
+	for _, col in ipairs(POSITION_COLUMNS) do
+		local v = pos[col.key]
+		local isColored = col.format == "change" or col.format == "percent"
+
+		makeLabel(row, {
+			name = col.key,
+			text = formatValue(v, col.format),
+			sz = UDim2.new(0, col.width, 1, 0),
+			pos = UDim2.fromOffset(xOffset, 0),
+			color = isColored and getChangeColor(v) or TEXT_PRIMARY,
+			align = Enum.TextXAlignment.Right,
+		})
+
+		xOffset = xOffset + col.width
+	end
+
+	return row
+end
+
+-- item = { headline, timestamp, source? }
+local function createNewsItem(parent, index, item)
+	local row = Instance.new("Frame")
+
+	row.Name = "News_" .. index
+	row.Size = UDim2.new(1, 0, 0, ROW_HEIGHT_NEWS)
+	row.BackgroundColor3 = BG_ROW_ODD
+	row.BorderSizePixel = 0
+	row.LayoutOrder = index
+	row.Parent = parent
+
+	makeSeparator(row)
+
+	local headline = Instance.new("TextLabel")
+
+	headline.Name = "Headline"
+	headline.Text = item.headline or ""
+	headline.Size = UDim2.new(1, -90, 1, -2)
+	headline.Position = UDim2.fromOffset(8, 1)
+	headline.BackgroundTransparency = 1
+	headline.TextColor3 = TEXT_PRIMARY
+	headline.Font = Enum.Font.SourceSans
+	headline.TextSize = 13
+	headline.TextXAlignment = Enum.TextXAlignment.Left
+	headline.TextYAlignment = Enum.TextYAlignment.Center
+	headline.TextWrapped = true
+	headline.Parent = row
+
+	makeLabel(row, {
+		name = "Timestamp",
+		text = item.timestamp or "",
+		sz = UDim2.new(0, 78, 0, 16),
+		pos = UDim2.new(1, -82, 0, 4),
+		color = TEXT_SECONDARY,
+		size = 11,
+		align = Enum.TextXAlignment.Right,
+	})
+
+	if item.source then
+		makeLabel(row, {
+			name = "Source",
+			text = item.source,
+			sz = UDim2.new(0, 78, 0, 13),
+			pos = UDim2.new(1, -82, 1, -16),
+			color = TEXT_SECONDARY,
+			size = 10,
+			align = Enum.TextXAlignment.Right,
+		})
+	end
+
+	row.MouseEnter:Connect(function()
+		row.BackgroundColor3 = Color3.fromRGB(28, 36, 50)
+	end)
+	row.MouseLeave:Connect(function()
+		row.BackgroundColor3 = BG_ROW_ODD
+	end)
+
+	return row
+end
+
+-- OptionChain
+local function clearOptionChain()
+	for _, child in pairs(ChainData:GetChildren()) do
+		local isGeneratedRow = child:IsA("Frame") and string.match(child.Name, "^Strike_")
+
+		if isGeneratedRow then
+			child:Destroy()
+		end
+	end
+end
+
+-- {
+--   currentPrice = 150.25,
+--   expiryLabel  = "Jul 18",
+--   strikes = {
+--     { strike = 145, callBid = 5.20, callAsk = 5.30, putBid = 0.15, putAsk = 0.20 },
+--     { strike = 150, callBid = 2.10, callAsk = 2.20, putBid = 1.80, putAsk = 1.90 },
+--     ...
+--   }
+-- }
+local function renderOptionChain(optionData)
+	clearOptionChain()
+
+	if not optionData or not optionData.strikes then
+		return
+	end
+
+	local spotPrice = optionData.currentPrice or currentPrice
+
+	for i, s in ipairs(optionData.strikes) do
+		createStrikeRow(ChainData, i, s, spotPrice)
+	end
+end
+
+-- Collapse / expand
+local function setChainExpanded(expanded)
+	chainExpanded = expanded
+
+	local targetSize = expanded and UDim2.new(1, 0, 0.45, 0) or UDim2.new(1, 0, 0, 30) -- collapsed to just the toggle bar
+
+	TweenService:Create(OptionChain, TWEEN_MED, { Size = targetSize }):Play()
+	ChainData.Visible = expanded
+	ChainToggle.Text = expanded and "Option Chain ▼" or "Option Chain ▶"
+end
+
+-- Positions
+local function clearPositions()
+	for _, child in pairs(PositionsTable:GetChildren()) do
+		if child:IsA("Frame") and string.match(child.Name, "^Pos_") then
+			child:Destroy()
+		end
+	end
+end
+
+-- {
+--   {
+--     ticker = "COIN", quantity = 3,
+--     mark = 166.30, markChange = -2.57,
+--     plDay = -7.71,  plOpen = -112.28,
+--     netLiq = 498.90, tradePrice = 203.73, cost = 611.18,
+--     delta = 3.00,   theta = 0.00,  plOpenPct = -18.37
+--   },
+--   ...
+-- }
+local function renderPositions(positions)
+	clearPositions()
+
+	local emptyLabel = PositionsTable:FindFirstChild("EmptyLabel")
+
+	if not positions or #positions == 0 then
+		if emptyLabel then
+			emptyLabel.Visible = true
+		end
+
+		return
+	end
+
+	if emptyLabel then
+		emptyLabel.Visible = false
+	end
+
+	createPositionsHeader(PositionsTable)
+
+	for i, pos in ipairs(positions) do
+		createPositionRow(PositionsTable, i, pos)
+	end
+end
+
+-- NewsFeed
+local function clearNewsFeed()
+	for _, child in pairs(NewsFeed:GetChildren()) do
+		if child:IsA("Frame") and string.match(child.Name, "^News_") then
+			child:Destroy()
+		end
+	end
+end
+
+-- { { headline = "COIN surges on ETF news", timestamp = "2h ago", source = "Reuters" }, ... }
+local function renderNewsFeed(newsItems)
+	clearNewsFeed()
+
+	if not newsItems or #newsItems == 0 then
+		return
+	end
+
+	for i, item in ipairs(newsItems) do
+		createNewsItem(NewsFeed, i, item)
+	end
+end
+
+-- Mini Chart
+local function renderMiniChart(chartData)
+	MiniChart:ClearAllChildren()
+
+	if not chartData or #chartData < 2 then
+		return
+	end
+
+	local high = -math.huge
+	local low = math.huge
+
+	for _, c in ipairs(chartData) do
+		if c.Close > high then
+			high = c.Close
+		end
+
+		if c.Close < low then
+			low = c.Close
+		end
+	end
+
+	local range = high - low
+
+	if range == 0 then
+		range = 1
+	end
+
+	local firstClose = chartData[1].Close
+	local lastClose = chartData[#chartData].Close
+	local lineColor = lastClose >= firstClose and GREEN or RED
+
+	local count = #chartData
+
+	for i = 1, count - 1 do
+		local x1 = (i - 1) / (count - 1)
+		local x2 = i / (count - 1)
+		local y1 = 1 - (chartData[i].Close - low) / range
+		local y2 = 1 - (chartData[i + 1].Close - low) / range
+
+		local seg = Instance.new("Frame")
+
+		seg.Name = "Seg_" .. i
+		seg.BackgroundColor3 = lineColor
+		seg.BorderSizePixel = 0
+		seg.ZIndex = 2
+		seg.AnchorPoint = Vector2.new(0, 0.5)
+		seg.Size = UDim2.new((x2 - x1), 0, 0, 2)
+		seg.Position = UDim2.fromScale(x1, (y1 + y2) / 2)
+		seg.Parent = MiniChart
+	end
+end
+
+-- Loading
+local function setLoadingState(isLoading)
+	if isLoading then
+		TickerLabel.Text = "Loading..."
+		CompanyLabel.Text = ""
+		BuyButton.Text = "Buy"
+		SellButton.Text = "Sell"
+	end
+
+	BuyButton.Active = not isLoading
+	SellButton.Active = not isLoading
+	TickerInput.TextEditable = not isLoading
+end
+
+local function showError(message)
+	TickerLabel.Text = "Error"
+	CompanyLabel.Text = message or "Ticker not found"
+end
+
+-- Main Load
+local function loadTicker(rawTicker)
+	local ticker = string.upper((string.gsub(rawTicker, "%s+", "")))
+
+	if ticker == "" then
+		return
+	end
+
+	if ticker == currentTicker and not isFetchingData then
+		return
+	end
+
+	if isFetchingData then
+		return
+	end
+
+	isFetchingData = true
+	currentTicker = ticker
+
+	setLoadingState(true)
+	clearOptionChain()
+	clearPositions()
+	clearNewsFeed()
+
+	-- Core
+	local marketData = GetMarketDataEvent:InvokeServer(ticker)
+
+	if not marketData then
+		showError("Ticker not found")
+		TickerInput.Text = currentTicker ~= ticker and currentTicker or "..."
+		isFetchingData = false
+
+		return
+	end
+
+	currentQuoteData = marketData
+	currentPrice = marketData.price or 0
+	currentPrevClose = marketData.prevClose or currentPrice
+
+	TickerInput.Text = ticker
+	updateHeader(marketData)
+	renderQuoteDetails(marketData)
+	switchTab("QuoteDetails")
+
+	-- MiniChart
+	local miniData = RequestChartEvent:InvokeServer(ticker, "5M")
+	if miniData then
+		renderMiniChart(miniData)
+	end
+
+	-- ── Options data ──────────────────────────────────────────────────────────
+	-- Uncomment when GetOptionsDataEvent is live on the server.
+	-- local optionData = GetOptionsDataEvent:InvokeServer(ticker)
+	-- if optionData then
+	--     currentOptionData = optionData
+	--     renderOptionChain(optionData)
+	-- end
+
+	-- ── Player positions for this ticker ──────────────────────────────────────
+	-- Uncomment when GetPositionsEvent is live on the server.
+	-- local positions = GetPositionsEvent:InvokeServer(ticker)
+	-- if positions then
+	--     renderPositions(positions)
+	-- end
+
+	-- ── News feed ──────────────────────────────────────────────────────────────
+	-- Uncomment when GetNewsFeedEvent is live on the server.
+	-- local news = GetNewsFeedEvent:InvokeServer(ticker)
+	-- if news then
+	--     renderNewsFeed(news)
+	-- end
+
+	isFetchingData = false
+end
+
+-- Polling
+task.spawn(function()
+	while true do
+		task.wait(5)
+
+		if currentTicker ~= "" and not isFetchingData then
+			local liveData = RequestChartEvent:InvokeServer(currentTicker, "M", "live")
+
+			if liveData and #liveData > 0 then
+				local latest = liveData[#liveData]
+
+				currentPrice = latest.Close or currentPrice
+				updateHeader(currentQuoteData, currentPrice)
+
+				-- Keep the live price field in Quote Details in sync.
+				-- "price" key is not in QUOTE_FIELDS (it's in the header),
+				-- but if you add a "Last" field you could call:
+				-- updateQuoteField("price", currentPrice, "price")
+			end
+		end
+	end
+end)
+
+-- Buy/Sell
+local function isMarketOpen()
+	return MarketHoursModule.getMarketStatus(os.time())
+end
+
+BuyButton.MouseButton1Click:Connect(function()
+	if currentTicker == "" or isFetchingData then
+		return
+	end
+
+	if not isMarketOpen() then
+		print("[TradeController] Market is closed — cannot place order.") -- Add Toast
+		return
+	end
+
+	-- ★ PlaceOrderEvent:FireServer(currentTicker, "BUY", orderQuantity, currentPrice)
+	print(string.format("[TradeController] BUY %d × %s @ %.2f", orderQuantity, currentTicker, currentPrice))
+end)
+
+SellButton.MouseButton1Click:Connect(function()
+	if currentTicker == "" or isFetchingData then
+		return
+	end
+
+	if not isMarketOpen() then
+		print("[TradeController] Market is closed — cannot place order.")
+
+		return
+	end
+
+	-- ★ PlaceOrderEvent:FireServer(currentTicker, "SELL", orderQuantity, currentPrice)
+	print(string.format("[TradeController] SELL %d × %s @ %.2f", orderQuantity, currentTicker, currentPrice))
+end)
+
+attachHover(BuyButton, Color3.fromRGB(38, 166, 154), Color3.fromRGB(25, 140, 128))
+attachHover(SellButton, Color3.fromRGB(200, 50, 50), Color3.fromRGB(170, 35, 35))
+
+-- Ticker Input
+TickerInput.FocusLost:Connect(function(enterPressed)
+	if not enterPressed then
+		return
+	end
+
+	local raw = string.upper((string.gsub(TickerInput.Text, "%s+", "")))
+
+	if raw == "" then
+		TickerInput.Text = currentTicker ~= "" and currentTicker or "..."
+
+		return
+	end
+
+	loadTicker(raw)
+end)
+
+-- Option Chain Toggle
+ChainToggle.MouseButton1Click:Connect(function()
+	setChainExpanded(not chainExpanded)
+end)
+
+-- Tab Button
+for tabName, button in pairs(TabButtons) do
+	button.MouseButton1Click:Connect(function()
+		switchTab(tabName)
+	end)
+end
+
+-- Player Attribute Watchers
+local function onBalanceChanged()
+	if currentTicker == "" then
+		return
+	end
+
+	-- ★ Uncomment when GetPositionsEvent is live:
+	-- local positions = GetPositionsEvent:InvokeServer(currentTicker)
+	-- if positions then renderPositions(positions) end
+end
+
+Player:GetAttributeChangedSignal("Balance"):Connect(onBalanceChanged)
+Player:GetAttributeChangedSignal("NetWorth"):Connect(onBalanceChanged)
+
+switchTab("QuoteDetails")
+
+setChainExpanded(true)
+
+-- Preloading Ticker:
+-- loadTicker("AAPL")
