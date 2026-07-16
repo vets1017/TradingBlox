@@ -758,6 +758,15 @@ local function loadTicker(rawTicker)
 		return
 	end
 
+	if not marketData.ticker and not marketData.price then
+		warn(
+			string.format(
+				"[TradeController] GetMarketDataEvent returned an unexpected shape for %s - check server-side field names.",
+				ticker
+			)
+		)
+	end
+
 	currentQuoteData = marketData
 	currentPrice = marketData.price or 0
 	currentPrevClose = marketData.prevClose or currentPrice
