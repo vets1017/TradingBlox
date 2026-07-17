@@ -2,18 +2,17 @@
 --
 -- Handles Trade Screen
 
-print("[DEBUG] Starting")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
-print("[DEBUG] Services loaded")
+
 local NumberModule = require(ReplicatedStorage.Modules.Multi.NumberModule)
 local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursModule)
-print("[DEBUG] Modules Loaded")
+
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
-print("[DEBUG] Core loaded")
+
 -- Remote
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
 local GetMarketDataEvent = EventsFolder:WaitForChild("GetMarketDataEvent")
@@ -22,7 +21,7 @@ local GetOptionsDataEvent = EventsFolder:WaitForChild("GetOptionsDataEvent")
 local GetPositionsEvent = EventsFolder:WaitForChild("GetPositionsEvent")
 local GetNewsFeedEvent = EventsFolder:WaitForChild("GetNewsFeedEvent")
 local PlayerOrderEvent = EventsFolder:WaitForChild("PlayerOrderEvent")
-print("[DEBUG] Remotes loaded")
+
 -- References
 local TerminalGui = PlayerGui:WaitForChild("TerminalGui")
 local MainBackground = TerminalGui:WaitForChild("MainBackground")
@@ -47,8 +46,6 @@ local QuoteDetails = TradeScreen:WaitForChild("QuoteDetails")
 local TabContentContainer = QuoteDetails:WaitForChild("TabContentContainer")
 local TabHeaderContainer = QuoteDetails:WaitForChild("TabHeaderContainer")
 local ContentQuoteDetails = TabContentContainer:WaitForChild("Content_QuoteDetails")
-
-print("[DEBUG] Core UI References loaded")
 
 -- Contants
 local GREEN = Color3.fromRGB(8, 153, 129)
@@ -108,7 +105,6 @@ local chainExpanded = true
 local orderQuantity = 1
 
 -- Map
-print("[DEBUG] About to build TabButton")
 local TabButtons = {
 	QuoteDetails = TabHeaderContainer:WaitForChild("Tab_QuoteDetails"),
 	AnalystReports = TabHeaderContainer:WaitForChild("Tab_AnalystReports"),
@@ -122,7 +118,7 @@ local TabContents = {
 	-- Fundamentals   = TabContentContainer:WaitForChild("Content_Fundamentals"),
 	-- OptionStats    = TabContentContainer:WaitForChild("Content_OptionStats"),
 }
-print("[DEBUG] TabButton/TabContents loaded")
+
 --
 
 local function formatValue(value, formatType)
@@ -222,6 +218,10 @@ local function updateHeader(data, livePrice)
 	end
 end
 
+local QUOTE_ROW_HEIGHT = 24
+local QUOTE_ROW_GAP = 2
+local QUOTE_COLUMN = 2
+
 -- Quote Details
 local function renderQuoteDetails(data)
 	for _, child in pairs(ContentQuoteDetails:GetChildren()) do
@@ -235,6 +235,7 @@ local function renderQuoteDetails(data)
 	end
 
 	for i, field in ipairs(QUOTE_FIELDS) do
+		local col = (i - 1) % QUOTE_COLUMN
 		local row = Instance.new("Frame")
 
 		row.Name = "QF_" .. field.key
@@ -242,6 +243,14 @@ local function renderQuoteDetails(data)
 		row.BackgroundTransparency = 1
 		row.LayoutOrder = i
 		row.Parent = ContentQuoteDetails
+
+		local rowFrame = Instance.new("Frame")
+
+		rowFrame.Name = "QF_" .. field.key
+		rowFrame.nSize = UDim2.new(1 / QUOTE_COLUMN, -8, 0, QUOTE_ROW_HEIGHT)
+		rowFrame.Position = UDim2.new(col / QUOTE_COLUMN, 4, 0, row * (QUOTE_ROW_HEIGHT + QUOTE_ROW_GAP))
+		rowFrame.BackgroundTransparency = 1
+		rowFrame = ContentQuoteDetails
 
 		local lbl = Instance.new("TextLabel")
 
@@ -919,6 +928,7 @@ Player:GetAttributeChangedSignal("NetWorth"):Connect(onBalanceChanged)
 switchTab("QuoteDetails")
 
 setChainExpanded(false)
+TableHeader.Visible = false
 
 print("[DEBUG] Script fully intitalized")
 
