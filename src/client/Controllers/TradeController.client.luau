@@ -1,18 +1,19 @@
--- TradeController.luau
+-- TradeController.client.luau
 --
 -- Handles Trade Screen
 
+print("[DEBUG] Starting")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
-
+print("[DEBUG] Services loaded")
 local NumberModule = require(ReplicatedStorage.Modules.Multi.NumberModule)
 local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursModule)
-
+print("[DEBUG] Modules Loaded")
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
-
+print("[DEBUG] Core loaded")
 -- Remote
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
 local GetMarketDataEvent = EventsFolder:WaitForChild("GetMarketDataEvent")
@@ -20,8 +21,8 @@ local RequestChartEvent = EventsFolder:WaitForChild("RequestChartEvent")
 local GetOptionsDataEvent = EventsFolder:WaitForChild("GetOptionsDataEvent")
 local GetPositionsEvent = EventsFolder:WaitForChild("GetPositionsEvent")
 local GetNewsFeedEvent = EventsFolder:WaitForChild("GetNewsFeedEvent")
-local PlaceOrderEvent = EventsFolder:WaitForChild("PlaceOrderEvent")
-
+local PlayerOrderEvent = EventsFolder:WaitForChild("PlayerOrderEvent")
+print("[DEBUG] Remotes loaded")
 -- References
 local TerminalGui = PlayerGui:WaitForChild("TerminalGui")
 local MainBackground = TerminalGui:WaitForChild("MainBackground")
@@ -33,7 +34,7 @@ local SellButton = HeaderRow:WaitForChild("SellButton")
 local CompanyLabel = HeaderRow:WaitForChild("CompanyLabel")
 local TickerLabel = HeaderRow:WaitForChild("TickerLabel")
 local InputRow = TradeScreen:WaitForChild("InputRow")
-local TickerInput = InputRow:WaitForChild("TextBox")
+local TickerInput = InputRow:WaitForChild("TickerInput")
 local MiniChart = TradeScreen:WaitForChild("MiniChart")
 local NewsFeed = TradeScreen:WaitForChild("NewsFeed")
 local OptionChain = TradeScreen:WaitForChild("OptionChain")
@@ -46,6 +47,8 @@ local QuoteDetails = TradeScreen:WaitForChild("QuoteDetails")
 local TabContentContainer = QuoteDetails:WaitForChild("TabContentContainer")
 local TabHeaderContainer = QuoteDetails:WaitForChild("TabHeaderContainer")
 local ContentQuoteDetails = TabContentContainer:WaitForChild("Content_QuoteDetails")
+
+print("[DEBUG] Core UI References loaded")
 
 -- Contants
 local GREEN = Color3.fromRGB(8, 153, 129)
@@ -105,11 +108,12 @@ local chainExpanded = true
 local orderQuantity = 1
 
 -- Map
+print("[DEBUG] About to build TabButton")
 local TabButtons = {
-	QuoteDetails = TabHeaderContainer:WaitForChild("QuoteDetailsTab"),
-	AnalystReports = TabHeaderContainer:WaitForChild("AnalystReportsTab"),
-	Fundamentals = TabHeaderContainer:WaitForChild("FundamentalsTab"),
-	OptionStats = TabHeaderContainer:WaitForChild("OptionStatsTab"),
+	QuoteDetails = TabHeaderContainer:WaitForChild("Tab_QuoteDetails"),
+	AnalystReports = TabHeaderContainer:WaitForChild("Tab_AnalystReports"),
+	Fundamentals = TabHeaderContainer:WaitForChild("Tab_Fundamentals"),
+	OptionStats = TabHeaderContainer:WaitForChild("Tab_OptionStats"),
 }
 
 local TabContents = {
@@ -118,7 +122,7 @@ local TabContents = {
 	-- Fundamentals   = TabContentContainer:WaitForChild("Content_Fundamentals"),
 	-- OptionStats    = TabContentContainer:WaitForChild("Content_OptionStats"),
 }
-
+print("[DEBUG] TabButton/TabContents loaded")
 --
 
 local function formatValue(value, formatType)
@@ -201,6 +205,7 @@ local function updateHeader(data, livePrice)
 	if ask then
 		BuyButton.Text = string.format("Buy  %.2f", ask)
 	end
+
 	if bid then
 		SellButton.Text = string.format("Sell  %.2f", bid)
 	end
@@ -211,6 +216,7 @@ local function updateHeader(data, livePrice)
 	if bidSizeLabel and bidSize then
 		bidSizeLabel.Text = "Bid size: " .. bidSize
 	end
+
 	if askSizeLabel and askSize then
 		askSizeLabel.Text = "Ask size: " .. askSize
 	end
@@ -579,7 +585,7 @@ end
 -- Collapse / expand
 local function setChainExpanded(expanded)
 	chainExpanded = expanded
-
+	print("ran")
 	local targetSize = expanded and UDim2.new(1, 0, 0.45, 0) or UDim2.new(1, 0, 0, 30) -- collapsed to just the toggle bar
 
 	TweenService:Create(OptionChain, TWEEN_MED, { Size = targetSize }):Play()
@@ -813,7 +819,7 @@ task.spawn(function()
 		task.wait(5)
 
 		if currentTicker ~= "" and not isFetchingData then
-			local liveData = RequestChartEvent:InvokeServer(currentTicker, "M", "live")
+			local liveData = RequestChartEvent:InvokeServer(currentTicker, "H", "live")
 
 			if liveData and #liveData > 0 then
 				local latest = liveData[#liveData]
@@ -912,7 +918,9 @@ Player:GetAttributeChangedSignal("NetWorth"):Connect(onBalanceChanged)
 
 switchTab("QuoteDetails")
 
-setChainExpanded(true)
+setChainExpanded(false)
+
+print("[DEBUG] Script fully intitalized")
 
 -- Preloading Ticker:
 -- loadTicker("AAPL")

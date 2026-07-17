@@ -3,7 +3,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local EVENTS = {
 	"RequestChartEvent",
 	"GetMarketDataEvent",
-	"GetOptionDataEvent",
+	"GetOptionsDataEvent",
 	"GetPositionsEvent",
 	"GetNewsFeedEvent",
 	"PlayerOrderEvent",
@@ -43,7 +43,7 @@ end
 
 local RequestChartEvent = Event.RequestChartEvent
 local GetMarketDataEvent = Event.GetMarketDataEvent
-local GetOptionDataEvent = Event.GetOptionDataEvent
+local GetOptionsDataEvent = Event.GetOptionsDataEvent
 local GetPositionsEvent = Event.GetPositionsEvent
 local GetNewsFeedEvent = Event.GetNewsFeedEvent
 local PlayerOrderEvent = Event.PlayerOrderEvent
