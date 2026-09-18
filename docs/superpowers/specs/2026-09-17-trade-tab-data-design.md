@@ -70,12 +70,15 @@ Yahoo's nested response into exactly the fields Roblox needs, following the same
 try/catch → `{ error }` pattern as the existing `/api/candles/:ticker` route.
 
 ### `GET /api/quote-details/:ticker`
+
 `quoteSummary(ticker, { modules: ["summaryDetail", "defaultKeyStatistics", "calendarEvents", "price"] })`, flattened to:
+
 ```
 companyName, bid, ask, bidSize, askSize, volume, avgVolume, marketCap, beta,
 trailingPE, forwardPE, dividendYield, dividendRate, exDividendDate, eps,
 earningsDate, dayHigh, dayLow, fiftyTwoWeekHigh, fiftyTwoWeekLow
 ```
+
 Fields Yahoo doesn't have for a given ticker come back `null` (client already renders
 `null` as "—").
 
@@ -86,27 +89,35 @@ in the backend flattening step if needed so the client's `percent` formatter
 (`%.2f%%`) is correct without guessing.
 
 ### `GET /api/analyst/:ticker`
+
 `financialData` + `recommendationTrend`, flattened to:
+
 ```
 targetHigh, targetLow, targetMean, targetMedian, recommendationMean,
 recommendationKey, numberOfAnalysts,
 strongBuyCount, buyCount, holdCount, sellCount, strongSellCount
 ```
+
 (most-recent `recommendationTrend` period). Returns `{ available: false }` if Yahoo
 has no analyst coverage for the ticker.
 
 ### `GET /api/fundamentals/:ticker`
+
 `financialData` + `defaultKeyStatistics` + `summaryDetail`, flattened to:
+
 ```
 totalRevenue, grossMargins, operatingMargins, profitMargins, returnOnEquity,
 returnOnAssets, totalCash, totalDebt, debtToEquity, freeCashflow, priceToBook,
 pegRatio, enterpriseToEbitda, revenueGrowth, earningsGrowth
 ```
+
 Returns `{ available: false }` if unavailable for the ticker.
 
 ### `GET /api/options/:ticker`
+
 `yahooFinance.options(ticker)` → pick the nearest expiration, find the strike closest
 to the current price within that expiration, return just that one pair:
+
 ```
 { expiration, strike,
   call: { bid, ask, lastPrice, impliedVolatility, volume, openInterest },
@@ -116,11 +127,14 @@ to the current price within that expiration, return just that one pair:
 ## Section B — Roblox data layer
 
 ### `ServerSetup.server.luau`
+
 Add to `EVENTS`: `GetAnalystReportEvent`, `GetFundamentalsEvent`, `GetOptionStatsEvent`.
 (`GetOptionsDataEvent` stays reserved, untouched, for the future full Option Chain.)
 
 ### `MarketDataModule.luau`
+
 Generalize the existing single-purpose `ChartCache` pattern into a reusable helper:
+
 ```lua
 local function cachedFetch(cache, key, ttl, fetchFn)
     local cached = cache[key]
@@ -132,7 +146,9 @@ local function cachedFetch(cache, key, ttl, fetchFn)
     return data, err
 end
 ```
+
 New functions, each with its own cache table and TTL:
+
 - `getQuoteDetails(ticker)` — TTL 60s (bid/ask/volume move during the day)
 - `getAnalystReport(ticker)` — TTL 6 hours (changes rarely)
 - `getFundamentals(ticker)` — TTL 6 hours
@@ -142,6 +158,7 @@ Extend the existing cache-sweep `task.spawn` loop to sweep all cache tables, not
 `ChartCache`.
 
 ### `API_Manager.server.luau`
+
 Three new `OnServerInvoke` handlers (`GetAnalystReportEvent`, `GetFundamentalsEvent`,
 `GetOptionStatsEvent`): validate ticker → reuse the existing per-player
 `PLAYER_COOLDOWN` throttle → call the matching `MarketDataModule` function → return
@@ -149,6 +166,7 @@ result or `nil` + `warn` on failure. Same shape as the existing `GetMarketDataEv
 handler.
 
 ### `GetMarketDataEvent` — enriched, not replaced
+
 Today it returns `{ ticker, price, prevClose }` from candles only. Merge in
 `MarketDataModule.getQuoteDetails(ticker)`'s fields into the same returned table, so
 `updateHeader`/`renderQuoteDetails` on the client receive real data through the
@@ -157,9 +175,11 @@ Today it returns `{ ticker, price, prevClose }` from candles only. Merge in
 ## Section C — Client: `TradeController.client.luau` + new Studio panels
 
 ### Formatting fixes (`NumberModule.luau`)
+
 `NumberModule.format()` always prepends `$` and never abbreviates — wrong for share
 counts (Volume) and unreadable for large dollar figures (a $3T market cap rendered
 as a raw 13-digit string). Add:
+
 - `NumberModule.formatShares(amount)` — comma-grouped integer, no `$`.
 - `NumberModule.formatCompact(amount)` — `$3.00T` / `$245.67B` / `$12.30M` / `$850.00K`
   style abbreviation, falls back to plain comma-grouped `$X.XX` under 1,000.
@@ -167,33 +187,40 @@ as a raw 13-digit string). Add:
 Add `"count"` and `"compact"` cases to `TradeController`'s `formatValue()`.
 
 ### `QUOTE_FIELDS` (replaces current list — drops `vwap`/`impliedVolatility`, real fields only)
+
 ```
 Volume(count) · Avg Volume(count) · Beta(decimal2) · Market Cap(compact) ·
 Yield(percent) · Div Amount(price) · Ex Date(date) · PE Trailing(decimal2) ·
 PE Forward(decimal2) · EPS(decimal2) · Earnings(date) · Day High(price) ·
 Day Low(price) · 52-Wk High(price) · 52-Wk Low(price)
 ```
+
 Keys match the backend's flattened field names exactly (no renaming needed at the
 call site).
 
 ### `ANALYST_FIELDS` (new)
+
 ```
 Mean Target(price) · High Target(price) · Low Target(price) · Median Target(price) ·
 Rating(auto) · Rating Score 1-5(decimal2) · # Analysts(count) ·
 Strong Buy(count) · Buy(count) · Hold(count) · Sell(count) · Strong Sell(count)
 ```
+
 Same flat grid render pattern as Quote Details — no custom bar-chart widget for v1.
 
 ### `FUNDAMENTALS_FIELDS` (new)
+
 ```
 Revenue(compact) · Gross Margin(percent) · Operating Margin(percent) ·
 Profit Margin(percent) · ROE(percent) · ROA(percent) · Cash(compact) ·
 Debt(compact) · Debt/Equity(decimal2) · Free Cash Flow(compact) · P/B(decimal2) ·
 PEG(decimal2) · EV/EBITDA(decimal2) · Revenue Growth(percent) · Earnings Growth(percent)
 ```
+
 Same flat grid render pattern.
 
 ### Option Stats — custom renderer (not the flat grid)
+
 Payload is inherently two-sided (call vs put for one ATM strike). Header line
 (`Nearest Expiry: <date> · Strike: <strike>`), then 6 rows — Bid/Ask/Last/IV/Volume/
 Open Interest — each showing Call value | Put value side by side, visually
@@ -201,10 +228,12 @@ consistent with the existing Call|Strike|Put styling in `createStrikeRow` (Optio
 Chain code).
 
 ### Non-equity handling
+
 When a tab's data comes back `{ available: false }`, show one centered "Not
 available for this asset" label instead of the field grid.
 
 ### Studio-side UI (not version-controlled — see Known limitation below)
+
 `Content_AnalystReports` and `Content_Fundamentals` don't exist yet (only their tab
 buttons do). Create them as empty Frames under `TabContentContainer`, cloned from
 `Content_QuoteDetails`'s existing `UIGridLayout` setup (rows are generated by script
@@ -212,6 +241,7 @@ at render time, same as today). `Content_OptionStats` needs no grid — a bare F
 rows generated in code via the existing `makeLabel`/`makeSeparator` helpers.
 
 ### Lazy loading
+
 Fetch each tab's data only when that tab is first opened for the current ticker,
 cached client-side per ticker (`currentAnalystData`, `currentFundamentalsData`,
 `currentOptionStatsData`, alongside the existing `currentQuoteData`). Changing

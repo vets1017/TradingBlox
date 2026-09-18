@@ -218,6 +218,10 @@ local function updateHeader(data, livePrice)
 	end
 end
 
+local QUOTE_ROW_HEIGHT = 24
+local QUOTE_ROW_GAP = 2
+local QUOTE_COLUMN = 2
+
 -- Quote Details
 local function renderQuoteDetails(data)
 	for _, child in pairs(ContentQuoteDetails:GetChildren()) do
@@ -231,6 +235,7 @@ local function renderQuoteDetails(data)
 	end
 
 	for i, field in ipairs(QUOTE_FIELDS) do
+		local col = (i - 1) % QUOTE_COLUMN
 		local row = Instance.new("Frame")
 
 		row.Name = "QF_" .. field.key
@@ -238,6 +243,14 @@ local function renderQuoteDetails(data)
 		row.BackgroundTransparency = 1
 		row.LayoutOrder = i
 		row.Parent = ContentQuoteDetails
+
+		local rowFrame = Instance.new("Frame")
+
+		rowFrame.Name = "QF_" .. field.key
+		rowFrame.nSize = UDim2.new(1 / QUOTE_COLUMN, -8, 0, QUOTE_ROW_HEIGHT)
+		rowFrame.Position = UDim2.new(col / QUOTE_COLUMN, 4, 0, row * (QUOTE_ROW_HEIGHT + QUOTE_ROW_GAP))
+		rowFrame.BackgroundTransparency = 1
+		rowFrame = ContentQuoteDetails
 
 		local lbl = Instance.new("TextLabel")
 
