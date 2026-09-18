@@ -1,0 +1,93 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this is
+
+TradingBlox is a Roblox experience (Luau) that simulates a stock/options trading terminal. It's built with
+[Rojo](https://rojo.space/) and synced into Roblox Studio for playtesting — there is no standalone way to run
+or test it outside Studio.
+
+## Commands
+
+Tooling is managed by [Aftman](https://github.com/LPGhatguy/aftman) (`aftman.toml` pins `rojo`).
+
+- `aftman install` — install the pinned Rojo version.
+- `rojo serve` — start the Rojo dev server; connect to it from the Rojo plugin inside Roblox Studio to sync
+  `src/` live into a place for playtesting. This is the primary "run" loop for this project.
+- `rojo build -o RobloxProjects.rbxlx` — build a standalone `.rbxlx` place file from `default.project.json`
+  (git-ignored, along with `.lock` files).
+- `selene src` — lint against `selene.toml` (`std = "roblox"`). Selene is not currently pinned in
+  `aftman.toml`, so it must be installed separately (e.g. via cargo or a system package manager) if not
+  already on `PATH`.
+
+There is no test suite, no `stylua` config, and no package manager (no Wally) in this repo.
+
+## Architecture
+
+### Rojo sync map (`default.project.json`)
+
+Source folders map directly to the Roblox DataModel:
+
+- `src/server` → `ServerScriptService`
+- `src/client` → `StarterPlayer.StarterPlayerScripts`
+- `src/shared` → `ReplicatedStorage`
+
+Server scripts (`*.server.luau`) and client scripts (`*.client.luau`) run automatically when Rojo syncs them
+into their respective services; plain `.luau` files under `Modules/` are `require`d libraries.
+
+### Client/server split
+
+- **Client (`src/client/Controllers/`)** — one controller per screen/UI area (Terminal shell, Trade screen,
+  Quote tabs, Options chain). Controllers `WaitForChild` their way through a large, hand-built UI tree (no UI
+  framework/library), wire up `TweenService` animations and `UserInputService` input handling directly, and
+  call server `RemoteFunction`s to fetch data. Several controllers (`QuoteTabsController`,
+  `OptionsChainController`) are stubs (empty or fully commented out) awaiting their corresponding server
+  events to go live — check whether a controller is "real" before assuming it runs.
+- **Server (`src/server/Core/`)** — one script per subsystem:
+  - `ServerSetup.server.luau` creates the `EventsFolder` in `ReplicatedStorage` and all `RemoteFunction`s the
+    client calls (`RequestChartEvent`, `GetMarketDataEvent`, `GetOptionsDataEvent`, `GetPositionsEvent`,
+    `GetNewsFeedEvent`, `PlayerOrderEvent`). This must run before other server scripts wire up
+    `OnServerInvoke` handlers.
+  - `API_Manager.server.luau` is the sole bridge to the outside world: it polls an external HTTP backend
+    (`SERVER_URL`, currently a Render-hosted service) for live quotes and serves candle/chart data, with its
+    own ticker validation, per-player request-cooldown throttling, and a time-based chart cache
+    (`ChartCache`, swept periodically). `GetOptionsDataEvent`, `GetPositionsEvent`, `GetNewsFeedEvent`, and
+    `PlayerOrderEvent` are declared but have no server-side handler yet — client calls to them will hang.
+  - `Data_Manager.server.luau` owns player persistence (`DataStoreService`, key `PlayerData_v1`): balance,
+    portfolio shares/options, load on `PlayerAdded`, save on `PlayerRemoving`/`BindToClose`.
+  - `OptionSystem.server.luau` and the buy/sell logic in `TradeSystem.server.luau` are currently
+    empty/commented-out placeholders — trading is not wired up end-to-end yet.
+  - `Modules/CalculatorModule.luau` computes net worth from portfolio + live market data.
+- **Shared (`src/shared/Modules/`)**:
+  - `Multi/` — cross-boundary utilities used by both client and server-side logic conceptually:
+    `ChartRenderer` (pure UI-building candlestick/grid/axis renderer, takes a table of UI element refs +
+    OHLC data and returns min/max price), `MarketHoursModule` (NYSE open/closed + holiday calendar, computed
+    algorithmically including Easter-relative Good Friday), `NumberModule` (currency formatting).
+  - `Terminal/` and `Trade/` subfolders are placeholder modules (currently empty) reserved for pulling
+    per-screen rendering logic out of the client controllers as they grow.
+
+### Cross-script state sharing
+
+Server scripts share mutable state via `_G` (e.g. `_G.PlayerData`, `_G.UpdatePlayerStat`,
+`_G.UpdatePortfolio`, `_G.LiveMarketData` referenced from `CalculatorModule`) rather than `require`d modules
+returning shared tables. This is deliberate but fragile — code depending on `_G.*` assumes
+`Data_Manager.server.luau` (and `API_Manager.server.luau` for market data) has already run and initialized it.
+
+### Data flow for a typical UI action
+
+1. Client controller invokes a `RemoteFunction` in `ReplicatedStorage.EventsFolder` (e.g.
+   `RequestChartEvent:InvokeServer(ticker, timeframe, mode)`).
+2. `API_Manager.server.luau` validates input, checks/updates its cache, and fetches from the external HTTP
+   API if needed, returning a plain Luau table.
+3. Client renders the result directly into pre-built UI instances (e.g. `ChartRenderer.render(...)`) — there
+   is no client-side state management layer beyond local variables in each controller.
+4. Player-specific stats (`Balance`, `NetWorth`) are exposed to the client as Roblox `Attribute`s on the
+   `Player` instance and read reactively via `GetAttributeChangedSignal`.
+
+### Known WIP areas
+
+Several files intentionally contain large commented-out blocks or are empty, representing not-yet-wired
+features rather than dead code: `TradeSystem.server.luau` (buy/sell handler), `OptionsChainController.client.luau`,
+`QuoteTabsController.client.luau`, `OptionSystem.server.luau`, and all files under `shared/Modules/Terminal/`
+and `shared/Modules/Trade/`. Check git blame/history before deleting anything that looks unused.

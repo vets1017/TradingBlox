@@ -1,3 +1,7 @@
+local ServerScriptService = game:GetService("ServerScriptService")
+
+local MarketDataModule = require(ServerScriptService.Modules.MarketDataModule)
+
 local CalculatorModule = {}
 
 function CalculatorModule.calculateNetWorth(player)
@@ -12,10 +16,10 @@ function CalculatorModule.calculateNetWorth(player)
 
     if playerData.Portfolio and playerData.Portfolio.Shares then
         for ticker, shares in pairs(playerData.Portfolio.Shares) do
-            local marketData = _G.LiveMarketData[ticker]
+            local price = MarketDataModule.getCurrentPrice(ticker)
 
-            if marketData then
-                totalShareValue = (totalShareValue or 0) + (shares * marketData.Price)
+            if price then
+                totalShareValue = (totalShareValue or 0) + (shares * price)
             end
         end
     elseif playerData.Portfolio and playerData.Portfolio.Options then

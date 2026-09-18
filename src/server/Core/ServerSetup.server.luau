@@ -38,7 +38,7 @@ end
 local EventsFolder = getOrCreateFolder(ReplicatedStorage, "EventsFolder")
 
 for _, eventName in ipairs(EVENTS) do
-	Event[EVENTS] = getOrCreateRemote(EventsFolder, eventName, "RemoteFunction")
+	Event[eventName] = getOrCreateRemote(EventsFolder, eventName, "RemoteFunction")
 end
 
 local RequestChartEvent = Event.RequestChartEvent

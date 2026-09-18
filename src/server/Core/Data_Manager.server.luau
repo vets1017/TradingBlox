@@ -12,7 +12,7 @@ _G.UpdatePlayerStat = function(player, statName, value)
 	player:SetAttribute(statName, value)
 end
 
-_G.UpdatePortfolio = function(player, ticker, shares)
+_G.UpdatePortfolio = function(player, ticker, shares, price)
 	local playerData = _G.PlayerData[player.UserId]
 
 	if not playerData then
@@ -20,14 +20,23 @@ _G.UpdatePortfolio = function(player, ticker, shares)
 	end
 
 	playerData.Portfolio = playerData.Portfolio or {}
+	playerData.Portfolio.AvgCost = playerData.Portfolio.AvgCost or {}
 
 	local currentShares = playerData.Portfolio.Shares[ticker] or 0
 	local newShares = currentShares + shares
 
 	if newShares > 0 then
 		playerData.Portfolio.Shares[ticker] = newShares
+
+		if shares > 0 and price then
+			-- Buying more: roll the new lot into a weighted-average cost.
+			local currentAvgCost = playerData.Portfolio.AvgCost[ticker] or price
+
+			playerData.Portfolio.AvgCost[ticker] = ((currentAvgCost * currentShares) + (price * shares)) / newShares
+		end
 	else
 		playerData.Portfolio.Shares[ticker] = nil
+		playerData.Portfolio.AvgCost[ticker] = nil
 	end
 
 	local PortfolioFolder = player:FindFirstChild("PortfolioFolder")
@@ -55,6 +64,7 @@ local function createDefaultData()
 		Balance = 10000,
 		Portfolio = {
 			Shares = {},
+			AvgCost = {},
 			Options = {},
 		},
 	}

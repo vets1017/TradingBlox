@@ -1,67 +1,126 @@
+-- TradeSystem.server.luau
+--
+-- Order execution (Buy/Sell) and positions reporting.
+
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
+local MarketDataModule = require(ServerScriptService.Modules.MarketDataModule)
 local CalculatorModule = require(ServerScriptService.Modules.CalculatorModule)
+local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursModule)
 
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
--- local TradeEvent = EventsFolder:WaitForChild("TradeEvent")
+local PlayerOrderEvent = EventsFolder:WaitForChild("PlayerOrderEvent")
+local GetPositionsEvent = EventsFolder:WaitForChild("GetPositionsEvent")
 
--- TradeEvent.OnServerEvent:Connect(function(player, action, ticker, shares)
--- 	if type(action) ~= "string" or type(ticker) ~= "string" or type(shares) ~= "number" then
--- 		return
--- 	end
+local VALID_ACTIONS = { Buy = true, Sell = true }
 
--- 	shares = math.floor(shares)
+local function isPositiveInteger(value)
+	return type(value) == "number" and value > 0 and value == math.floor(value)
+end
 
--- 	if shares <= 0 then
--- 		return
--- 	end
+-- PlayerOrderEvent
+PlayerOrderEvent.OnServerInvoke = function(player, action, ticker, shares)
+	if type(action) ~= "string" or not VALID_ACTIONS[action] then
+		return { success = false, message = "Invalid order type." }
+	end
 
--- 	ticker = string.upper(ticker)
+	if not MarketDataModule.isValidTicker(ticker) then
+		return { success = false, message = "Invalid ticker." }
+	end
 
--- 	local PlayerData = _G.PlayerData[player.UserId]
--- 	local LiveMarketData = _G.LiveMarketData
+	if not isPositiveInteger(shares) then
+		return { success = false, message = "Invalid share quantity." }
+	end
 
--- 	if not PlayerData or not LiveMarketData or not LiveMarketData[ticker] then
--- 		warn("Invalid trade attempt by " .. player.Name)
--- 		return
--- 	end
+	local targetTicker = string.upper(ticker)
 
--- 	local currentPrice = LiveMarketData[ticker].Price
--- 	local totalValue = currentPrice * shares
+	if not MarketDataModule.isCryptoTicker(targetTicker) and not MarketHoursModule.getMarketStatus(os.time()) then
+		return { success = false, message = "Market is closed." }
+	end
 
--- 	if action == "Buy" then
--- 		if PlayerData.Balance >= totalValue then
--- 			local newBalance = PlayerData.Balance - totalValue
+	local playerData = _G.PlayerData[player.UserId]
 
--- 			_G.UpdatePlayerStat(player, "Balance", newBalance)
--- 			_G.UpdatePortfolio(player, ticker, shares)
--- 			CalculatorModule.calculateNetWorth(player)
+	if not playerData then
+		return { success = false, message = "Player data not loaded." }
+	end
 
--- 			print(player.Name .. " bought " .. shares .. " shares of " .. ticker)
--- 		else
--- 			warn(player.Name .. " has insufficient funds to buy " .. shares .. " shares of " .. ticker)
--- 		end
--- 	elseif action == "Sell" then
--- 		local ownedShares = PlayerData.Portfolio.Shares[ticker] or 0
+	local price = MarketDataModule.getCurrentPrice(targetTicker)
 
--- 		if PlayerData.Portfolio and PlayerData.Portfolio.Shares[ticker] then
--- 			ownedShares = PlayerData.Portfolio.Shares[ticker]
--- 		else
--- 			ownedShares = 0
--- 		end
+	if not price then
+		return { success = false, message = "Price unavailable for " .. targetTicker .. "." }
+	end
 
--- 		if ownedShares >= shares then
--- 			local totalProceeds = currentPrice * shares
--- 			local newBalance = PlayerData.Balance + totalProceeds
+	if action == "Buy" then
+		local totalCost = price * shares
 
--- 			_G.UpdatePlayerStat(player, "Balance", newBalance)
--- 			_G.UpdatePortfolio(player, ticker, -shares)
--- 			CalculatorModule.calculateNetWorth(player)
+		if playerData.Balance < totalCost then
+			return { success = false, message = "Insufficient funds." }
+		end
 
--- 			print(player.Name .. " sold " .. shares .. " shares of " .. ticker)
--- 		else
--- 			warn(player.Name .. " does not have enough shares to sell " .. shares .. " of " .. ticker)
--- 		end
--- 	end
--- end)
+		_G.UpdatePlayerStat(player, "Balance", playerData.Balance - totalCost)
+		_G.UpdatePortfolio(player, targetTicker, shares, price)
+	else -- Sell
+		local portfolioShares = playerData.Portfolio and playerData.Portfolio.Shares
+		local ownedShares = (portfolioShares and portfolioShares[targetTicker]) or 0
+
+		if ownedShares < shares then
+			return { success = false, message = "Not enough shares to sell." }
+		end
+
+		local totalProceeds = price * shares
+
+		_G.UpdatePlayerStat(player, "Balance", playerData.Balance + totalProceeds)
+		_G.UpdatePortfolio(player, targetTicker, -shares, price)
+	end
+
+	CalculatorModule.calculateNetWorth(player)
+
+	return {
+		success = true,
+		message = string.format("%s %d x %s @ %.2f", action, shares, targetTicker, price),
+		price = price,
+	}
+end
+
+-- GetPositionsEvent
+-- Builds the player's current holdings, priced against live market data.
+GetPositionsEvent.OnServerInvoke = function(player)
+	local playerData = _G.PlayerData[player.UserId]
+
+	if not playerData or not playerData.Portfolio or not playerData.Portfolio.Shares then
+		return {}
+	end
+
+	local positions = {}
+
+	for ticker, quantity in pairs(playerData.Portfolio.Shares) do
+		local quote = MarketDataModule.getQuote(ticker)
+		local avgCost = playerData.Portfolio.AvgCost and playerData.Portfolio.AvgCost[ticker]
+
+		local mark = quote and quote.price
+		local markChange = (mark and quote.prevClose) and (mark - quote.prevClose) or nil
+		local cost = avgCost and (avgCost * quantity) or nil
+		local netLiq = mark and (mark * quantity) or nil
+		local plOpen = (netLiq and cost) and (netLiq - cost) or nil
+		local plOpenPct = (plOpen and cost and cost ~= 0) and (plOpen / cost * 100) or nil
+		local plDay = markChange and (markChange * quantity) or nil
+
+		table.insert(positions, {
+			ticker = ticker,
+			quantity = quantity,
+			mark = mark,
+			markChange = markChange,
+			plDay = plDay,
+			plOpen = plOpen,
+			netLiq = netLiq,
+			tradePrice = avgCost,
+			cost = cost,
+			delta = nil,
+			theta = nil,
+			plOpenPct = plOpenPct,
+		})
+	end
+
+	return positions
+end

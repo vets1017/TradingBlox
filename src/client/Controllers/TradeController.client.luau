@@ -218,10 +218,6 @@ local function updateHeader(data, livePrice)
 	end
 end
 
-local QUOTE_ROW_HEIGHT = 24
-local QUOTE_ROW_GAP = 2
-local QUOTE_COLUMN = 2
-
 -- Quote Details
 local function renderQuoteDetails(data)
 	for _, child in pairs(ContentQuoteDetails:GetChildren()) do
@@ -235,7 +231,6 @@ local function renderQuoteDetails(data)
 	end
 
 	for i, field in ipairs(QUOTE_FIELDS) do
-		local col = (i - 1) % QUOTE_COLUMN
 		local row = Instance.new("Frame")
 
 		row.Name = "QF_" .. field.key
@@ -243,14 +238,6 @@ local function renderQuoteDetails(data)
 		row.BackgroundTransparency = 1
 		row.LayoutOrder = i
 		row.Parent = ContentQuoteDetails
-
-		local rowFrame = Instance.new("Frame")
-
-		rowFrame.Name = "QF_" .. field.key
-		rowFrame.nSize = UDim2.new(1 / QUOTE_COLUMN, -8, 0, QUOTE_ROW_HEIGHT)
-		rowFrame.Position = UDim2.new(col / QUOTE_COLUMN, 4, 0, row * (QUOTE_ROW_HEIGHT + QUOTE_ROW_GAP))
-		rowFrame.BackgroundTransparency = 1
-		rowFrame = ContentQuoteDetails
 
 		local lbl = Instance.new("TextLabel")
 
@@ -645,6 +632,15 @@ local function renderPositions(positions)
 	end
 end
 
+-- Fetches the player's current holdings and re-renders the Positions table.
+local function refreshPositions()
+	local positions = GetPositionsEvent:InvokeServer()
+
+	if positions then
+		renderPositions(positions)
+	end
+end
+
 -- NewsFeed
 local function clearNewsFeed()
 	for _, child in pairs(NewsFeed:GetChildren()) do
@@ -805,12 +801,8 @@ local function loadTicker(rawTicker)
 	--     renderOptionChain(optionData)
 	-- end
 
-	-- ── Player positions for this ticker ──────────────────────────────────────
-	-- Uncomment when GetPositionsEvent is live on the server.
-	-- local positions = GetPositionsEvent:InvokeServer(ticker)
-	-- if positions then
-	--     renderPositions(positions)
-	-- end
+	-- ── Player positions ──────────────────────────────────────────────────────
+	refreshPositions()
 
 	-- ── News feed ──────────────────────────────────────────────────────────────
 	-- Uncomment when GetNewsFeedEvent is live on the server.
@@ -850,33 +842,36 @@ local function isMarketOpen()
 	return MarketHoursModule.getMarketStatus(os.time())
 end
 
-BuyButton.MouseButton1Click:Connect(function()
+local function placeOrder(action)
 	if currentTicker == "" or isFetchingData then
 		return
 	end
 
 	if not isMarketOpen() then
 		print("[TradeController] Market is closed — cannot place order.") -- Add Toast
+
 		return
 	end
 
-	-- ★ PlaceOrderEvent:FireServer(currentTicker, "BUY", orderQuantity, currentPrice)
-	print(string.format("[TradeController] BUY %d × %s @ %.2f", orderQuantity, currentTicker, currentPrice))
+	local result = PlayerOrderEvent:InvokeServer(action, currentTicker, orderQuantity)
+
+	if not result or not result.success then
+		print(string.format("[TradeController] %s failed: %s", action, (result and result.message) or "Unknown error"))
+
+		return
+	end
+
+	print("[TradeController] " .. result.message)
+
+	refreshPositions()
+end
+
+BuyButton.MouseButton1Click:Connect(function()
+	placeOrder("Buy")
 end)
 
 SellButton.MouseButton1Click:Connect(function()
-	if currentTicker == "" or isFetchingData then
-		return
-	end
-
-	if not isMarketOpen() then
-		print("[TradeController] Market is closed — cannot place order.")
-
-		return
-	end
-
-	-- ★ PlaceOrderEvent:FireServer(currentTicker, "SELL", orderQuantity, currentPrice)
-	print(string.format("[TradeController] SELL %d × %s @ %.2f", orderQuantity, currentTicker, currentPrice))
+	placeOrder("Sell")
 end)
 
 attachHover(BuyButton, Color3.fromRGB(38, 166, 154), Color3.fromRGB(25, 140, 128))
@@ -917,9 +912,7 @@ local function onBalanceChanged()
 		return
 	end
 
-	-- ★ Uncomment when GetPositionsEvent is live:
-	-- local positions = GetPositionsEvent:InvokeServer(currentTicker)
-	-- if positions then renderPositions(positions) end
+	refreshPositions()
 end
 
 Player:GetAttributeChangedSignal("Balance"):Connect(onBalanceChanged)
