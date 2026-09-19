@@ -21,6 +21,7 @@ local GetOptionsDataEvent = EventsFolder:WaitForChild("GetOptionsDataEvent")
 local GetPositionsEvent = EventsFolder:WaitForChild("GetPositionsEvent")
 local GetNewsFeedEvent = EventsFolder:WaitForChild("GetNewsFeedEvent")
 local PlayerOrderEvent = EventsFolder:WaitForChild("PlayerOrderEvent")
+local GetAnalystReportEvent = EventsFolder:WaitForChild("GetAnalystReportEvent")
 
 -- References
 local TerminalGui = PlayerGui:WaitForChild("TerminalGui")
@@ -46,6 +47,7 @@ local QuoteDetails = TradeScreen:WaitForChild("QuoteDetails")
 local TabContentContainer = QuoteDetails:WaitForChild("TabContentContainer")
 local TabHeaderContainer = QuoteDetails:WaitForChild("TabHeaderContainer")
 local ContentQuoteDetails = TabContentContainer:WaitForChild("Content_QuoteDetails")
+local ContentAnalystReports = TabContentContainer:WaitForChild("Content_AnalystReports")
 
 -- Contants
 local GREEN = Color3.fromRGB(8, 153, 129)
@@ -96,12 +98,28 @@ local POSITION_COLUMNS = {
 	{ key = "plOpenPct", format = "percent", label = "P/L Open %", width = 75 },
 }
 
+local ANALYST_FIELDS = {
+	{ label = "Mean Target", key = "targetMean", format = "price" },
+	{ label = "High Target", key = "targetHigh", format = "price" },
+	{ label = "Low Target", key = "targetLow", format = "price" },
+	{ label = "Median Target", key = "targetMedian", format = "price" },
+	{ label = "Rating", key = "recommendationKey", format = "auto" },
+	{ label = "Rating Score (1-5)", key = "recommendationMean", format = "decimal2" },
+	{ label = "# Analysts", key = "numberOfAnalysts", format = "count" },
+	{ label = "Strong Buy", key = "strongBuyCount", format = "count" },
+	{ label = "Buy", key = "buyCount", format = "count" },
+	{ label = "Hold", key = "holdCount", format = "count" },
+	{ label = "Sell", key = "sellCount", format = "count" },
+	{ label = "Strong Sell", key = "strongSellCount", format = "count" },
+}
+
 -- State
 local currentTicker = ""
 local currentPrice = 0
 local currentPrevClose = 0
 local currentQuoteData = nil
 local currentOptionData = nil
+local currentAnalystData = nil
 local isFetchingData = false
 local activeTabName = ""
 local chainExpanded = true
@@ -117,7 +135,7 @@ local TabButtons = {
 
 local TabContents = {
 	QuoteDetails = ContentQuoteDetails,
-	-- AnalystReports = TabContentContainer:WaitForChild("Content_AnalystReports"),
+	AnalystReports = ContentAnalystReports,
 	-- Fundamentals   = TabContentContainer:WaitForChild("Content_Fundamentals"),
 	-- OptionStats    = TabContentContainer:WaitForChild("Content_OptionStats"),
 }
@@ -275,6 +293,51 @@ local function renderFieldGrid(container, fields, data, prefix)
 	end
 end
 
+-- Shows a single centered message instead of a field grid - used when a
+-- tab's data comes back { available = false } (e.g. Analyst/Fundamentals
+-- for a crypto ticker with no Yahoo coverage).
+local function renderUnavailable(container, prefix, message)
+	for _, child in pairs(container:GetChildren()) do
+		if child:IsA("Frame") and string.match(child.Name, "^" .. prefix) then
+			child:Destroy()
+		end
+	end
+
+	local row = Instance.new("Frame")
+
+	row.Name = prefix .. "Unavailable"
+	row.Size = UDim2.new(1, 0, 0, 22)
+	row.BackgroundTransparency = 1
+	row.Parent = container
+
+	local lbl = Instance.new("TextLabel")
+
+	lbl.Name = "Label"
+	lbl.Text = message
+	lbl.Size = UDim2.new(1, 0, 1, 0)
+	lbl.BackgroundTransparency = 1
+	lbl.TextColor3 = TEXT_SECONDARY
+	lbl.Font = Enum.Font.SourceSans
+	lbl.TextSize = 13
+	lbl.TextXAlignment = Enum.TextXAlignment.Center
+	lbl.Parent = row
+end
+
+local function renderAnalystReport(data)
+	if data and data.available == false then
+		renderUnavailable(ContentAnalystReports, "AR_", "Not available for this asset")
+		return
+	end
+
+	renderFieldGrid(ContentAnalystReports, ANALYST_FIELDS, data, "AR_")
+end
+
+local function fetchAnalystReport()
+	local data = GetAnalystReportEvent:InvokeServer(currentTicker)
+	currentAnalystData = data
+	renderAnalystReport(data)
+end
+
 local function renderQuoteDetails(data)
 	renderFieldGrid(ContentQuoteDetails, QUOTE_FIELDS, data, "QF_")
 end
@@ -317,6 +380,10 @@ local function switchTab(tabName)
 
 	for name, frame in pairs(TabContents) do
 		frame.Visible = (name == tabName)
+	end
+
+	if tabName == "AnalystReports" and currentTicker ~= "" and not currentAnalystData then
+		fetchAnalystReport()
 	end
 end
 
@@ -765,6 +832,7 @@ local function loadTicker(rawTicker)
 
 	isFetchingData = true
 	currentTicker = ticker
+	currentAnalystData = nil
 
 	setLoadingState(true)
 	clearOptionChain()
