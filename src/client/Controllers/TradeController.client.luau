@@ -22,6 +22,7 @@ local GetPositionsEvent = EventsFolder:WaitForChild("GetPositionsEvent")
 local GetNewsFeedEvent = EventsFolder:WaitForChild("GetNewsFeedEvent")
 local PlayerOrderEvent = EventsFolder:WaitForChild("PlayerOrderEvent")
 local GetAnalystReportEvent = EventsFolder:WaitForChild("GetAnalystReportEvent")
+local GetFundamentalsEvent = EventsFolder:WaitForChild("GetFundamentalsEvent")
 
 -- References
 local TerminalGui = PlayerGui:WaitForChild("TerminalGui")
@@ -48,6 +49,7 @@ local TabContentContainer = QuoteDetails:WaitForChild("TabContentContainer")
 local TabHeaderContainer = QuoteDetails:WaitForChild("TabHeaderContainer")
 local ContentQuoteDetails = TabContentContainer:WaitForChild("Content_QuoteDetails")
 local ContentAnalystReports = TabContentContainer:WaitForChild("Content_AnalystReports")
+local ContentFundamentals = TabContentContainer:WaitForChild("Content_Fundamentals")
 
 -- Contants
 local GREEN = Color3.fromRGB(8, 153, 129)
@@ -113,6 +115,24 @@ local ANALYST_FIELDS = {
 	{ label = "Strong Sell", key = "strongSellCount", format = "count" },
 }
 
+local FUNDAMENTALS_FIELDS = {
+	{ label = "Revenue", key = "totalRevenue", format = "compact" },
+	{ label = "Gross Margin", key = "grossMargins", format = "percent" },
+	{ label = "Operating Margin", key = "operatingMargins", format = "percent" },
+	{ label = "Profit Margin", key = "profitMargins", format = "percent" },
+	{ label = "ROE", key = "returnOnEquity", format = "percent" },
+	{ label = "ROA", key = "returnOnAssets", format = "percent" },
+	{ label = "Cash", key = "totalCash", format = "compact" },
+	{ label = "Debt", key = "totalDebt", format = "compact" },
+	{ label = "Debt/Equity", key = "debtToEquity", format = "decimal2" },
+	{ label = "Free Cash Flow", key = "freeCashflow", format = "compact" },
+	{ label = "P/B", key = "priceToBook", format = "decimal2" },
+	{ label = "PEG Ratio", key = "pegRatio", format = "decimal2" },
+	{ label = "EV/EBITDA", key = "enterpriseToEbitda", format = "decimal2" },
+	{ label = "Revenue Growth", key = "revenueGrowth", format = "percent" },
+	{ label = "Earnings Growth", key = "earningsGrowth", format = "percent" },
+}
+
 -- State
 local currentTicker = ""
 local currentPrice = 0
@@ -120,6 +140,7 @@ local currentPrevClose = 0
 local currentQuoteData = nil
 local currentOptionData = nil
 local currentAnalystData = nil
+local currentFundamentalsData = nil
 local isFetchingData = false
 local activeTabName = ""
 local chainExpanded = true
@@ -136,7 +157,7 @@ local TabButtons = {
 local TabContents = {
 	QuoteDetails = ContentQuoteDetails,
 	AnalystReports = ContentAnalystReports,
-	-- Fundamentals   = TabContentContainer:WaitForChild("Content_Fundamentals"),
+	Fundamentals = ContentFundamentals,
 	-- OptionStats    = TabContentContainer:WaitForChild("Content_OptionStats"),
 }
 
@@ -338,6 +359,21 @@ local function fetchAnalystReport()
 	renderAnalystReport(data)
 end
 
+local function renderFundamentals(data)
+	if data and data.available == false then
+		renderUnavailable(ContentFundamentals, "FN_", "Not available for this asset")
+		return
+	end
+
+	renderFieldGrid(ContentFundamentals, FUNDAMENTALS_FIELDS, data, "FN_")
+end
+
+local function fetchFundamentals()
+	local data = GetFundamentalsEvent:InvokeServer(currentTicker)
+	currentFundamentalsData = data
+	renderFundamentals(data)
+end
+
 local function renderQuoteDetails(data)
 	renderFieldGrid(ContentQuoteDetails, QUOTE_FIELDS, data, "QF_")
 end
@@ -384,6 +420,10 @@ local function switchTab(tabName)
 
 	if tabName == "AnalystReports" and currentTicker ~= "" and not currentAnalystData then
 		fetchAnalystReport()
+	end
+
+	if tabName == "Fundamentals" and currentTicker ~= "" and not currentFundamentalsData then
+		fetchFundamentals()
 	end
 end
 
@@ -833,6 +873,7 @@ local function loadTicker(rawTicker)
 	isFetchingData = true
 	currentTicker = ticker
 	currentAnalystData = nil
+	currentFundamentalsData = nil
 
 	setLoadingState(true)
 	clearOptionChain()
