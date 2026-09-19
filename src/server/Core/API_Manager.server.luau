@@ -12,6 +12,9 @@ local MarketDataModule = require(ServerScriptService.Modules.MarketDataModule)
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
 local RequestChartEvent = EventsFolder:WaitForChild("RequestChartEvent")
 local GetMarketDataEvent = EventsFolder:WaitForChild("GetMarketDataEvent")
+local GetAnalystReportEvent = EventsFolder:WaitForChild("GetAnalystReportEvent")
+local GetFundamentalsEvent = EventsFolder:WaitForChild("GetFundamentalsEvent")
+local GetOptionStatsEvent = EventsFolder:WaitForChild("GetOptionStatsEvent")
 
 -- Config
 local PLAYER_COOLDOWN = 1
@@ -77,9 +80,100 @@ GetMarketDataEvent.OnServerInvoke = function(player, ticker)
 
 	if not quote then
 		warn(string.format("[API_Manager] Quote fetch failed for %s", string.upper(ticker)))
+
+		return nil
+	end
+
+	local details = MarketDataModule.getQuoteDetails(ticker)
+
+	if details then
+		for key, value in pairs(details) do
+			quote[key] = value
+		end
 	end
 
 	return quote
+end
+
+-- GetAnalystReportEvent
+GetAnalystReportEvent.OnServerInvoke = function(player, ticker)
+	local userId = player.UserId
+	local now = os.time()
+	local lastRequest = PlayerLastRequest[userId] or 0
+
+	if (now - lastRequest) < PLAYER_COOLDOWN then
+		return nil
+	end
+
+	PlayerLastRequest[userId] = now
+
+	if not MarketDataModule.isValidTicker(ticker) then
+		warn(string.format("[API_Manager] Invalid ticker from %s: %s", player.Name, tostring(ticker)))
+
+		return nil
+	end
+
+	local report, err = MarketDataModule.getAnalystReport(ticker)
+
+	if not report then
+		warn(string.format("[API_Manager] Analyst report fetch failed for %s: %s", string.upper(ticker), tostring(err)))
+	end
+
+	return report
+end
+
+-- GetFundamentalsEvent
+GetFundamentalsEvent.OnServerInvoke = function(player, ticker)
+	local userId = player.UserId
+	local now = os.time()
+	local lastRequest = PlayerLastRequest[userId] or 0
+
+	if (now - lastRequest) < PLAYER_COOLDOWN then
+		return nil
+	end
+
+	PlayerLastRequest[userId] = now
+
+	if not MarketDataModule.isValidTicker(ticker) then
+		warn(string.format("[API_Manager] Invalid ticker from %s: %s", player.Name, tostring(ticker)))
+
+		return nil
+	end
+
+	local fundamentals, err = MarketDataModule.getFundamentals(ticker)
+
+	if not fundamentals then
+		warn(string.format("[API_Manager] Fundamentals fetch failed for %s: %s", string.upper(ticker), tostring(err)))
+	end
+
+	return fundamentals
+end
+
+-- GetOptionStatsEvent
+GetOptionStatsEvent.OnServerInvoke = function(player, ticker)
+	local userId = player.UserId
+	local now = os.time()
+	local lastRequest = PlayerLastRequest[userId] or 0
+
+	if (now - lastRequest) < PLAYER_COOLDOWN then
+		return nil
+	end
+
+	PlayerLastRequest[userId] = now
+
+	if not MarketDataModule.isValidTicker(ticker) then
+		warn(string.format("[API_Manager] Invalid ticker from %s: %s", player.Name, tostring(ticker)))
+
+		return nil
+	end
+
+	local stats, err = MarketDataModule.getOptionStats(ticker)
+
+	if not stats then
+		warn(string.format("[API_Manager] Option stats fetch failed for %s: %s", string.upper(ticker), tostring(err)))
+	end
+
+	return stats
 end
 
 -- Clean up

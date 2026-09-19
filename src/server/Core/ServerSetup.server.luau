@@ -7,6 +7,9 @@ local EVENTS = {
 	"GetPositionsEvent",
 	"GetNewsFeedEvent",
 	"PlayerOrderEvent",
+	"GetAnalystReportEvent",
+	"GetFundamentalsEvent",
+	"GetOptionStatsEvent",
 }
 
 local Event = {}
