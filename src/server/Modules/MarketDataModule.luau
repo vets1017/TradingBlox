@@ -13,14 +13,26 @@ local MarketDataModule = {}
 -- Config
 local SERVER_URL = "https://tradingblox-terminal-backend.onrender.com" -- temp
 local CANDLES_ENDPOINT = SERVER_URL .. "/api/candles/"
+local QUOTE_DETAILS_ENDPOINT = SERVER_URL .. "/api/quote-details/"
+local ANALYST_ENDPOINT = SERVER_URL .. "/api/analyst/"
+local FUNDAMENTALS_ENDPOINT = SERVER_URL .. "/api/fundamentals/"
+local OPTIONS_ENDPOINT = SERVER_URL .. "/api/options/"
 
 local CHART_CACHE_DURATION = 300
+local QUOTE_DETAILS_CACHE_DURATION = 60
+local ANALYST_CACHE_DURATION = 21600 -- 6 hours
+local FUNDAMENTALS_CACHE_DURATION = 21600 -- 6 hours
+local OPTION_STATS_CACHE_DURATION = 300
 local CACHE_SWEEP_INTERVAL = 600
 local MAX_TICKER_LENGTH = 10
 local VALID_TIMEFRAMES = { ["1M"] = true, ["5M"] = true, ["30M"] = true, ["H"] = true, ["D"] = true }
 
 -- State
 local ChartCache = {} -- [cacheKey] = { data = ..., lastUpdated = os.time() }
+local QuoteDetailsCache = {}
+local AnalystCache = {}
+local FundamentalsCache = {}
+local OptionStatsCache = {}
 
 --
 
@@ -69,6 +81,25 @@ local function fetchJSON(url)
 	end
 
 	return decoded, nil
+end
+
+-- Generic cache-or-fetch: returns cached data if still within `ttl` seconds,
+-- otherwise calls fetchFn() and stores a fresh copy on success.
+local function cachedFetch(cache, key, ttl, fetchFn)
+	local cached = cache[key]
+	local now = os.time()
+
+	if cached and (now - cached.lastUpdated) < ttl then
+		return cached.data, nil
+	end
+
+	local data, err = fetchFn()
+
+	if data then
+		cache[key] = { data = data, lastUpdated = now }
+	end
+
+	return data, err
 end
 
 -- Fetches candles for ticker/timeframe/mode, using the shared cache for
@@ -156,7 +187,95 @@ function MarketDataModule.getQuote(ticker)
 	}
 end
 
+-- Quote Details tab: bid/ask/sizes, volume, market cap, beta, PE, dividends,
+-- EPS, ex-div/earnings dates, day & 52-week range.
+function MarketDataModule.getQuoteDetails(ticker)
+	if not MarketDataModule.isValidTicker(ticker) then
+		return nil, "Invalid ticker"
+	end
+
+	local targetTicker = string.upper(ticker)
+
+	return cachedFetch(QuoteDetailsCache, targetTicker, QUOTE_DETAILS_CACHE_DURATION, function()
+		local data, err = fetchJSON(QUOTE_DETAILS_ENDPOINT .. HttpService:UrlEncode(targetTicker))
+
+		if data and data.error then
+			return nil, tostring(data.error)
+		end
+
+		return data, err
+	end)
+end
+
+-- Analyst Reports tab: price targets, recommendation mean/key, rating counts.
+-- Returns { available = false } for tickers with no analyst coverage.
+function MarketDataModule.getAnalystReport(ticker)
+	if not MarketDataModule.isValidTicker(ticker) then
+		return nil, "Invalid ticker"
+	end
+
+	local targetTicker = string.upper(ticker)
+
+	return cachedFetch(AnalystCache, targetTicker, ANALYST_CACHE_DURATION, function()
+		local data, err = fetchJSON(ANALYST_ENDPOINT .. HttpService:UrlEncode(targetTicker))
+
+		if data and data.error then
+			return nil, tostring(data.error)
+		end
+
+		return data, err
+	end)
+end
+
+-- Fundamentals tab: revenue, margins, ROE/ROA, cash, debt, valuation ratios,
+-- growth. Returns { available = false } for tickers with no financials.
+function MarketDataModule.getFundamentals(ticker)
+	if not MarketDataModule.isValidTicker(ticker) then
+		return nil, "Invalid ticker"
+	end
+
+	local targetTicker = string.upper(ticker)
+
+	return cachedFetch(FundamentalsCache, targetTicker, FUNDAMENTALS_CACHE_DURATION, function()
+		local data, err = fetchJSON(FUNDAMENTALS_ENDPOINT .. HttpService:UrlEncode(targetTicker))
+
+		if data and data.error then
+			return nil, tostring(data.error)
+		end
+
+		return data, err
+	end)
+end
+
+-- Option Stats tab: nearest-expiration ATM call/put. No greeks - Yahoo
+-- doesn't provide them. Returns { available = false } if no listed options.
+function MarketDataModule.getOptionStats(ticker)
+	if not MarketDataModule.isValidTicker(ticker) then
+		return nil, "Invalid ticker"
+	end
+
+	local targetTicker = string.upper(ticker)
+
+	return cachedFetch(OptionStatsCache, targetTicker, OPTION_STATS_CACHE_DURATION, function()
+		local data, err = fetchJSON(OPTIONS_ENDPOINT .. HttpService:UrlEncode(targetTicker))
+
+		if data and data.error then
+			return nil, tostring(data.error)
+		end
+
+		return data, err
+	end)
+end
+
 -- Cache sweep
+local ALL_CACHES = {
+	{ cache = ChartCache, ttl = CHART_CACHE_DURATION },
+	{ cache = QuoteDetailsCache, ttl = QUOTE_DETAILS_CACHE_DURATION },
+	{ cache = AnalystCache, ttl = ANALYST_CACHE_DURATION },
+	{ cache = FundamentalsCache, ttl = FUNDAMENTALS_CACHE_DURATION },
+	{ cache = OptionStatsCache, ttl = OPTION_STATS_CACHE_DURATION },
+}
+
 task.spawn(function()
 	while true do
 		task.wait(CACHE_SWEEP_INTERVAL)
@@ -164,15 +283,17 @@ task.spawn(function()
 		local now = os.time()
 		local deletedCount = 0
 
-		for key, entry in pairs(ChartCache) do
-			if (now - entry.lastUpdated) > CHART_CACHE_DURATION then
-				ChartCache[key] = nil
-				deletedCount += 1
+		for _, entry in ipairs(ALL_CACHES) do
+			for key, cacheEntry in pairs(entry.cache) do
+				if (now - cacheEntry.lastUpdated) > entry.ttl then
+					entry.cache[key] = nil
+					deletedCount += 1
+				end
 			end
 		end
 
 		if deletedCount > 0 then
-			print("[MarketDataModule] Cleared " .. deletedCount .. " stale chart cache entries.")
+			print("[MarketDataModule] Cleared " .. deletedCount .. " stale cache entries.")
 		end
 	end
 end)
