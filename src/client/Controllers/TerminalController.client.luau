@@ -90,6 +90,10 @@ local ChartTickerLabel = ChartLegend:WaitForChild("ChartTickerLabel")
 local TimeframeDropdown = TopToolbar:WaitForChild("TimeframeDropdown")
 local TimeDropdownList = TimeframeDropdown:WaitForChild("TimeDropdownList")
 local MainTimeframeButton = TimeframeDropdown:WaitForChild("MainTimeframeButton")
+local IndicatorsContainer = ChartCanvas:WaitForChild("IndicatorsContainer")
+local IndicatorsDropdown = TopToolbar:WaitForChild("IndicatorsDropdown")
+local IndicatorsDropdownList = IndicatorsDropdown:WaitForChild("IndicatorsDropdownList")
+local MainIndicatorsButton = IndicatorsDropdown:WaitForChild("MainIndicatorsButton")
 local ScrollTrack = ChartCanvas:WaitForChild("ScrollTrack")
 local ScrollThumb = ScrollTrack:WaitForChild("ScrollThumb")
 local CandlesContainer = ChartCanvas:WaitForChild("CandlesContainer")
@@ -138,6 +142,7 @@ local isHoveringChart = false
 local isActiveTradeVisible = false
 local isCrosshairActive = true
 local isDropdownOpen = false
+local isIndicatorsDropdownOpen = false
 local isDraggingChart = false
 local isDraggingScroll = false
 
@@ -184,6 +189,39 @@ local TimeDropdownOptions = {
 	[TimeDropdownList:WaitForChild("1DayButton")] = { query = "D" },
 }
 
+-- Moving-average overlay indicators. `active` is toggled by the dropdown;
+-- renderChart reads it to decide what to hand ChartRenderer each render.
+local IndicatorOptions = {
+	[IndicatorsDropdownList:WaitForChild("SMA20Button")] = {
+		key = "SMA20",
+		type = "sma",
+		period = 20,
+		color = Color3.fromRGB(255, 170, 0),
+		active = false,
+	},
+	[IndicatorsDropdownList:WaitForChild("SMA50Button")] = {
+		key = "SMA50",
+		type = "sma",
+		period = 50,
+		color = Color3.fromRGB(0, 170, 255),
+		active = false,
+	},
+	[IndicatorsDropdownList:WaitForChild("EMA20Button")] = {
+		key = "EMA20",
+		type = "ema",
+		period = 20,
+		color = Color3.fromRGB(255, 90, 205),
+		active = false,
+	},
+	[IndicatorsDropdownList:WaitForChild("EMA50Button")] = {
+		key = "EMA50",
+		type = "ema",
+		period = 50,
+		color = Color3.fromRGB(150, 100, 255),
+		active = false,
+	},
+}
+
 -- Unfinished
 local function refreshTerminal()
 	local marketData = GetMarketDataEvent:InvokeServer()
@@ -194,6 +232,18 @@ local function refreshTerminal()
 	-- continue after stock-list is done
 end
 
+local function getActiveIndicators()
+	local activeIndicators = {}
+
+	for _, indicator in pairs(IndicatorOptions) do
+		if indicator.active then
+			table.insert(activeIndicators, indicator)
+		end
+	end
+
+	return activeIndicators
+end
+
 local function renderChart(ticker, chartData)
 	local liveCandle = #masterChartData > 0 and masterChartData[#masterChartData] or nil
 
@@ -201,10 +251,11 @@ local function renderChart(ticker, chartData)
 		ChartTickerLabel = ChartTickerLabel,
 		CandlesContainer = CandlesContainer,
 		GridContainer = GridContainer,
+		IndicatorsContainer = IndicatorsContainer,
 		RightAxis = RightAxis,
 		BottomAxis = BottomAxis,
 		MainChart = MainChart,
-	}, ticker, chartData, currentTimeframe, liveCandle)
+	}, ticker, chartData, currentTimeframe, liveCandle, getActiveIndicators())
 
 	if minPrice and maxPrice then
 		currentMinPrice = minPrice
@@ -564,14 +615,46 @@ end
 MainTimeframeButton.MouseButton1Click:Connect(function()
 	isDropdownOpen = not isDropdownOpen
 	TimeDropdownList.Visible = isDropdownOpen
+
+	isIndicatorsDropdownOpen = false
+	IndicatorsDropdownList.Visible = false
 end)
 
--- Closes the timeframe dropdown on any click/tap outside it - previously it
--- only closed via the toggle button or picking an option, so it stayed open
--- (and silently ate the next click) if you clicked anywhere else, including
--- the chart itself.
+MainIndicatorsButton.MouseButton1Click:Connect(function()
+	isIndicatorsDropdownOpen = not isIndicatorsDropdownOpen
+	IndicatorsDropdownList.Visible = isIndicatorsDropdownOpen
+
+	isDropdownOpen = false
+	TimeDropdownList.Visible = false
+end)
+
+for button, indicator in pairs(IndicatorOptions) do
+	button.MouseButton1Click:Connect(function()
+		indicator.active = not indicator.active
+		button.BackgroundTransparency = indicator.active and 0 or 1
+		button.BackgroundColor3 = indicator.active and indicator.color or COLOR_INACTIVE_BACKGROUND
+		button.TextColor3 = indicator.active and COLOR_ACTIVE_TEXT or COLOR_INACTIVE_TEXT
+
+		renderChart(currentDisplayedTicker, currentChartData)
+	end)
+end
+
+-- Closes the timeframe/indicators dropdowns on any click/tap outside them -
+-- previously they only closed via their own toggle button or picking an
+-- option, so they stayed open (and silently ate the next click) if you
+-- clicked anywhere else, including the chart itself.
+local function isWithinBounds(frame, inputPosition)
+	local framePosition = frame.AbsolutePosition
+	local frameSize = frame.AbsoluteSize
+
+	return inputPosition.X >= framePosition.X
+		and inputPosition.X <= framePosition.X + frameSize.X
+		and inputPosition.Y >= framePosition.Y
+		and inputPosition.Y <= framePosition.Y + frameSize.Y
+end
+
 UserInputService.InputBegan:Connect(function(input)
-	if not isDropdownOpen then
+	if not isDropdownOpen and not isIndicatorsDropdownOpen then
 		return
 	end
 
@@ -579,18 +662,26 @@ UserInputService.InputBegan:Connect(function(input)
 		return
 	end
 
-	local dropdownPosition = TimeframeDropdown.AbsolutePosition
-	local dropdownSize = TimeframeDropdown.AbsoluteSize
-	local inputPosition = input.Position
-
-	local withinBounds = inputPosition.X >= dropdownPosition.X
-		and inputPosition.X <= dropdownPosition.X + dropdownSize.X
-		and inputPosition.Y >= dropdownPosition.Y
-		and inputPosition.Y <= dropdownPosition.Y + dropdownSize.Y
-
-	if not withinBounds then
+	-- The open list visually extends below its toggle button, outside the
+	-- toggle frame's own AbsoluteSize - check both rects, or a click on a
+	-- list item (below the toggle) reads as "outside" and hides the list
+	-- on mouse-down, before the item's own click can fire.
+	if
+		isDropdownOpen
+		and not isWithinBounds(TimeframeDropdown, input.Position)
+		and not isWithinBounds(TimeDropdownList, input.Position)
+	then
 		isDropdownOpen = false
 		TimeDropdownList.Visible = false
+	end
+
+	if
+		isIndicatorsDropdownOpen
+		and not isWithinBounds(IndicatorsDropdown, input.Position)
+		and not isWithinBounds(IndicatorsDropdownList, input.Position)
+	then
+		isIndicatorsDropdownOpen = false
+		IndicatorsDropdownList.Visible = false
 	end
 end)
 

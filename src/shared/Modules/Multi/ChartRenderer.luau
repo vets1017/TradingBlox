@@ -1,7 +1,14 @@
+local IndicatorModule = require(script.Parent.IndicatorModule)
+
 local ChartRenderer = {}
 
 local GREEN = Color3.fromRGB(8, 153, 129)
 local RED = Color3.fromRGB(242, 54, 69)
+
+local INDICATOR_FUNCTIONS = {
+	sma = IndicatorModule.sma,
+	ema = IndicatorModule.ema,
+}
 
 ChartRenderer.TimeframeFormats = {
 	["D"] = "%b %d, %Y",
@@ -17,6 +24,7 @@ ChartRenderer.TimeframeFormats = {
 --     ChartTickerLabel : TextLabel
 --     CandlesContainer : Frame
 --     GridContainer : Frame
+--     IndicatorsContainer : Frame
 --     RightAxis : Frame
 --     BottomAxis : Frame
 --     MainChart : Frame
@@ -26,13 +34,15 @@ ChartRenderer.TimeframeFormats = {
 -- chartData : array  { Open, High, Low, Close, Timestamp}
 -- timeframe : string matching TimeframeFormats keys
 -- liveCandle : optional latest candle (full series); used for price badge when viewport is scrolled
+-- indicators : optional array of { key, type ("sma"|"ema"), period, color }, drawn as overlay lines
 --
 -- Returns minPrice, maxPrice,
 
-function ChartRenderer.render(elements, ticker, chartData, timeframe, liveCandle)
+function ChartRenderer.render(elements, ticker, chartData, timeframe, liveCandle, indicators)
 	local ChartTickerLabel = elements.ChartTickerLabel
 	local CandlesContainer = elements.CandlesContainer
 	local GridContainer = elements.GridContainer
+	local IndicatorsContainer = elements.IndicatorsContainer
 	local RightAxis = elements.RightAxis
 	local BottomAxis = elements.BottomAxis
 	local MainChart = elements.MainChart
@@ -41,6 +51,10 @@ function ChartRenderer.render(elements, ticker, chartData, timeframe, liveCandle
 
 	CandlesContainer:ClearAllChildren()
 	GridContainer:ClearAllChildren()
+
+	if IndicatorsContainer then
+		IndicatorsContainer:ClearAllChildren()
+	end
 
 	for _, child in pairs(RightAxis:GetChildren()) do
 		if string.match(child.Name, "AxisLabel_") then
@@ -119,6 +133,50 @@ function ChartRenderer.render(elements, ticker, chartData, timeframe, liveCandle
 		bodyFrame.Size = UDim2.fromScale(candleWidthScale - paddingScale, bodyHeightScale)
 		bodyFrame.Position = UDim2.fromScale(xPositionScale + (candleWidthScale / 2), bodyTopScale)
 		bodyFrame.Parent = CandlesContainer
+	end
+
+	-- Indicator Overlays (moving averages drawn on the same price scale as the candles)
+	if IndicatorsContainer and indicators and #indicators > 0 then
+		local closes = {}
+
+		for index, candle in ipairs(chartData) do
+			closes[index] = candle.Close
+		end
+
+		for _, indicator in ipairs(indicators) do
+			local computeFn = INDICATOR_FUNCTIONS[indicator.type]
+			local values = computeFn and computeFn(closes, indicator.period)
+
+			if values then
+				for index = 2, numberCandles do
+					local previousValue = values[index - 1]
+					local currentValue = values[index]
+
+					if previousValue and currentValue then
+						local x1 = ((index - 2) * candleWidthScale) + (candleWidthScale / 2)
+						local x2 = ((index - 1) * candleWidthScale) + (candleWidthScale / 2)
+						local y1 = (maximumPrice - previousValue) / priceRange
+						local y2 = (maximumPrice - currentValue) / priceRange
+
+						local dx = (x2 - x1) * MainChart.AbsoluteSize.X
+						local dy = (y2 - y1) * MainChart.AbsoluteSize.Y
+						local length = math.sqrt(dx * dx + dy * dy)
+						local angle = math.deg(math.atan2(dy, dx))
+
+						local segment = Instance.new("Frame")
+						segment.Name = indicator.key .. "_" .. index
+						segment.AnchorPoint = Vector2.new(0.5, 0.5)
+						segment.BackgroundColor3 = indicator.color
+						segment.BorderSizePixel = 0
+						segment.ZIndex = 2
+						segment.Size = UDim2.new(0, length, 0, 2)
+						segment.Rotation = angle
+						segment.Position = UDim2.fromScale((x1 + x2) / 2, (y1 + y2) / 2)
+						segment.Parent = IndicatorsContainer
+					end
+				end
+			end
+		end
 	end
 
 	-- Grid and Axis Labels
