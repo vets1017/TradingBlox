@@ -16,7 +16,9 @@ local function addCommas(numberString)
 end
 
 function NumberModule.format(amount)
-	return "$" .. addCommas(tostring(amount))
+	local sign = amount < 0 and "-" or ""
+
+	return sign .. "$" .. addCommas(string.format("%.2f", math.abs(amount)))
 end
 
 -- Comma-grouped integer, no currency prefix - for share/contract counts
