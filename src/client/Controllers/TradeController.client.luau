@@ -21,6 +21,9 @@ local GetOptionsDataEvent = EventsFolder:WaitForChild("GetOptionsDataEvent")
 local GetPositionsEvent = EventsFolder:WaitForChild("GetPositionsEvent")
 local GetNewsFeedEvent = EventsFolder:WaitForChild("GetNewsFeedEvent")
 local PlayerOrderEvent = EventsFolder:WaitForChild("PlayerOrderEvent")
+local GetAnalystReportEvent = EventsFolder:WaitForChild("GetAnalystReportEvent")
+local GetFundamentalsEvent = EventsFolder:WaitForChild("GetFundamentalsEvent")
+local GetOptionStatsEvent = EventsFolder:WaitForChild("GetOptionStatsEvent")
 
 -- References
 local TerminalGui = PlayerGui:WaitForChild("TerminalGui")
@@ -46,6 +49,9 @@ local QuoteDetails = TradeScreen:WaitForChild("QuoteDetails")
 local TabContentContainer = QuoteDetails:WaitForChild("TabContentContainer")
 local TabHeaderContainer = QuoteDetails:WaitForChild("TabHeaderContainer")
 local ContentQuoteDetails = TabContentContainer:WaitForChild("Content_QuoteDetails")
+local ContentAnalystReports = TabContentContainer:WaitForChild("Content_AnalystReports")
+local ContentFundamentals = TabContentContainer:WaitForChild("Content_Fundamentals")
+local ContentOptionStats = TabContentContainer:WaitForChild("Content_OptionStats")
 
 -- Contants
 local GREEN = Color3.fromRGB(8, 153, 129)
@@ -66,18 +72,21 @@ local TWEEN_FAST = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirecti
 local TWEEN_MED = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
 local QUOTE_FIELDS = {
-	{ label = "Volume", key = "volume", format = "number" },
+	{ label = "Volume", key = "volume", format = "count" },
+	{ label = "Avg Volume", key = "avgVolume", format = "count" },
 	{ label = "Beta", key = "beta", format = "decimal2" },
-	{ label = "Market Cap", key = "marketCap", format = "auto" },
-	{ label = "Yield", key = "yield", format = "percent" },
-	{ label = "VWAP", key = "vwap", format = "price" },
-	{ label = "IV", key = "impliedVolatility", format = "percent" },
-	{ label = "PE", key = "pe", format = "decimal2" },
-	{ label = "Div Amount", key = "divAmount", format = "price" },
-	{ label = "50-Day Avg Vol", key = "avgVolume50", format = "number" },
-	{ label = "EPS", key = "eps", format = "decimal2" },
+	{ label = "Market Cap", key = "marketCap", format = "compact" },
+	{ label = "Yield", key = "dividendYield", format = "percent" },
+	{ label = "Div Amount", key = "dividendRate", format = "price" },
 	{ label = "Ex Date", key = "exDividendDate", format = "date" },
+	{ label = "PE (Trailing)", key = "trailingPE", format = "decimal2" },
+	{ label = "PE (Forward)", key = "forwardPE", format = "decimal2" },
+	{ label = "EPS", key = "eps", format = "decimal2" },
 	{ label = "Earnings", key = "earningsDate", format = "date" },
+	{ label = "Day High", key = "dayHigh", format = "price" },
+	{ label = "Day Low", key = "dayLow", format = "price" },
+	{ label = "52-Wk High", key = "fiftyTwoWeekHigh", format = "price" },
+	{ label = "52-Wk Low", key = "fiftyTwoWeekLow", format = "price" },
 }
 
 local POSITION_COLUMNS = {
@@ -93,12 +102,57 @@ local POSITION_COLUMNS = {
 	{ key = "plOpenPct", format = "percent", label = "P/L Open %", width = 75 },
 }
 
+local ANALYST_FIELDS = {
+	{ label = "Mean Target", key = "targetMean", format = "price" },
+	{ label = "High Target", key = "targetHigh", format = "price" },
+	{ label = "Low Target", key = "targetLow", format = "price" },
+	{ label = "Median Target", key = "targetMedian", format = "price" },
+	{ label = "Rating", key = "recommendationKey", format = "auto" },
+	{ label = "Rating Score (1-5)", key = "recommendationMean", format = "decimal2" },
+	{ label = "# Analysts", key = "numberOfAnalysts", format = "count" },
+	{ label = "Strong Buy", key = "strongBuyCount", format = "count" },
+	{ label = "Buy", key = "buyCount", format = "count" },
+	{ label = "Hold", key = "holdCount", format = "count" },
+	{ label = "Sell", key = "sellCount", format = "count" },
+	{ label = "Strong Sell", key = "strongSellCount", format = "count" },
+}
+
+local FUNDAMENTALS_FIELDS = {
+	{ label = "Revenue", key = "totalRevenue", format = "compact" },
+	{ label = "Gross Margin", key = "grossMargins", format = "percent" },
+	{ label = "Operating Margin", key = "operatingMargins", format = "percent" },
+	{ label = "Profit Margin", key = "profitMargins", format = "percent" },
+	{ label = "ROE", key = "returnOnEquity", format = "percent" },
+	{ label = "ROA", key = "returnOnAssets", format = "percent" },
+	{ label = "Cash", key = "totalCash", format = "compact" },
+	{ label = "Debt", key = "totalDebt", format = "compact" },
+	{ label = "Debt/Equity", key = "debtToEquity", format = "decimal2" },
+	{ label = "Free Cash Flow", key = "freeCashflow", format = "compact" },
+	{ label = "P/B", key = "priceToBook", format = "decimal2" },
+	{ label = "PEG Ratio", key = "pegRatio", format = "decimal2" },
+	{ label = "EV/EBITDA", key = "enterpriseToEbitda", format = "decimal2" },
+	{ label = "Revenue Growth", key = "revenueGrowth", format = "percent" },
+	{ label = "Earnings Growth", key = "earningsGrowth", format = "percent" },
+}
+
+local OPTION_STATS_ROWS = {
+	{ label = "Bid", key = "bid", format = "price" },
+	{ label = "Ask", key = "ask", format = "price" },
+	{ label = "Last", key = "lastPrice", format = "price" },
+	{ label = "IV", key = "impliedVolatility", format = "percent" },
+	{ label = "Volume", key = "volume", format = "count" },
+	{ label = "Open Interest", key = "openInterest", format = "count" },
+}
+
 -- State
 local currentTicker = ""
 local currentPrice = 0
 local currentPrevClose = 0
 local currentQuoteData = nil
 local currentOptionData = nil
+local currentAnalystData = nil
+local currentFundamentalsData = nil
+local currentOptionStatsData = nil
 local isFetchingData = false
 local activeTabName = ""
 local chainExpanded = true
@@ -114,9 +168,9 @@ local TabButtons = {
 
 local TabContents = {
 	QuoteDetails = ContentQuoteDetails,
-	-- AnalystReports = TabContentContainer:WaitForChild("Content_AnalystReports"),
-	-- Fundamentals   = TabContentContainer:WaitForChild("Content_Fundamentals"),
-	-- OptionStats    = TabContentContainer:WaitForChild("Content_OptionStats"),
+	AnalystReports = ContentAnalystReports,
+	Fundamentals = ContentFundamentals,
+	OptionStats = ContentOptionStats,
 }
 
 --
@@ -138,7 +192,16 @@ local function formatValue(value, formatType)
 		return string.format("%s%.2f", sign, value)
 	elseif formatType == "number" then
 		return NumberModule.format(value)
-	elseif formatType == "date" or formatType == "auto" then
+	elseif formatType == "count" then
+		return NumberModule.formatShares(value)
+	elseif formatType == "compact" then
+		return NumberModule.formatCompact(value)
+	elseif formatType == "date" then
+		local text = tostring(value)
+
+		-- Backend passes Yahoo Date objects through as ISO-8601; only the day matters here.
+		return string.match(text, "^%d%d%d%d%-%d%d%-%d%d") or text
+	elseif formatType == "auto" then
 		return tostring(value)
 	end
 
@@ -218,39 +281,52 @@ local function updateHeader(data, livePrice)
 	end
 end
 
-local QUOTE_ROW_HEIGHT = 24
-local QUOTE_ROW_GAP = 2
-local QUOTE_COLUMN = 2
+-- UIGridLayout has no `Enabled` property (confirmed live - Studio throws
+-- "Enabled is not a valid member of UIGridLayout"), so "toggling" it off/on
+-- means unparenting/reparenting the same instance instead. Cache the lookup
+-- once per container: FindFirstChildOfClass can't find it while detached, so
+-- a fresh lookup after renderUnavailable has run would silently return nil.
+local GridLayoutCache = {}
 
--- Quote Details
-local function renderQuoteDetails(data)
-	for _, child in pairs(ContentQuoteDetails:GetChildren()) do
-		if child:IsA("Frame") and string.match(child.Name, "^QF_") then
+local function getGridLayout(container)
+	local cached = GridLayoutCache[container]
+
+	if cached == nil then
+		cached = container:FindFirstChildOfClass("UIGridLayout") or false
+		GridLayoutCache[container] = cached
+	end
+
+	return cached or nil
+end
+
+-- Renders a flat label/value grid into `container`, clearing any previous
+-- rows tagged with `prefix` first. Shared by Quote Details, Analyst
+-- Reports, and Fundamentals - all three are flat field-list tabs.
+local function renderFieldGrid(container, fields, data, prefix)
+	for _, child in pairs(container:GetChildren()) do
+		if child:IsA("Frame") and string.match(child.Name, "^" .. prefix) then
 			child:Destroy()
 		end
+	end
+
+	local gridLayout = getGridLayout(container)
+
+	if gridLayout then
+		gridLayout.Parent = container
 	end
 
 	if not data then
 		return
 	end
 
-	for i, field in ipairs(QUOTE_FIELDS) do
-		local col = (i - 1) % QUOTE_COLUMN
+	for i, field in ipairs(fields) do
 		local row = Instance.new("Frame")
 
-		row.Name = "QF_" .. field.key
+		row.Name = prefix .. field.key
 		row.Size = UDim2.new(0.5, -4, 0, 22)
 		row.BackgroundTransparency = 1
 		row.LayoutOrder = i
-		row.Parent = ContentQuoteDetails
-
-		local rowFrame = Instance.new("Frame")
-
-		rowFrame.Name = "QF_" .. field.key
-		rowFrame.nSize = UDim2.new(1 / QUOTE_COLUMN, -8, 0, QUOTE_ROW_HEIGHT)
-		rowFrame.Position = UDim2.new(col / QUOTE_COLUMN, 4, 0, row * (QUOTE_ROW_HEIGHT + QUOTE_ROW_GAP))
-		rowFrame.BackgroundTransparency = 1
-		rowFrame = ContentQuoteDetails
+		row.Parent = container
 
 		local lbl = Instance.new("TextLabel")
 
@@ -279,6 +355,239 @@ local function renderQuoteDetails(data)
 	end
 end
 
+-- Shows a single centered message instead of a field grid - used when a
+-- tab's data comes back { available = false } (e.g. Analyst/Fundamentals
+-- for a crypto ticker with no Yahoo coverage).
+local function renderUnavailable(container, prefix, message)
+	for _, child in pairs(container:GetChildren()) do
+		if child:IsA("Frame") and string.match(child.Name, "^" .. prefix) then
+			child:Destroy()
+		end
+	end
+
+	local gridLayout = getGridLayout(container)
+
+	if gridLayout then
+		gridLayout.Parent = nil
+	end
+
+	local row = Instance.new("Frame")
+
+	row.Name = prefix .. "Unavailable"
+	row.Size = UDim2.new(1, 0, 0, 22)
+	row.BackgroundTransparency = 1
+	row.Parent = container
+
+	local lbl = Instance.new("TextLabel")
+
+	lbl.Name = "Label"
+	lbl.Text = message
+	lbl.Size = UDim2.new(1, 0, 1, 0)
+	lbl.BackgroundTransparency = 1
+	lbl.TextColor3 = TEXT_SECONDARY
+	lbl.Font = Enum.Font.SourceSans
+	lbl.TextSize = 13
+	lbl.TextXAlignment = Enum.TextXAlignment.Center
+	lbl.Parent = row
+end
+
+-- Builds a single TextLabel from a props table. Moved up here (ahead of its
+-- original spot near the Option Chain row-builders) so the two-column Option
+-- Stats renderer below - and switchTab's lazy-fetch wiring further down - can
+-- call it; Luau locals aren't visible above their declaration.
+local function makeLabel(parent, props)
+	local lbl = Instance.new("TextLabel")
+
+	lbl.Name = props.name or "Label"
+	lbl.Text = props.text or ""
+	lbl.Size = props.sz or UDim2.new(1, 0, 1, 0)
+	lbl.Position = props.pos or UDim2.fromOffset(0, 0)
+	lbl.BackgroundTransparency = 1
+	lbl.Font = props.font or Enum.Font.SourceSans
+	lbl.TextSize = props.size or 13
+	lbl.TextColor3 = props.color or TEXT_PRIMARY
+	lbl.TextXAlignment = props.align or Enum.TextXAlignment.Left
+	lbl.TextTruncate = Enum.TextTruncate.AtEnd
+	lbl.ZIndex = props.zindex or 1
+	lbl.Parent = parent
+
+	return lbl
+end
+
+local function renderAnalystReport(data)
+	if not data then
+		renderUnavailable(ContentAnalystReports, "AR_", "Data unavailable — try again")
+		return
+	end
+
+	if data.available == false then
+		renderUnavailable(ContentAnalystReports, "AR_", "Not available for this asset")
+		return
+	end
+
+	renderFieldGrid(ContentAnalystReports, ANALYST_FIELDS, data, "AR_")
+end
+
+local function fetchAnalystReport()
+	local ticker = currentTicker
+	local data = GetAnalystReportEvent:InvokeServer(ticker)
+
+	if ticker ~= currentTicker then
+		return
+	end
+
+	currentAnalystData = data
+	renderAnalystReport(data)
+end
+
+local function renderFundamentals(data)
+	if not data then
+		renderUnavailable(ContentFundamentals, "FN_", "Data unavailable — try again")
+		return
+	end
+
+	if data.available == false then
+		renderUnavailable(ContentFundamentals, "FN_", "Not available for this asset")
+		return
+	end
+
+	renderFieldGrid(ContentFundamentals, FUNDAMENTALS_FIELDS, data, "FN_")
+end
+
+local function fetchFundamentals()
+	local ticker = currentTicker
+	local data = GetFundamentalsEvent:InvokeServer(ticker)
+
+	if ticker ~= currentTicker then
+		return
+	end
+
+	currentFundamentalsData = data
+	renderFundamentals(data)
+end
+
+-- Option Stats isn't a flat field list like the three tabs above it - the
+-- payload is inherently two-sided (call vs put) - so it gets its own
+-- clear/render pair instead of going through renderFieldGrid.
+local function clearOptionStats()
+	for _, child in pairs(ContentOptionStats:GetChildren()) do
+		if child:IsA("Frame") and string.match(child.Name, "^OS_") then
+			child:Destroy()
+		end
+	end
+end
+
+local function renderOptionStats(data)
+	clearOptionStats()
+
+	if not data then
+		renderUnavailable(ContentOptionStats, "OS_", "Data unavailable — try again")
+		return
+	end
+
+	if data.available == false then
+		renderUnavailable(ContentOptionStats, "OS_", "Not available for this asset")
+		return
+	end
+
+	local header = Instance.new("Frame")
+
+	header.Name = "OS_Header"
+	header.Size = UDim2.new(1, 0, 0, 22)
+	header.BackgroundTransparency = 1
+	header.LayoutOrder = 0
+	header.Parent = ContentOptionStats
+
+	makeLabel(header, {
+		name = "HeaderLabel",
+		text = string.format("Nearest Expiry: %s   ·   Strike: %.2f", formatValue(data.expiration, "date"), data.strike or 0),
+		sz = UDim2.new(1, 0, 1, 0),
+		color = TEXT_SECONDARY,
+		font = Enum.Font.SourceSansSemibold,
+		align = Enum.TextXAlignment.Left,
+	})
+
+	local columnsRow = Instance.new("Frame")
+
+	columnsRow.Name = "OS_Columns"
+	columnsRow.Size = UDim2.new(1, 0, 0, 20)
+	columnsRow.BackgroundTransparency = 1
+	columnsRow.LayoutOrder = 1
+	columnsRow.Parent = ContentOptionStats
+
+	makeLabel(columnsRow, {
+		name = "CallHeader",
+		text = "CALL",
+		sz = UDim2.new(0.35, 0, 1, 0),
+		pos = UDim2.fromScale(0.4, 0),
+		color = TEXT_SECONDARY,
+		font = Enum.Font.SourceSansSemibold,
+		align = Enum.TextXAlignment.Center,
+	})
+
+	makeLabel(columnsRow, {
+		name = "PutHeader",
+		text = "PUT",
+		sz = UDim2.new(0.35, 0, 1, 0),
+		pos = UDim2.fromScale(0.75, 0),
+		color = TEXT_SECONDARY,
+		font = Enum.Font.SourceSansSemibold,
+		align = Enum.TextXAlignment.Center,
+	})
+
+	for i, field in ipairs(OPTION_STATS_ROWS) do
+		local row = Instance.new("Frame")
+
+		row.Name = "OS_" .. field.key
+		row.Size = UDim2.new(1, 0, 0, 22)
+		row.BackgroundTransparency = 1
+		row.LayoutOrder = i + 1
+		row.Parent = ContentOptionStats
+
+		makeLabel(row, {
+			name = "Label",
+			text = field.label,
+			sz = UDim2.new(0.4, 0, 1, 0),
+			color = TEXT_SECONDARY,
+			align = Enum.TextXAlignment.Left,
+		})
+
+		makeLabel(row, {
+			name = "CallValue",
+			text = formatValue(data.call and data.call[field.key], field.format),
+			sz = UDim2.new(0.3, 0, 1, 0),
+			pos = UDim2.fromScale(0.4, 0),
+			color = TEXT_PRIMARY,
+			align = Enum.TextXAlignment.Center,
+		})
+
+		makeLabel(row, {
+			name = "PutValue",
+			text = formatValue(data.put and data.put[field.key], field.format),
+			sz = UDim2.new(0.3, 0, 1, 0),
+			pos = UDim2.fromScale(0.75, 0),
+			color = TEXT_PRIMARY,
+			align = Enum.TextXAlignment.Center,
+		})
+	end
+end
+
+local function fetchOptionStats()
+	local ticker = currentTicker
+	local data = GetOptionStatsEvent:InvokeServer(ticker)
+
+	if ticker ~= currentTicker then
+		return
+	end
+
+	currentOptionStatsData = data
+	renderOptionStats(data)
+end
+
+local function renderQuoteDetails(data)
+	renderFieldGrid(ContentQuoteDetails, QUOTE_FIELDS, data, "QF_")
+end
+
 -- Refresh Quotes
 local function updateQuoteField(key, value, format)
 	local row = ContentQuoteDetails:FindFirstChild("QF_" .. key)
@@ -296,6 +605,18 @@ end
 
 -- Tabs
 local function switchTab(tabName)
+	if tabName == "AnalystReports" and currentTicker ~= "" and not currentAnalystData then
+		fetchAnalystReport()
+	end
+
+	if tabName == "Fundamentals" and currentTicker ~= "" and not currentFundamentalsData then
+		fetchFundamentals()
+	end
+
+	if tabName == "OptionStats" and currentTicker ~= "" and not currentOptionStatsData then
+		fetchOptionStats()
+	end
+
 	if activeTabName == tabName then
 		return
 	end
@@ -325,25 +646,6 @@ local TICKER_COL_WIDTH = 90
 local ROW_HEIGHT_CHAIN = 28
 local ROW_HEIGHT_POS = 24
 local ROW_HEIGHT_NEWS = 44
-
-local function makeLabel(parent, props)
-	local lbl = Instance.new("TextLabel")
-
-	lbl.Name = props.name or "Label"
-	lbl.Text = props.text or ""
-	lbl.Size = props.sz or UDim2.new(1, 0, 1, 0)
-	lbl.Position = props.pos or UDim2.fromOffset(0, 0)
-	lbl.BackgroundTransparency = 1
-	lbl.Font = props.font or Enum.Font.SourceSans
-	lbl.TextSize = props.size or 13
-	lbl.TextColor3 = props.color or TEXT_PRIMARY
-	lbl.TextXAlignment = props.align or Enum.TextXAlignment.Left
-	lbl.TextTruncate = Enum.TextTruncate.AtEnd
-	lbl.ZIndex = props.zindex or 1
-	lbl.Parent = parent
-
-	return lbl
-end
 
 -- separator line
 local function makeSeparator(parent)
@@ -765,6 +1067,13 @@ local function loadTicker(rawTicker)
 
 	isFetchingData = true
 	currentTicker = ticker
+	currentAnalystData = nil
+	currentFundamentalsData = nil
+	currentOptionStatsData = nil
+
+	renderFieldGrid(ContentAnalystReports, ANALYST_FIELDS, nil, "AR_")
+	renderFieldGrid(ContentFundamentals, FUNDAMENTALS_FIELDS, nil, "FN_")
+	clearOptionStats()
 
 	setLoadingState(true)
 	clearOptionChain()
