@@ -14,6 +14,7 @@ local ChartRenderer = require(ReplicatedStorage.Modules.Multi.ChartRenderer)
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
 local RequestChartEvent = EventsFolder:WaitForChild("RequestChartEvent")
 local GetMarketDataEvent = EventsFolder:WaitForChild("GetMarketDataEvent")
+local PlayerOrderEvent = EventsFolder:WaitForChild("PlayerOrderEvent")
 
 -- UI Instances
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -48,6 +49,12 @@ local SecondsNumber = TimeContainer.SecondsBlock.Number
 local ChartsScreen = ScreenContainer:WaitForChild("ChartsScreen")
 local ActiveTraderPanel = ChartsScreen:WaitForChild("ActiveTraderPanel")
 local ActiveTraderTopBar = ActiveTraderPanel:WaitForChild("ActiveTraderTopBar")
+local ActiveTraderContentArea = ActiveTraderPanel:WaitForChild("ContentArea")
+local ActiveTraderTickerLabel = ActiveTraderContentArea:WaitForChild("TickerLabel")
+local ActiveTraderQuantityInput = ActiveTraderContentArea:WaitForChild("QuantityRow"):WaitForChild("QuantityInput")
+local ActiveTraderBuyButton = ActiveTraderContentArea:WaitForChild("BuyButton")
+local ActiveTraderSellButton = ActiveTraderContentArea:WaitForChild("SellButton")
+local ActiveTraderStatusLabel = ActiveTraderContentArea:WaitForChild("StatusLabel")
 local Sidebar = ChartsScreen:WaitForChild("Sidebar")
 local ToggleActiveTraderButton = Sidebar:WaitForChild("ToggleActiveTraderButton")
 local MainChart = ChartsScreen:WaitForChild("MainChart")
@@ -104,6 +111,7 @@ local rightOffset = 0 -- UI Offset for graph
 local lastMouseDragX
 local currentDisplayedTicker = ""
 local currentTimeframe = "H" -- Default Timeframe
+local activeTraderQuantity = 1
 local scrollDragStartX = 0
 local startRightOffset = 0 -- UI Offset for Scroll
 
@@ -264,6 +272,8 @@ local function updateAccountInfo()
 	AvailableFundsValue.Text = NumberModule.format(currentBalance)
 end
 
+local updateActiveTraderPrices
+
 -- Toggle for ActiveTrader window
 local function toggleActiveTrader()
 	isActiveTradeVisible = not isActiveTradeVisible
@@ -278,6 +288,65 @@ local function toggleActiveTrader()
 	else
 		ToggleActiveTraderButton.Text = "Show Active Trader"
 	end
+
+	if isActiveTradeVisible then
+		updateActiveTraderPrices()
+	end
+end
+
+-- Refreshes the Buy/Sell button price labels for the ticker currently
+-- loaded on the chart. Active Trader always trades that ticker - there is
+-- no separate ticker input on the panel itself.
+updateActiveTraderPrices = function()
+	if currentDisplayedTicker == "" then
+		return
+	end
+
+	local quote = GetMarketDataEvent:InvokeServer(currentDisplayedTicker)
+
+	if not quote then
+		return
+	end
+
+	if quote.ask then
+		ActiveTraderBuyButton.Text = string.format("Buy  %.2f", quote.ask)
+	end
+
+	if quote.bid then
+		ActiveTraderSellButton.Text = string.format("Sell  %.2f", quote.bid)
+	end
+end
+
+local function placeActiveTraderOrder(action)
+	if currentDisplayedTicker == "" then
+		ActiveTraderStatusLabel.TextColor3 = GRAY
+		ActiveTraderStatusLabel.Text = "Load a ticker on the chart first."
+
+		return
+	end
+
+	local isOpen = MarketHoursModule.getMarketStatus(os.time())
+
+	if not isOpen then
+		ActiveTraderStatusLabel.TextColor3 = GRAY
+		ActiveTraderStatusLabel.Text = "Market is closed."
+
+		return
+	end
+
+	local result = PlayerOrderEvent:InvokeServer(action, currentDisplayedTicker, activeTraderQuantity)
+
+	if not result or not result.success then
+		ActiveTraderStatusLabel.TextColor3 = RED
+		ActiveTraderStatusLabel.Text = (result and result.message) or "Order failed."
+
+		return
+	end
+
+	ActiveTraderStatusLabel.TextColor3 = GREEN
+	ActiveTraderStatusLabel.Text = result.message
+
+	updateActiveTraderPrices()
 end
 
 -- ScrollBar Logic
@@ -392,6 +461,34 @@ end
 MainTimeframeButton.MouseButton1Click:Connect(function()
 	isDropdownOpen = not isDropdownOpen
 	TimeDropdownList.Visible = isDropdownOpen
+end)
+
+-- Closes the timeframe dropdown on any click/tap outside it - previously it
+-- only closed via the toggle button or picking an option, so it stayed open
+-- (and silently ate the next click) if you clicked anywhere else, including
+-- the chart itself.
+UserInputService.InputBegan:Connect(function(input)
+	if not isDropdownOpen then
+		return
+	end
+
+	if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then
+		return
+	end
+
+	local dropdownPosition = TimeframeDropdown.AbsolutePosition
+	local dropdownSize = TimeframeDropdown.AbsoluteSize
+	local inputPosition = input.Position
+
+	local withinBounds = inputPosition.X >= dropdownPosition.X
+		and inputPosition.X <= dropdownPosition.X + dropdownSize.X
+		and inputPosition.Y >= dropdownPosition.Y
+		and inputPosition.Y <= dropdownPosition.Y + dropdownSize.Y
+
+	if not withinBounds then
+		isDropdownOpen = false
+		TimeDropdownList.Visible = false
+	end
 end)
 
 ActiveTraderTopBar.InputBegan:Connect(function(input)
@@ -579,7 +676,10 @@ TickerInput.FocusLost:Connect(function(enterPressed)
 			currentDisplayedTicker = targetTicker
 			rightOffset = 0
 			TickerInput.Text = targetTicker
+			ActiveTraderTickerLabel.Text = targetTicker
+			ActiveTraderStatusLabel.Text = ""
 			updateViewport()
+			updateActiveTraderPrices()
 		else
 			TickerInput.Text = " . . . "
 			ChartTickerLabel.Text = "Error"
@@ -592,6 +692,10 @@ TickerInput.FocusLost:Connect(function(enterPressed)
 		isFetchingData = false
 		return
 	end
+
+	-- Clicked/tabbed away without pressing Enter - discard whatever was
+	-- typed instead of leaving stale text sitting in the box forever.
+	TickerInput.Text = currentDisplayedTicker
 end)
 
 ScrollThumb.InputBegan:Connect(function(input)
@@ -660,6 +764,10 @@ task.spawn(function()
 
 				scheduleViewportUpdate()
 			end
+
+			if isActiveTradeVisible then
+				updateActiveTraderPrices()
+			end
 		end
 	end
 end)
@@ -708,6 +816,22 @@ Player:GetAttributeChangedSignal("NetWorth"):Connect(updateAccountInfo)
 
 ToggleActiveTraderButton.MouseButton1Click:Connect(toggleActiveTrader)
 
+ActiveTraderQuantityInput.FocusLost:Connect(function()
+	local parsed = math.floor(tonumber(ActiveTraderQuantityInput.Text) or 1)
+
+	activeTraderQuantity = math.max(1, parsed)
+	ActiveTraderQuantityInput.Text = tostring(activeTraderQuantity)
+end)
+
+ActiveTraderBuyButton.MouseButton1Click:Connect(function()
+	placeActiveTraderOrder("Buy")
+end)
+
+ActiveTraderSellButton.MouseButton1Click:Connect(function()
+	placeActiveTraderOrder("Sell")
+end)
+
 switchTab("Dashboard")
 updateGreeting()
 updateAccountInfo()
+ChartTickerLabel.Text = "—" -- otherwise this shows Studio's literal default "Label" until a ticker loads
