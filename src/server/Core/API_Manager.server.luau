@@ -50,9 +50,7 @@ RequestChartEvent.OnServerInvoke = function(player, ticker, timeframe, mode)
 	local data, err = MarketDataModule.getCandles(targetTicker, timeframe, mode)
 
 	if not data then
-		warn(
-			string.format("[API_Manager] Chart fetch failed for %s (%s): %s", targetTicker, timeframe, tostring(err))
-		)
+		warn(string.format("[API_Manager] Chart fetch failed for %s (%s): %s", targetTicker, timeframe, tostring(err)))
 
 		return nil
 	end
