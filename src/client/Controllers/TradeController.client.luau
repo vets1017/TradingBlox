@@ -23,6 +23,7 @@ local GetNewsFeedEvent = EventsFolder:WaitForChild("GetNewsFeedEvent")
 local PlayerOrderEvent = EventsFolder:WaitForChild("PlayerOrderEvent")
 local GetAnalystReportEvent = EventsFolder:WaitForChild("GetAnalystReportEvent")
 local GetFundamentalsEvent = EventsFolder:WaitForChild("GetFundamentalsEvent")
+local GetOptionStatsEvent = EventsFolder:WaitForChild("GetOptionStatsEvent")
 
 -- References
 local TerminalGui = PlayerGui:WaitForChild("TerminalGui")
@@ -50,6 +51,7 @@ local TabHeaderContainer = QuoteDetails:WaitForChild("TabHeaderContainer")
 local ContentQuoteDetails = TabContentContainer:WaitForChild("Content_QuoteDetails")
 local ContentAnalystReports = TabContentContainer:WaitForChild("Content_AnalystReports")
 local ContentFundamentals = TabContentContainer:WaitForChild("Content_Fundamentals")
+local ContentOptionStats = TabContentContainer:WaitForChild("Content_OptionStats")
 
 -- Contants
 local GREEN = Color3.fromRGB(8, 153, 129)
@@ -133,6 +135,15 @@ local FUNDAMENTALS_FIELDS = {
 	{ label = "Earnings Growth", key = "earningsGrowth", format = "percent" },
 }
 
+local OPTION_STATS_ROWS = {
+	{ label = "Bid", key = "bid", format = "price" },
+	{ label = "Ask", key = "ask", format = "price" },
+	{ label = "Last", key = "lastPrice", format = "price" },
+	{ label = "IV", key = "impliedVolatility", format = "percent" },
+	{ label = "Volume", key = "volume", format = "count" },
+	{ label = "Open Interest", key = "openInterest", format = "count" },
+}
+
 -- State
 local currentTicker = ""
 local currentPrice = 0
@@ -141,6 +152,7 @@ local currentQuoteData = nil
 local currentOptionData = nil
 local currentAnalystData = nil
 local currentFundamentalsData = nil
+local currentOptionStatsData = nil
 local isFetchingData = false
 local activeTabName = ""
 local chainExpanded = true
@@ -158,7 +170,7 @@ local TabContents = {
 	QuoteDetails = ContentQuoteDetails,
 	AnalystReports = ContentAnalystReports,
 	Fundamentals = ContentFundamentals,
-	-- OptionStats    = TabContentContainer:WaitForChild("Content_OptionStats"),
+	OptionStats = ContentOptionStats,
 }
 
 --
@@ -344,6 +356,29 @@ local function renderUnavailable(container, prefix, message)
 	lbl.Parent = row
 end
 
+-- Builds a single TextLabel from a props table. Moved up here (ahead of its
+-- original spot near the Option Chain row-builders) so the two-column Option
+-- Stats renderer below - and switchTab's lazy-fetch wiring further down - can
+-- call it; Luau locals aren't visible above their declaration.
+local function makeLabel(parent, props)
+	local lbl = Instance.new("TextLabel")
+
+	lbl.Name = props.name or "Label"
+	lbl.Text = props.text or ""
+	lbl.Size = props.sz or UDim2.new(1, 0, 1, 0)
+	lbl.Position = props.pos or UDim2.fromOffset(0, 0)
+	lbl.BackgroundTransparency = 1
+	lbl.Font = props.font or Enum.Font.SourceSans
+	lbl.TextSize = props.size or 13
+	lbl.TextColor3 = props.color or TEXT_PRIMARY
+	lbl.TextXAlignment = props.align or Enum.TextXAlignment.Left
+	lbl.TextTruncate = Enum.TextTruncate.AtEnd
+	lbl.ZIndex = props.zindex or 1
+	lbl.Parent = parent
+
+	return lbl
+end
+
 local function renderAnalystReport(data)
 	if data and data.available == false then
 		renderUnavailable(ContentAnalystReports, "AR_", "Not available for this asset")
@@ -372,6 +407,113 @@ local function fetchFundamentals()
 	local data = GetFundamentalsEvent:InvokeServer(currentTicker)
 	currentFundamentalsData = data
 	renderFundamentals(data)
+end
+
+-- Option Stats isn't a flat field list like the three tabs above it - the
+-- payload is inherently two-sided (call vs put) - so it gets its own
+-- clear/render pair instead of going through renderFieldGrid.
+local function clearOptionStats()
+	for _, child in pairs(ContentOptionStats:GetChildren()) do
+		if child:IsA("Frame") and string.match(child.Name, "^OS_") then
+			child:Destroy()
+		end
+	end
+end
+
+local function renderOptionStats(data)
+	clearOptionStats()
+
+	if not data or data.available == false then
+		renderUnavailable(ContentOptionStats, "OS_", "Not available for this asset")
+		return
+	end
+
+	local header = Instance.new("Frame")
+
+	header.Name = "OS_Header"
+	header.Size = UDim2.new(1, 0, 0, 22)
+	header.BackgroundTransparency = 1
+	header.LayoutOrder = 0
+	header.Parent = ContentOptionStats
+
+	makeLabel(header, {
+		name = "HeaderLabel",
+		text = string.format("Nearest Expiry: %s   ·   Strike: %.2f", tostring(data.expiration), data.strike or 0),
+		sz = UDim2.new(1, 0, 1, 0),
+		color = TEXT_SECONDARY,
+		font = Enum.Font.SourceSansSemibold,
+		align = Enum.TextXAlignment.Left,
+	})
+
+	local columnsRow = Instance.new("Frame")
+
+	columnsRow.Name = "OS_Columns"
+	columnsRow.Size = UDim2.new(1, 0, 0, 20)
+	columnsRow.BackgroundTransparency = 1
+	columnsRow.LayoutOrder = 1
+	columnsRow.Parent = ContentOptionStats
+
+	makeLabel(columnsRow, {
+		name = "CallHeader",
+		text = "CALL",
+		sz = UDim2.new(0.35, 0, 1, 0),
+		pos = UDim2.fromScale(0.4, 0),
+		color = TEXT_SECONDARY,
+		font = Enum.Font.SourceSansSemibold,
+		align = Enum.TextXAlignment.Center,
+	})
+
+	makeLabel(columnsRow, {
+		name = "PutHeader",
+		text = "PUT",
+		sz = UDim2.new(0.35, 0, 1, 0),
+		pos = UDim2.fromScale(0.75, 0),
+		color = TEXT_SECONDARY,
+		font = Enum.Font.SourceSansSemibold,
+		align = Enum.TextXAlignment.Center,
+	})
+
+	for i, field in ipairs(OPTION_STATS_ROWS) do
+		local row = Instance.new("Frame")
+
+		row.Name = "OS_" .. field.key
+		row.Size = UDim2.new(1, 0, 0, 22)
+		row.BackgroundTransparency = 1
+		row.LayoutOrder = i + 1
+		row.Parent = ContentOptionStats
+
+		makeLabel(row, {
+			name = "Label",
+			text = field.label,
+			sz = UDim2.new(0.4, 0, 1, 0),
+			color = TEXT_SECONDARY,
+			align = Enum.TextXAlignment.Left,
+		})
+
+		makeLabel(row, {
+			name = "CallValue",
+			text = formatValue(data.call and data.call[field.key], field.format),
+			sz = UDim2.new(0.3, 0, 1, 0),
+			pos = UDim2.fromScale(0.4, 0),
+			color = TEXT_PRIMARY,
+			align = Enum.TextXAlignment.Center,
+		})
+
+		makeLabel(row, {
+			name = "PutValue",
+			text = formatValue(data.put and data.put[field.key], field.format),
+			sz = UDim2.new(0.3, 0, 1, 0),
+			pos = UDim2.fromScale(0.75, 0),
+			color = TEXT_PRIMARY,
+			align = Enum.TextXAlignment.Center,
+		})
+	end
+end
+
+local function fetchOptionStats()
+	local data = GetOptionStatsEvent:InvokeServer(currentTicker)
+	currentOptionStatsData = data
+	renderOptionStats(data)
 end
 
 local function renderQuoteDetails(data)
@@ -425,6 +567,10 @@ local function switchTab(tabName)
 	if tabName == "Fundamentals" and currentTicker ~= "" and not currentFundamentalsData then
 		fetchFundamentals()
 	end
+
+	if tabName == "OptionStats" and currentTicker ~= "" and not currentOptionStatsData then
+		fetchOptionStats()
+	end
 end
 
 -- Row
@@ -432,25 +578,6 @@ local TICKER_COL_WIDTH = 90
 local ROW_HEIGHT_CHAIN = 28
 local ROW_HEIGHT_POS = 24
 local ROW_HEIGHT_NEWS = 44
-
-local function makeLabel(parent, props)
-	local lbl = Instance.new("TextLabel")
-
-	lbl.Name = props.name or "Label"
-	lbl.Text = props.text or ""
-	lbl.Size = props.sz or UDim2.new(1, 0, 1, 0)
-	lbl.Position = props.pos or UDim2.fromOffset(0, 0)
-	lbl.BackgroundTransparency = 1
-	lbl.Font = props.font or Enum.Font.SourceSans
-	lbl.TextSize = props.size or 13
-	lbl.TextColor3 = props.color or TEXT_PRIMARY
-	lbl.TextXAlignment = props.align or Enum.TextXAlignment.Left
-	lbl.TextTruncate = Enum.TextTruncate.AtEnd
-	lbl.ZIndex = props.zindex or 1
-	lbl.Parent = parent
-
-	return lbl
-end
 
 -- separator line
 local function makeSeparator(parent)
@@ -874,6 +1001,7 @@ local function loadTicker(rawTicker)
 	currentTicker = ticker
 	currentAnalystData = nil
 	currentFundamentalsData = nil
+	currentOptionStatsData = nil
 
 	setLoadingState(true)
 	clearOptionChain()
