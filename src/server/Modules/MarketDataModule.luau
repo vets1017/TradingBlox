@@ -1,10 +1,10 @@
 -- MarketDataModule.luau
 --
 -- Shared market-data access: ticker validation, candle fetching/caching, and
--- price/quote derivation on top of the candles endpoint (the only endpoint
--- the backend actually exposes). Used by API_Manager (chart/quote remotes)
--- and TradeSystem (trade pricing + positions) so neither duplicates the HTTP
--- fetch/cache logic.
+-- price/quote derivation on top of the backend's five endpoints (candles,
+-- quote-details, analyst, fundamentals, options). Used by API_Manager
+-- (chart/quote remotes) and TradeSystem (trade pricing + positions) so
+-- neither duplicates the HTTP fetch/cache logic.
 
 local HttpService = game:GetService("HttpService")
 
@@ -164,8 +164,9 @@ function MarketDataModule.getCurrentPrice(ticker)
 	return candles[#candles].Close
 end
 
--- Minimal quote shape: { ticker, price, prevClose }. No bid/ask/volume/etc. -
--- the backend has no route for those.
+-- Minimal quote shape: { ticker, price, prevClose }, derived purely from
+-- candles. Bid/ask/volume/etc. come from getQuoteDetails below instead, which
+-- hits the dedicated quote-details route.
 function MarketDataModule.getQuote(ticker)
 	local price = MarketDataModule.getCurrentPrice(ticker)
 

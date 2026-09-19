@@ -196,7 +196,12 @@ local function formatValue(value, formatType)
 		return NumberModule.formatShares(value)
 	elseif formatType == "compact" then
 		return NumberModule.formatCompact(value)
-	elseif formatType == "date" or formatType == "auto" then
+	elseif formatType == "date" then
+		local text = tostring(value)
+
+		-- Backend passes Yahoo Date objects through as ISO-8601; only the day matters here.
+		return string.match(text, "^%d%d%d%d%-%d%d%-%d%d") or text
+	elseif formatType == "auto" then
 		return tostring(value)
 	end
 
@@ -276,6 +281,24 @@ local function updateHeader(data, livePrice)
 	end
 end
 
+-- UIGridLayout has no `Enabled` property (confirmed live - Studio throws
+-- "Enabled is not a valid member of UIGridLayout"), so "toggling" it off/on
+-- means unparenting/reparenting the same instance instead. Cache the lookup
+-- once per container: FindFirstChildOfClass can't find it while detached, so
+-- a fresh lookup after renderUnavailable has run would silently return nil.
+local GridLayoutCache = {}
+
+local function getGridLayout(container)
+	local cached = GridLayoutCache[container]
+
+	if cached == nil then
+		cached = container:FindFirstChildOfClass("UIGridLayout") or false
+		GridLayoutCache[container] = cached
+	end
+
+	return cached or nil
+end
+
 -- Renders a flat label/value grid into `container`, clearing any previous
 -- rows tagged with `prefix` first. Shared by Quote Details, Analyst
 -- Reports, and Fundamentals - all three are flat field-list tabs.
@@ -284,6 +307,12 @@ local function renderFieldGrid(container, fields, data, prefix)
 		if child:IsA("Frame") and string.match(child.Name, "^" .. prefix) then
 			child:Destroy()
 		end
+	end
+
+	local gridLayout = getGridLayout(container)
+
+	if gridLayout then
+		gridLayout.Parent = container
 	end
 
 	if not data then
@@ -336,6 +365,12 @@ local function renderUnavailable(container, prefix, message)
 		end
 	end
 
+	local gridLayout = getGridLayout(container)
+
+	if gridLayout then
+		gridLayout.Parent = nil
+	end
+
 	local row = Instance.new("Frame")
 
 	row.Name = prefix .. "Unavailable"
@@ -380,7 +415,12 @@ local function makeLabel(parent, props)
 end
 
 local function renderAnalystReport(data)
-	if data and data.available == false then
+	if not data then
+		renderUnavailable(ContentAnalystReports, "AR_", "Data unavailable — try again")
+		return
+	end
+
+	if data.available == false then
 		renderUnavailable(ContentAnalystReports, "AR_", "Not available for this asset")
 		return
 	end
@@ -389,13 +429,24 @@ local function renderAnalystReport(data)
 end
 
 local function fetchAnalystReport()
-	local data = GetAnalystReportEvent:InvokeServer(currentTicker)
+	local ticker = currentTicker
+	local data = GetAnalystReportEvent:InvokeServer(ticker)
+
+	if ticker ~= currentTicker then
+		return
+	end
+
 	currentAnalystData = data
 	renderAnalystReport(data)
 end
 
 local function renderFundamentals(data)
-	if data and data.available == false then
+	if not data then
+		renderUnavailable(ContentFundamentals, "FN_", "Data unavailable — try again")
+		return
+	end
+
+	if data.available == false then
 		renderUnavailable(ContentFundamentals, "FN_", "Not available for this asset")
 		return
 	end
@@ -404,7 +455,13 @@ local function renderFundamentals(data)
 end
 
 local function fetchFundamentals()
-	local data = GetFundamentalsEvent:InvokeServer(currentTicker)
+	local ticker = currentTicker
+	local data = GetFundamentalsEvent:InvokeServer(ticker)
+
+	if ticker ~= currentTicker then
+		return
+	end
+
 	currentFundamentalsData = data
 	renderFundamentals(data)
 end
@@ -423,7 +480,12 @@ end
 local function renderOptionStats(data)
 	clearOptionStats()
 
-	if not data or data.available == false then
+	if not data then
+		renderUnavailable(ContentOptionStats, "OS_", "Data unavailable — try again")
+		return
+	end
+
+	if data.available == false then
 		renderUnavailable(ContentOptionStats, "OS_", "Not available for this asset")
 		return
 	end
@@ -438,7 +500,7 @@ local function renderOptionStats(data)
 
 	makeLabel(header, {
 		name = "HeaderLabel",
-		text = string.format("Nearest Expiry: %s   ·   Strike: %.2f", tostring(data.expiration), data.strike or 0),
+		text = string.format("Nearest Expiry: %s   ·   Strike: %.2f", formatValue(data.expiration, "date"), data.strike or 0),
 		sz = UDim2.new(1, 0, 1, 0),
 		color = TEXT_SECONDARY,
 		font = Enum.Font.SourceSansSemibold,
@@ -511,7 +573,13 @@ local function renderOptionStats(data)
 end
 
 local function fetchOptionStats()
-	local data = GetOptionStatsEvent:InvokeServer(currentTicker)
+	local ticker = currentTicker
+	local data = GetOptionStatsEvent:InvokeServer(ticker)
+
+	if ticker ~= currentTicker then
+		return
+	end
+
 	currentOptionStatsData = data
 	renderOptionStats(data)
 end
@@ -537,6 +605,18 @@ end
 
 -- Tabs
 local function switchTab(tabName)
+	if tabName == "AnalystReports" and currentTicker ~= "" and not currentAnalystData then
+		fetchAnalystReport()
+	end
+
+	if tabName == "Fundamentals" and currentTicker ~= "" and not currentFundamentalsData then
+		fetchFundamentals()
+	end
+
+	if tabName == "OptionStats" and currentTicker ~= "" and not currentOptionStatsData then
+		fetchOptionStats()
+	end
+
 	if activeTabName == tabName then
 		return
 	end
@@ -558,18 +638,6 @@ local function switchTab(tabName)
 
 	for name, frame in pairs(TabContents) do
 		frame.Visible = (name == tabName)
-	end
-
-	if tabName == "AnalystReports" and currentTicker ~= "" and not currentAnalystData then
-		fetchAnalystReport()
-	end
-
-	if tabName == "Fundamentals" and currentTicker ~= "" and not currentFundamentalsData then
-		fetchFundamentals()
-	end
-
-	if tabName == "OptionStats" and currentTicker ~= "" and not currentOptionStatsData then
-		fetchOptionStats()
 	end
 end
 
@@ -1002,6 +1070,10 @@ local function loadTicker(rawTicker)
 	currentAnalystData = nil
 	currentFundamentalsData = nil
 	currentOptionStatsData = nil
+
+	renderFieldGrid(ContentAnalystReports, ANALYST_FIELDS, nil, "AR_")
+	renderFieldGrid(ContentFundamentals, FUNDAMENTALS_FIELDS, nil, "FN_")
+	clearOptionStats()
 
 	setLoadingState(true)
 	clearOptionChain()

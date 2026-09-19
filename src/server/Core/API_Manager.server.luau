@@ -21,21 +21,35 @@ local PLAYER_COOLDOWN = 1
 local VALID_TIMEFRAMES = { ["1M"] = true, ["5M"] = true, ["30M"] = true, ["H"] = true, ["D"] = true }
 
 -- State
-local PlayerLastRequest = {} -- [UserId] = os.time() of last request
+local PlayerLastRequest = {} -- [UserId] = { [remoteName] = os.time() }
+
+-- Per-remote: switching tabs hits a different remote each time, so one tab's
+-- fetch must not throttle the next tab's first fetch.
+local function isThrottled(player, remoteName)
+	local now = os.time()
+	local perRemote = PlayerLastRequest[player.UserId]
+
+	if not perRemote then
+		perRemote = {}
+		PlayerLastRequest[player.UserId] = perRemote
+	end
+
+	if (now - (perRemote[remoteName] or 0)) < PLAYER_COOLDOWN then
+		return true
+	end
+
+	perRemote[remoteName] = now
+
+	return false
+end
 
 --
 
 -- RequestChartEvent
 RequestChartEvent.OnServerInvoke = function(player, ticker, timeframe, mode)
-	local userId = player.UserId
-	local now = os.time()
-	local lastRequest = PlayerLastRequest[userId] or 0
-
-	if (now - lastRequest) < PLAYER_COOLDOWN then
+	if isThrottled(player, "RequestChartEvent") then
 		return nil
 	end
-
-	PlayerLastRequest[userId] = now
 
 	if not MarketDataModule.isValidTicker(ticker) then
 		warn(string.format("[API_Manager] Invalid ticker from %s: %s", player.Name, tostring(ticker)))
@@ -64,7 +78,8 @@ RequestChartEvent.OnServerInvoke = function(player, ticker, timeframe, mode)
 end
 
 -- GetMarketDataEvent
--- Returns a minimal quote ({ ticker, price, prevClose }) for the given ticker.
+-- Returns a quote ({ ticker, price, prevClose }) for the given ticker, merged
+-- with quote-details fields (bid/ask, volume, market cap, etc.) when available.
 GetMarketDataEvent.OnServerInvoke = function(player, ticker)
 	if not ticker then
 		return nil
@@ -84,7 +99,11 @@ GetMarketDataEvent.OnServerInvoke = function(player, ticker)
 		return nil
 	end
 
-	local details = MarketDataModule.getQuoteDetails(ticker)
+	local details, detailsErr = MarketDataModule.getQuoteDetails(ticker)
+
+	if not details then
+		warn(string.format("[API_Manager] Quote details fetch failed for %s: %s", string.upper(ticker), tostring(detailsErr)))
+	end
 
 	if details then
 		for key, value in pairs(details) do
@@ -97,15 +116,9 @@ end
 
 -- GetAnalystReportEvent
 GetAnalystReportEvent.OnServerInvoke = function(player, ticker)
-	local userId = player.UserId
-	local now = os.time()
-	local lastRequest = PlayerLastRequest[userId] or 0
-
-	if (now - lastRequest) < PLAYER_COOLDOWN then
+	if isThrottled(player, "GetAnalystReportEvent") then
 		return nil
 	end
-
-	PlayerLastRequest[userId] = now
 
 	if not MarketDataModule.isValidTicker(ticker) then
 		warn(string.format("[API_Manager] Invalid ticker from %s: %s", player.Name, tostring(ticker)))
@@ -124,15 +137,9 @@ end
 
 -- GetFundamentalsEvent
 GetFundamentalsEvent.OnServerInvoke = function(player, ticker)
-	local userId = player.UserId
-	local now = os.time()
-	local lastRequest = PlayerLastRequest[userId] or 0
-
-	if (now - lastRequest) < PLAYER_COOLDOWN then
+	if isThrottled(player, "GetFundamentalsEvent") then
 		return nil
 	end
-
-	PlayerLastRequest[userId] = now
 
 	if not MarketDataModule.isValidTicker(ticker) then
 		warn(string.format("[API_Manager] Invalid ticker from %s: %s", player.Name, tostring(ticker)))
@@ -151,15 +158,9 @@ end
 
 -- GetOptionStatsEvent
 GetOptionStatsEvent.OnServerInvoke = function(player, ticker)
-	local userId = player.UserId
-	local now = os.time()
-	local lastRequest = PlayerLastRequest[userId] or 0
-
-	if (now - lastRequest) < PLAYER_COOLDOWN then
+	if isThrottled(player, "GetOptionStatsEvent") then
 		return nil
 	end
-
-	PlayerLastRequest[userId] = now
 
 	if not MarketDataModule.isValidTicker(ticker) then
 		warn(string.format("[API_Manager] Invalid ticker from %s: %s", player.Name, tostring(ticker)))
