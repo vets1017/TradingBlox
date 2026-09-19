@@ -73,6 +73,24 @@ local ActiveTraderSellPresets = {
 }
 local Sidebar = ChartsScreen:WaitForChild("Sidebar")
 local ToggleActiveTraderButton = Sidebar:WaitForChild("ToggleActiveTraderButton")
+local ToggleSymbolInfoButton = Sidebar:WaitForChild("ToggleSymbolInfoButton")
+local SymbolInfoPanel = ChartsScreen:WaitForChild("SymbolInfoPanel")
+local SymbolInfoTopBar = SymbolInfoPanel:WaitForChild("SymbolInfoTopBar")
+local SymbolInfoTickerLabel = SymbolInfoTopBar:WaitForChild("TickerNameLabel")
+local SymbolInfoContentArea = SymbolInfoPanel:WaitForChild("ContentArea")
+
+local SymbolInfoFields = {
+	MarketCap = SymbolInfoContentArea:WaitForChild("MarketCapRow"):WaitForChild("Value"),
+	PE = SymbolInfoContentArea:WaitForChild("PERow"):WaitForChild("Value"),
+	EPS = SymbolInfoContentArea:WaitForChild("EPSRow"):WaitForChild("Value"),
+	DayRange = SymbolInfoContentArea:WaitForChild("DayRangeRow"):WaitForChild("Value"),
+	FiftyTwoWeekRange = SymbolInfoContentArea:WaitForChild("FiftyTwoWeekRangeRow"):WaitForChild("Value"),
+	Volume = SymbolInfoContentArea:WaitForChild("VolumeRow"):WaitForChild("Value"),
+	AvgVolume = SymbolInfoContentArea:WaitForChild("AvgVolumeRow"):WaitForChild("Value"),
+	Beta = SymbolInfoContentArea:WaitForChild("BetaRow"):WaitForChild("Value"),
+	DividendYield = SymbolInfoContentArea:WaitForChild("DividendYieldRow"):WaitForChild("Value"),
+}
+
 local MainChart = ChartsScreen:WaitForChild("MainChart")
 local BottomAxis = MainChart:WaitForChild("BottomAxis")
 local ChartCanvas = MainChart:WaitForChild("ChartCanvas")
@@ -122,6 +140,7 @@ local dragging = false
 local dragInput = nil
 local dragStart = nil
 local startPosition = nil
+local draggedPanel = nil
 
 -- Variables
 local currentMaxPrice
@@ -140,6 +159,7 @@ local startRightOffset = 0 -- UI Offset for Scroll
 local isFetchingData = false
 local isHoveringChart = false
 local isActiveTradeVisible = false
+local isSymbolInfoVisible = false
 local isCrosshairActive = true
 local isDropdownOpen = false
 local isIndicatorsDropdownOpen = false
@@ -340,14 +360,19 @@ local function updateAccountInfo()
 	AvailableFundsValue.Text = NumberModule.format(currentBalance)
 end
 
-local updateActiveTraderPrices
+local updateSymbolData
 local updateActiveTraderPosition
+local toggleSymbolInfo
 
 local ACTIVE_TRADER_DISABLED_COLOR = Color3.fromRGB(90, 95, 105)
 
 -- Toggle for ActiveTrader window
 local function toggleActiveTrader()
 	isActiveTradeVisible = not isActiveTradeVisible
+
+	if isActiveTradeVisible and isSymbolInfoVisible then
+		toggleSymbolInfo()
+	end
 
 	local targetPosition = isActiveTradeVisible and VISIBLE_POSITION or HIDDEN_POSITION
 
@@ -361,8 +386,33 @@ local function toggleActiveTrader()
 	end
 
 	if isActiveTradeVisible then
-		updateActiveTraderPrices()
+		updateSymbolData()
 		updateActiveTraderPosition()
+	end
+end
+
+-- Toggle for the Symbol Info flyout. Mutually exclusive with Active Trader -
+-- both panels share the same anchored screen slot and would overlap.
+toggleSymbolInfo = function()
+	isSymbolInfoVisible = not isSymbolInfoVisible
+
+	if isSymbolInfoVisible and isActiveTradeVisible then
+		toggleActiveTrader()
+	end
+
+	local targetPosition = isSymbolInfoVisible and VISIBLE_POSITION or HIDDEN_POSITION
+
+	local slideTween = TweenService:Create(SymbolInfoPanel, SLIDE_EASING, { Position = targetPosition })
+	slideTween:Play()
+
+	if isSymbolInfoVisible then
+		ToggleSymbolInfoButton.Text = "Hide Symbol Info"
+	else
+		ToggleSymbolInfoButton.Text = "Symbol Info"
+	end
+
+	if isSymbolInfoVisible then
+		updateSymbolData()
 	end
 end
 
@@ -385,22 +435,44 @@ local function updateSellPresetsEnabled()
 	end
 end
 
--- Refreshes the live ask price used to size Buy presets ($ -> shares) for
--- the ticker currently loaded on the chart. Active Trader always trades
--- that ticker - there is no separate ticker input on the panel itself.
-updateActiveTraderPrices = function()
+-- Refreshes live data for the ticker currently loaded on the chart: the
+-- Active Trader ask price (Active Trader always trades that ticker - there
+-- is no separate ticker input on the panel itself) and the Symbol Info
+-- fields. One shared InvokeServer call feeds both panels.
+updateSymbolData = function()
 	if currentDisplayedTicker == "" then
 		return
 	end
 
 	local quote = GetMarketDataEvent:InvokeServer(currentDisplayedTicker)
 
-	if not quote or not quote.ask then
+	if not quote then
 		return
 	end
 
-	activeTraderAsk = quote.ask
-	ActiveTraderAskPriceLabel.Text = string.format("Ask %.2f", quote.ask)
+	if quote.ask then
+		activeTraderAsk = quote.ask
+		ActiveTraderAskPriceLabel.Text = string.format("Ask %.2f", quote.ask)
+	end
+
+	SymbolInfoTickerLabel.Text = currentDisplayedTicker
+
+	SymbolInfoFields.MarketCap.Text = quote.marketCap and NumberModule.formatCompact(quote.marketCap) or "—"
+	SymbolInfoFields.PE.Text = quote.trailingPE and string.format("%.2f", quote.trailingPE) or "—"
+	SymbolInfoFields.EPS.Text = quote.eps and string.format("%.2f", quote.eps) or "—"
+
+	SymbolInfoFields.DayRange.Text = (quote.dayLow and quote.dayHigh)
+			and string.format("%.2f - %.2f", quote.dayLow, quote.dayHigh)
+		or "—"
+
+	SymbolInfoFields.FiftyTwoWeekRange.Text = (quote.fiftyTwoWeekLow and quote.fiftyTwoWeekHigh)
+			and string.format("%.2f - %.2f", quote.fiftyTwoWeekLow, quote.fiftyTwoWeekHigh)
+		or "—"
+
+	SymbolInfoFields.Volume.Text = quote.volume and NumberModule.formatShares(quote.volume) or "—"
+	SymbolInfoFields.AvgVolume.Text = quote.avgVolume and NumberModule.formatShares(quote.avgVolume) or "—"
+	SymbolInfoFields.Beta.Text = quote.beta and string.format("%.2f", quote.beta) or "—"
+	SymbolInfoFields.DividendYield.Text = quote.dividendYield and string.format("%.2f%%", quote.dividendYield) or "—"
 end
 
 -- Refreshes the held share count for the current ticker, which Sell
@@ -465,7 +537,7 @@ local function placeActiveTraderBuy(dollarAmount)
 	ActiveTraderStatusLabel.TextColor3 = GREEN
 	ActiveTraderStatusLabel.Text = result.message
 
-	updateActiveTraderPrices()
+	updateSymbolData()
 	updateActiveTraderPosition()
 end
 
@@ -499,7 +571,7 @@ local function placeActiveTraderSell(fraction)
 	ActiveTraderStatusLabel.TextColor3 = GREEN
 	ActiveTraderStatusLabel.Text = result.message
 
-	updateActiveTraderPrices()
+	updateSymbolData()
 	updateActiveTraderPosition()
 end
 
@@ -694,6 +766,7 @@ ActiveTraderTopBar.InputBegan:Connect(function(input)
 		dragging = true
 		dragStart = input.Position
 		startPosition = ActiveTraderPanel.Position
+		draggedPanel = ActiveTraderPanel
 	end
 end)
 
@@ -703,11 +776,30 @@ ActiveTraderTopBar.InputChanged:Connect(function(input)
 	end
 end)
 
+SymbolInfoTopBar.InputBegan:Connect(function(input)
+	if not isSymbolInfoVisible then
+		return
+	end
+
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		dragging = true
+		dragStart = input.Position
+		startPosition = SymbolInfoPanel.Position
+		draggedPanel = SymbolInfoPanel
+	end
+end)
+
+SymbolInfoTopBar.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+		dragInput = input
+	end
+end)
+
 UserInputService.InputChanged:Connect(function(input)
-	if dragging and input == dragInput then
+	if dragging and input == dragInput and draggedPanel then
 		local delta = input.Position - dragStart
 
-		ActiveTraderPanel.Position = UDim2.new(
+		draggedPanel.Position = UDim2.new(
 			startPosition.X.Scale,
 			startPosition.X.Offset + delta.X,
 			startPosition.Y.Scale,
@@ -873,7 +965,7 @@ TickerInput.FocusLost:Connect(function(enterPressed)
 			ActiveTraderTickerLabel.Text = targetTicker
 			ActiveTraderStatusLabel.Text = ""
 			updateViewport()
-			updateActiveTraderPrices()
+			updateSymbolData()
 			updateActiveTraderPosition()
 		else
 			TickerInput.Text = " . . . "
@@ -961,8 +1053,10 @@ task.spawn(function()
 			end
 
 			if isActiveTradeVisible then
-				updateActiveTraderPrices()
+				updateSymbolData()
 				updateActiveTraderPosition()
+			elseif isSymbolInfoVisible then
+				updateSymbolData()
 			end
 		end
 	end
@@ -1011,6 +1105,7 @@ Player:GetAttributeChangedSignal("Balance"):Connect(updateAccountInfo)
 Player:GetAttributeChangedSignal("NetWorth"):Connect(updateAccountInfo)
 
 ToggleActiveTraderButton.MouseButton1Click:Connect(toggleActiveTrader)
+ToggleSymbolInfoButton.MouseButton1Click:Connect(toggleSymbolInfo)
 
 for _, preset in ipairs(ActiveTraderBuyPresets) do
 	preset.button.MouseButton1Click:Connect(function()
