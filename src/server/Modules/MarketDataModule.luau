@@ -83,6 +83,79 @@ local function fetchJSON(url)
 	return decoded, nil
 end
 
+-- Thin pre/post-market liquidity occasionally makes the backend emit a
+-- garbage candle. Left in, it blows out a renderer's price-scale range
+-- (computed as the global min/max across all candles) and shows up as a
+-- full-height spike in both ChartRenderer and the mini chart - confirmed
+-- live against AAPL 5M data: a single candle (Close 327.58) landed ~2.4%
+-- below its neighbors (~335.55) and reverted on the very next candle. That's
+-- too small a deviation for a flat percent-vs-previous-close threshold to
+-- catch without also rejecting real intraday moves, so this instead flags a
+-- candle whose Close jumps away from BOTH neighbors while those neighbors
+-- closely match each other - the signature of one bad tick, since a real
+-- price move persists into the following candle instead of snapping back.
+local function isInternallyValid(candle)
+	local open, high, low, close = candle.Open, candle.High, candle.Low, candle.Close
+
+	if type(open) ~= "number" or type(high) ~= "number" or type(low) ~= "number" or type(close) ~= "number" then
+		return false
+	end
+
+	if open <= 0 or high <= 0 or low <= 0 or close <= 0 then
+		return false
+	end
+
+	if high < low or high < open or high < close or low > open or low > close then
+		return false
+	end
+
+	return true
+end
+
+-- Isolated-spike check is only meaningful intraday. A daily candle can
+-- legitimately jump away from the prior day and give it back the next (a
+-- real news-driven round trip), so it's exempted rather than misflagged.
+local SPIKE_DEVIATION_THRESHOLD = 0.015 -- vs. each immediate neighbor
+local NEIGHBOR_AGREEMENT_THRESHOLD = 0.005 -- how close neighbors must be to trust them as the real level
+
+local function isIsolatedSpike(prevClose, close, nextClose)
+	local prevDeviation = math.abs(close - prevClose) / prevClose
+	local nextDeviation = math.abs(close - nextClose) / nextClose
+	local neighborAgreement = math.abs(prevClose - nextClose) / prevClose
+
+	return prevDeviation > SPIKE_DEVIATION_THRESHOLD
+		and nextDeviation > SPIKE_DEVIATION_THRESHOLD
+		and neighborAgreement < NEIGHBOR_AGREEMENT_THRESHOLD
+end
+
+local function sanitizeCandles(candles, timeframe)
+	local valid = {}
+
+	for _, candle in ipairs(candles) do
+		if isInternallyValid(candle) then
+			table.insert(valid, candle)
+		end
+	end
+
+	if timeframe == "D" then
+		return valid
+	end
+
+	local cleaned = {}
+
+	for index, candle in ipairs(valid) do
+		local prevCandle = valid[index - 1]
+		local nextCandle = valid[index + 1]
+		local isSpike = prevCandle and nextCandle and isIsolatedSpike(prevCandle.Close, candle.Close, nextCandle.Close)
+
+		if not isSpike then
+			table.insert(cleaned, candle)
+		end
+	end
+
+	return cleaned
+end
+
 -- Generic cache-or-fetch: returns cached data if still within `ttl` seconds,
 -- otherwise calls fetchFn() and stores a fresh copy on success.
 local function cachedFetch(cache, key, ttl, fetchFn)
@@ -143,6 +216,8 @@ function MarketDataModule.getCandles(ticker, timeframe, mode)
 	if data.error then
 		return nil, tostring(data.error)
 	end
+
+	data = sanitizeCandles(data, timeframe)
 
 	if not isLiveRequest then
 		ChartCache[cacheKey] = { data = data, lastUpdated = now }
