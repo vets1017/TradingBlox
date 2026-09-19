@@ -85,41 +85,47 @@ end
 
 -- GetPositionsEvent
 -- Builds the player's current holdings, priced against live market data.
-GetPositionsEvent.OnServerInvoke = function(player)
+-- With a ticker, filters to just that ticker's position (the Trade screen's
+-- use case - one active symbol at a time); without one, returns every open
+-- position (for a future all-holdings view, e.g. a Portfolio tab).
+GetPositionsEvent.OnServerInvoke = function(player, ticker)
 	local playerData = _G.PlayerData[player.UserId]
 
 	if not playerData or not playerData.Portfolio or not playerData.Portfolio.Shares then
 		return {}
 	end
 
+	local targetTicker = ticker and string.upper(ticker) or nil
 	local positions = {}
 
-	for ticker, quantity in pairs(playerData.Portfolio.Shares) do
-		local quote = MarketDataModule.getQuote(ticker)
-		local avgCost = playerData.Portfolio.AvgCost and playerData.Portfolio.AvgCost[ticker]
+	for posTicker, quantity in pairs(playerData.Portfolio.Shares) do
+		if not targetTicker or posTicker == targetTicker then
+			local quote = MarketDataModule.getQuote(posTicker)
+			local avgCost = playerData.Portfolio.AvgCost and playerData.Portfolio.AvgCost[posTicker]
 
-		local mark = quote and quote.price
-		local markChange = (mark and quote.prevClose) and (mark - quote.prevClose) or nil
-		local cost = avgCost and (avgCost * quantity) or nil
-		local netLiq = mark and (mark * quantity) or nil
-		local plOpen = (netLiq and cost) and (netLiq - cost) or nil
-		local plOpenPct = (plOpen and cost and cost ~= 0) and (plOpen / cost * 100) or nil
-		local plDay = markChange and (markChange * quantity) or nil
+			local mark = quote and quote.price
+			local markChange = (mark and quote.prevClose) and (mark - quote.prevClose) or nil
+			local cost = avgCost and (avgCost * quantity) or nil
+			local netLiq = mark and (mark * quantity) or nil
+			local plOpen = (netLiq and cost) and (netLiq - cost) or nil
+			local plOpenPct = (plOpen and cost and cost ~= 0) and (plOpen / cost * 100) or nil
+			local plDay = markChange and (markChange * quantity) or nil
 
-		table.insert(positions, {
-			ticker = ticker,
-			quantity = quantity,
-			mark = mark,
-			markChange = markChange,
-			plDay = plDay,
-			plOpen = plOpen,
-			netLiq = netLiq,
-			tradePrice = avgCost,
-			cost = cost,
-			delta = nil,
-			theta = nil,
-			plOpenPct = plOpenPct,
-		})
+			table.insert(positions, {
+				ticker = posTicker,
+				quantity = quantity,
+				mark = mark,
+				markChange = markChange,
+				plDay = plDay,
+				plOpen = plOpen,
+				netLiq = netLiq,
+				tradePrice = avgCost,
+				cost = cost,
+				delta = nil,
+				theta = nil,
+				plOpenPct = plOpenPct,
+			})
+		end
 	end
 
 	return positions

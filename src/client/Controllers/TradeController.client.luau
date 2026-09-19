@@ -947,9 +947,14 @@ local function renderPositions(positions)
 	end
 end
 
--- Fetches the player's current holdings and re-renders the Positions table.
+-- Fetches the player's holdings in the current ticker and re-renders the
+-- Positions table (Trade screen shows one active symbol at a time).
 local function refreshPositions()
-	local positions = GetPositionsEvent:InvokeServer()
+	if currentTicker == "" then
+		return
+	end
+
+	local positions = GetPositionsEvent:InvokeServer(currentTicker)
 
 	if positions then
 		renderPositions(positions)
@@ -979,6 +984,21 @@ local function renderNewsFeed(newsItems)
 end
 
 -- Mini Chart
+local MINI_CHART_GRADIENT_START = Color3.fromRGB(224, 170, 255) -- pale violet (older)
+local MINI_CHART_GRADIENT_END = Color3.fromRGB(124, 58, 237) -- vivid purple (most recent)
+
+local function lerpColor(fromColor, toColor, t)
+	return Color3.new(
+		fromColor.R + (toColor.R - fromColor.R) * t,
+		fromColor.G + (toColor.G - fromColor.G) * t,
+		fromColor.B + (toColor.B - fromColor.B) * t
+	)
+end
+
+-- Draws the line as rotated 2px-thick segments between consecutive points
+-- (Roblox has no native polyline) so it reads as one continuous line rather
+-- than a series of disconnected height jumps, with a purple gradient running
+-- along it from oldest (pale) to most recent (vivid).
 local function renderMiniChart(chartData)
 	MiniChart:ClearAllChildren()
 
@@ -1005,11 +1025,10 @@ local function renderMiniChart(chartData)
 		range = 1
 	end
 
-	local firstClose = chartData[1].Close
-	local lastClose = chartData[#chartData].Close
-	local lineColor = lastClose >= firstClose and GREEN or RED
-
 	local count = #chartData
+	local absoluteSize = MiniChart.AbsoluteSize
+	local width = math.max(absoluteSize.X, 1)
+	local height = math.max(absoluteSize.Y, 1)
 
 	for i = 1, count - 1 do
 		local x1 = (i - 1) / (count - 1)
@@ -1017,16 +1036,30 @@ local function renderMiniChart(chartData)
 		local y1 = 1 - (chartData[i].Close - low) / range
 		local y2 = 1 - (chartData[i + 1].Close - low) / range
 
+		local dx = (x2 - x1) * width
+		local dy = (y2 - y1) * height
+		local length = math.sqrt(dx * dx + dy * dy)
+		local angle = math.deg(math.atan2(dy, dx))
+
 		local seg = Instance.new("Frame")
 
 		seg.Name = "Seg_" .. i
-		seg.BackgroundColor3 = lineColor
+		seg.BackgroundColor3 = Color3.new(1, 1, 1)
 		seg.BorderSizePixel = 0
 		seg.ZIndex = 2
-		seg.AnchorPoint = Vector2.new(0, 0.5)
-		seg.Size = UDim2.new((x2 - x1), 0, 0, 2)
-		seg.Position = UDim2.fromScale(x1, (y1 + y2) / 2)
+		seg.AnchorPoint = Vector2.new(0.5, 0.5)
+		seg.Size = UDim2.new(0, length, 0, 2)
+		seg.Rotation = angle
+		seg.Position = UDim2.fromScale((x1 + x2) / 2, (y1 + y2) / 2)
 		seg.Parent = MiniChart
+
+		local gradient = Instance.new("UIGradient")
+
+		gradient.Color = ColorSequence.new(
+			lerpColor(MINI_CHART_GRADIENT_START, MINI_CHART_GRADIENT_END, x1),
+			lerpColor(MINI_CHART_GRADIENT_START, MINI_CHART_GRADIENT_END, x2)
+		)
+		gradient.Parent = seg
 	end
 end
 
