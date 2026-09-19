@@ -10,6 +10,8 @@ local EVENTS = {
 	"GetAnalystReportEvent",
 	"GetFundamentalsEvent",
 	"GetOptionStatsEvent",
+	"GetWatchlistEvent",
+	"ToggleWatchlistEvent",
 }
 
 local Event = {}

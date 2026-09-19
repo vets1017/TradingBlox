@@ -16,6 +16,8 @@ local RequestChartEvent = EventsFolder:WaitForChild("RequestChartEvent")
 local GetMarketDataEvent = EventsFolder:WaitForChild("GetMarketDataEvent")
 local PlayerOrderEvent = EventsFolder:WaitForChild("PlayerOrderEvent")
 local GetPositionsEvent = EventsFolder:WaitForChild("GetPositionsEvent")
+local GetWatchlistEvent = EventsFolder:WaitForChild("GetWatchlistEvent")
+local ToggleWatchlistEvent = EventsFolder:WaitForChild("ToggleWatchlistEvent")
 
 -- UI Instances
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -91,6 +93,16 @@ local SymbolInfoFields = {
 	DividendYield = SymbolInfoContentArea:WaitForChild("DividendYieldRow"):WaitForChild("Value"),
 }
 
+local ToggleWatchlistButton = Sidebar:WaitForChild("ToggleWatchlistButton")
+local WatchlistPanel = ChartsScreen:WaitForChild("WatchlistPanel")
+local WatchlistTopBar = WatchlistPanel:WaitForChild("WatchlistTopBar")
+local AddTickerRow = WatchlistPanel:WaitForChild("AddTickerRow")
+local AddTickerInput = AddTickerRow:WaitForChild("AddTickerInput")
+local AddTickerButton = AddTickerRow:WaitForChild("AddTickerButton")
+local WatchlistListContainer = WatchlistPanel:WaitForChild("ListContainer")
+local WatchlistEmptyLabel = WatchlistListContainer:WaitForChild("EmptyLabel")
+local WatchlistRowTemplate = WatchlistListContainer:WaitForChild("RowTemplate")
+
 local MainChart = ChartsScreen:WaitForChild("MainChart")
 local BottomAxis = MainChart:WaitForChild("BottomAxis")
 local ChartCanvas = MainChart:WaitForChild("ChartCanvas")
@@ -160,6 +172,7 @@ local isFetchingData = false
 local isHoveringChart = false
 local isActiveTradeVisible = false
 local isSymbolInfoVisible = false
+local isWatchlistVisible = false
 local isCrosshairActive = true
 local isDropdownOpen = false
 local isIndicatorsDropdownOpen = false
@@ -362,16 +375,25 @@ end
 
 local updateSymbolData
 local updateActiveTraderPosition
+local toggleActiveTrader
 local toggleSymbolInfo
+local toggleWatchlist
+local refreshWatchlist
+local loadTicker
 
 local ACTIVE_TRADER_DISABLED_COLOR = Color3.fromRGB(90, 95, 105)
 
--- Toggle for ActiveTrader window
-local function toggleActiveTrader()
+-- Toggle for ActiveTrader window. Mutually exclusive with Symbol Info and
+-- Watchlist - all three flyouts share the same anchored screen slot.
+toggleActiveTrader = function()
 	isActiveTradeVisible = not isActiveTradeVisible
 
 	if isActiveTradeVisible and isSymbolInfoVisible then
 		toggleSymbolInfo()
+	end
+
+	if isActiveTradeVisible and isWatchlistVisible then
+		toggleWatchlist()
 	end
 
 	local targetPosition = isActiveTradeVisible and VISIBLE_POSITION or HIDDEN_POSITION
@@ -391,13 +413,17 @@ local function toggleActiveTrader()
 	end
 end
 
--- Toggle for the Symbol Info flyout. Mutually exclusive with Active Trader -
--- both panels share the same anchored screen slot and would overlap.
+-- Toggle for the Symbol Info flyout. Mutually exclusive with Active Trader
+-- and Watchlist - all three flyouts share the same anchored screen slot.
 toggleSymbolInfo = function()
 	isSymbolInfoVisible = not isSymbolInfoVisible
 
 	if isSymbolInfoVisible and isActiveTradeVisible then
 		toggleActiveTrader()
+	end
+
+	if isSymbolInfoVisible and isWatchlistVisible then
+		toggleWatchlist()
 	end
 
 	local targetPosition = isSymbolInfoVisible and VISIBLE_POSITION or HIDDEN_POSITION
@@ -413,6 +439,88 @@ toggleSymbolInfo = function()
 
 	if isSymbolInfoVisible then
 		updateSymbolData()
+	end
+end
+
+-- Toggle for the Watchlist flyout. Mutually exclusive with Active Trader
+-- and Symbol Info - all three flyouts share the same anchored screen slot.
+toggleWatchlist = function()
+	isWatchlistVisible = not isWatchlistVisible
+
+	if isWatchlistVisible and isActiveTradeVisible then
+		toggleActiveTrader()
+	end
+
+	if isWatchlistVisible and isSymbolInfoVisible then
+		toggleSymbolInfo()
+	end
+
+	local targetPosition = isWatchlistVisible and VISIBLE_POSITION or HIDDEN_POSITION
+
+	local slideTween = TweenService:Create(WatchlistPanel, SLIDE_EASING, { Position = targetPosition })
+	slideTween:Play()
+
+	if isWatchlistVisible then
+		ToggleWatchlistButton.Text = "Hide Watchlist"
+	else
+		ToggleWatchlistButton.Text = "Watchlist"
+	end
+
+	if isWatchlistVisible then
+		refreshWatchlist()
+	end
+end
+
+local watchlistRowInstances = {}
+
+-- Rebuilds the Watchlist row list from a fresh GetWatchlistEvent result:
+-- clones/prices/wires rows for each ticker, clears stale ones, and toggles
+-- the empty-state label.
+refreshWatchlist = function()
+	local rows = GetWatchlistEvent:InvokeServer()
+
+	for _, row in ipairs(watchlistRowInstances) do
+		row:Destroy()
+	end
+	table.clear(watchlistRowInstances)
+
+	WatchlistEmptyLabel.Visible = #rows == 0
+
+	for _, entry in ipairs(rows) do
+		local row = WatchlistRowTemplate:Clone()
+		row.Name = "Row_" .. entry.ticker
+		row.Visible = true
+		row.LayoutOrder = 1
+		row.Parent = WatchlistListContainer
+
+		local rowButton = row:WaitForChild("RowButton")
+		local tickerLabel = rowButton:WaitForChild("TickerLabel")
+		local priceLabel = rowButton:WaitForChild("PriceLabel")
+		local changeLabel = rowButton:WaitForChild("ChangeLabel")
+		local removeButton = row:WaitForChild("RemoveButton")
+
+		tickerLabel.Text = entry.ticker
+		priceLabel.Text = entry.price and string.format("%.2f", entry.price) or "—"
+
+		if entry.change and entry.changePct then
+			local sign = entry.change >= 0 and "+" or ""
+			changeLabel.Text = string.format("%s%.2f (%s%.2f%%)", sign, entry.change, sign, entry.changePct)
+			changeLabel.TextColor3 = entry.change >= 0 and GREEN or RED
+		else
+			changeLabel.Text = "—"
+			changeLabel.TextColor3 = GRAY
+		end
+
+		rowButton.MouseButton1Click:Connect(function()
+			loadTicker(entry.ticker)
+		end)
+
+		removeButton.MouseButton1Click:Connect(function()
+			ToggleWatchlistEvent:InvokeServer(entry.ticker)
+			refreshWatchlist()
+		end)
+
+		table.insert(watchlistRowInstances, row)
 	end
 end
 
@@ -632,6 +740,49 @@ local function scheduleViewportUpdate()
 	end)
 end
 
+-- Loads a ticker onto the chart. Shared by the ticker input (Enter) and
+-- Watchlist row clicks, so both paths go through the same fetch/render/error
+-- handling instead of duplicating it.
+loadTicker = function(ticker)
+	if isFetchingData then
+		return
+	end
+
+	local targetTicker = string.gsub(string.upper(ticker or ""), "%s+", "")
+
+	if targetTicker == "" then
+		TickerInput.Text = currentDisplayedTicker
+		return
+	end
+
+	isFetchingData = true
+
+	TickerInput.Text = " . . . "
+	ChartTickerLabel.Text = "Loading"
+
+	local chartData = RequestChartEvent:InvokeServer(targetTicker, currentTimeframe)
+
+	if chartData and #chartData > 0 then
+		masterChartData = chartData
+		currentDisplayedTicker = targetTicker
+		rightOffset = 0
+		TickerInput.Text = targetTicker
+		ActiveTraderTickerLabel.Text = targetTicker
+		ActiveTraderStatusLabel.Text = ""
+		updateViewport()
+		updateSymbolData()
+		updateActiveTraderPosition()
+	else
+		TickerInput.Text = " . . . "
+		ChartTickerLabel.Text = "Error"
+		task.delay(2, function()
+			TickerInput.Text = currentDisplayedTicker
+		end)
+	end
+
+	isFetchingData = false
+end
+
 local function updateTimeframeUI(activeTime)
 	for button, data in pairs(TimeDropdownOptions) do
 		if data.query == activeTime then
@@ -795,6 +946,25 @@ SymbolInfoTopBar.InputChanged:Connect(function(input)
 	end
 end)
 
+WatchlistTopBar.InputBegan:Connect(function(input)
+	if not isWatchlistVisible then
+		return
+	end
+
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		dragging = true
+		dragStart = input.Position
+		startPosition = WatchlistPanel.Position
+		draggedPanel = WatchlistPanel
+	end
+end)
+
+WatchlistTopBar.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+		dragInput = input
+	end
+end)
+
 UserInputService.InputChanged:Connect(function(input)
 	if dragging and input == dragInput and draggedPanel then
 		local delta = input.Position - dragStart
@@ -939,44 +1109,7 @@ end)
 
 TickerInput.FocusLost:Connect(function(enterPressed)
 	if enterPressed then
-		if isFetchingData then
-			return
-		end
-
-		local targetTicker = string.gsub(string.upper(TickerInput.Text), "%s+", "")
-
-		if targetTicker == "" then
-			TickerInput.Text = currentDisplayedTicker
-			return
-		end
-
-		isFetchingData = true
-
-		TickerInput.Text = " . . . "
-		ChartTickerLabel.Text = "Loading"
-
-		local chartData = RequestChartEvent:InvokeServer(targetTicker, currentTimeframe)
-
-		if chartData and #chartData > 0 then
-			masterChartData = chartData
-			currentDisplayedTicker = targetTicker
-			rightOffset = 0
-			TickerInput.Text = targetTicker
-			ActiveTraderTickerLabel.Text = targetTicker
-			ActiveTraderStatusLabel.Text = ""
-			updateViewport()
-			updateSymbolData()
-			updateActiveTraderPosition()
-		else
-			TickerInput.Text = " . . . "
-			ChartTickerLabel.Text = "Error"
-			-- send error
-			task.delay(2, function()
-				TickerInput.Text = currentDisplayedTicker
-			end)
-		end
-
-		isFetchingData = false
+		loadTicker(TickerInput.Text)
 		return
 	end
 
@@ -1059,6 +1192,10 @@ task.spawn(function()
 				updateSymbolData()
 			end
 		end
+
+		if isWatchlistVisible then
+			refreshWatchlist()
+		end
 	end
 end)
 
@@ -1106,6 +1243,27 @@ Player:GetAttributeChangedSignal("NetWorth"):Connect(updateAccountInfo)
 
 ToggleActiveTraderButton.MouseButton1Click:Connect(toggleActiveTrader)
 ToggleSymbolInfoButton.MouseButton1Click:Connect(toggleSymbolInfo)
+ToggleWatchlistButton.MouseButton1Click:Connect(toggleWatchlist)
+
+local function addTickerToWatchlist()
+	local targetTicker = string.gsub(string.upper(AddTickerInput.Text), "%s+", "")
+	AddTickerInput.Text = ""
+
+	if targetTicker == "" then
+		return
+	end
+
+	ToggleWatchlistEvent:InvokeServer(targetTicker)
+	refreshWatchlist()
+end
+
+AddTickerButton.MouseButton1Click:Connect(addTickerToWatchlist)
+
+AddTickerInput.FocusLost:Connect(function(enterPressed)
+	if enterPressed then
+		addTickerToWatchlist()
+	end
+end)
 
 for _, preset in ipairs(ActiveTraderBuyPresets) do
 	preset.button.MouseButton1Click:Connect(function()

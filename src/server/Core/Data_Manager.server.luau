@@ -67,6 +67,7 @@ local function createDefaultData()
 			AvgCost = {},
 			Options = {},
 		},
+		Watchlist = {},
 	}
 end
 
@@ -87,6 +88,7 @@ local function onPlayerAdded(player)
 		_G.UpdatePlayerStat(player, "Balance", saveData.Balance)
 
 		_G.PlayerData[player.UserId].Portfolio = saveData.Portfolio or {}
+		_G.PlayerData[player.UserId].Watchlist = saveData.Watchlist or {}
 
 		for ticker, shares in pairs(_G.PlayerData[player.UserId].Portfolio.Shares) do
 			local shareValue = Instance.new("IntValue")
@@ -98,6 +100,7 @@ local function onPlayerAdded(player)
 		_G.UpdatePlayerStat(player, "Balance", createDefaultData().Balance)
 
 		_G.PlayerData[player.UserId].Portfolio = createDefaultData().Portfolio
+		_G.PlayerData[player.UserId].Watchlist = createDefaultData().Watchlist
 	end
 end
 
