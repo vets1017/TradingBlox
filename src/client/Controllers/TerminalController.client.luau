@@ -15,6 +15,7 @@ local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
 local RequestChartEvent = EventsFolder:WaitForChild("RequestChartEvent")
 local GetMarketDataEvent = EventsFolder:WaitForChild("GetMarketDataEvent")
 local PlayerOrderEvent = EventsFolder:WaitForChild("PlayerOrderEvent")
+local GetPositionsEvent = EventsFolder:WaitForChild("GetPositionsEvent")
 
 -- UI Instances
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -51,10 +52,25 @@ local ActiveTraderPanel = ChartsScreen:WaitForChild("ActiveTraderPanel")
 local ActiveTraderTopBar = ActiveTraderPanel:WaitForChild("ActiveTraderTopBar")
 local ActiveTraderContentArea = ActiveTraderPanel:WaitForChild("ContentArea")
 local ActiveTraderTickerLabel = ActiveTraderContentArea:WaitForChild("TickerLabel")
-local ActiveTraderQuantityInput = ActiveTraderContentArea:WaitForChild("QuantityRow"):WaitForChild("QuantityInput")
-local ActiveTraderBuyButton = ActiveTraderContentArea:WaitForChild("BuyButton")
-local ActiveTraderSellButton = ActiveTraderContentArea:WaitForChild("SellButton")
+local ActiveTraderAskPriceLabel = ActiveTraderContentArea:WaitForChild("BuyHeaderRow"):WaitForChild("AskPriceLabel")
+local ActiveTraderPositionLabel = ActiveTraderContentArea:WaitForChild("SellHeaderRow"):WaitForChild("PositionLabel")
+local ActiveTraderBuyPresetsGrid = ActiveTraderContentArea:WaitForChild("BuyPresetsGrid")
+local ActiveTraderSellPresetsGrid = ActiveTraderContentArea:WaitForChild("SellPresetsGrid")
 local ActiveTraderStatusLabel = ActiveTraderContentArea:WaitForChild("StatusLabel")
+
+local ActiveTraderBuyPresets = {
+	{ button = ActiveTraderBuyPresetsGrid:WaitForChild("BuyPreset_100"), amount = 100 },
+	{ button = ActiveTraderBuyPresetsGrid:WaitForChild("BuyPreset_250"), amount = 250 },
+	{ button = ActiveTraderBuyPresetsGrid:WaitForChild("BuyPreset_500"), amount = 500 },
+	{ button = ActiveTraderBuyPresetsGrid:WaitForChild("BuyPreset_1000"), amount = 1000 },
+}
+
+local ActiveTraderSellPresets = {
+	{ button = ActiveTraderSellPresetsGrid:WaitForChild("SellPreset_25"), fraction = 0.25 },
+	{ button = ActiveTraderSellPresetsGrid:WaitForChild("SellPreset_50"), fraction = 0.5 },
+	{ button = ActiveTraderSellPresetsGrid:WaitForChild("SellPreset_75"), fraction = 0.75 },
+	{ button = ActiveTraderSellPresetsGrid:WaitForChild("SellPreset_100"), fraction = 1 },
+}
 local Sidebar = ChartsScreen:WaitForChild("Sidebar")
 local ToggleActiveTraderButton = Sidebar:WaitForChild("ToggleActiveTraderButton")
 local MainChart = ChartsScreen:WaitForChild("MainChart")
@@ -111,7 +127,8 @@ local rightOffset = 0 -- UI Offset for graph
 local lastMouseDragX
 local currentDisplayedTicker = ""
 local currentTimeframe = "H" -- Default Timeframe
-local activeTraderQuantity = 1
+local activeTraderAsk = nil
+local activeTraderPositionQty = 0
 local scrollDragStartX = 0
 local startRightOffset = 0 -- UI Offset for Scroll
 
@@ -273,6 +290,9 @@ local function updateAccountInfo()
 end
 
 local updateActiveTraderPrices
+local updateActiveTraderPosition
+
+local ACTIVE_TRADER_DISABLED_COLOR = Color3.fromRGB(90, 95, 105)
 
 -- Toggle for ActiveTrader window
 local function toggleActiveTrader()
@@ -291,12 +311,32 @@ local function toggleActiveTrader()
 
 	if isActiveTradeVisible then
 		updateActiveTraderPrices()
+		updateActiveTraderPosition()
 	end
 end
 
--- Refreshes the Buy/Sell button price labels for the ticker currently
--- loaded on the chart. Active Trader always trades that ticker - there is
--- no separate ticker input on the panel itself.
+-- Enables/dims the Sell preset pills based on whether there's a position to
+-- sell out of - a 25%/50%/75%/100% preset means nothing against 0 shares.
+local function updateSellPresetsEnabled()
+	local hasPosition = activeTraderPositionQty > 0
+
+	for _, preset in ipairs(ActiveTraderSellPresets) do
+		local button = preset.button
+		local stroke = button:FindFirstChild("Stroke")
+
+		button.Active = hasPosition
+		button.AutoButtonColor = hasPosition
+		button.TextColor3 = hasPosition and RED or ACTIVE_TRADER_DISABLED_COLOR
+
+		if stroke then
+			stroke.Color = hasPosition and RED or ACTIVE_TRADER_DISABLED_COLOR
+		end
+	end
+end
+
+-- Refreshes the live ask price used to size Buy presets ($ -> shares) for
+-- the ticker currently loaded on the chart. Active Trader always trades
+-- that ticker - there is no separate ticker input on the panel itself.
 updateActiveTraderPrices = function()
 	if currentDisplayedTicker == "" then
 		return
@@ -304,20 +344,34 @@ updateActiveTraderPrices = function()
 
 	local quote = GetMarketDataEvent:InvokeServer(currentDisplayedTicker)
 
-	if not quote then
+	if not quote or not quote.ask then
 		return
 	end
 
-	if quote.ask then
-		ActiveTraderBuyButton.Text = string.format("Buy  %.2f", quote.ask)
-	end
-
-	if quote.bid then
-		ActiveTraderSellButton.Text = string.format("Sell  %.2f", quote.bid)
-	end
+	activeTraderAsk = quote.ask
+	ActiveTraderAskPriceLabel.Text = string.format("Ask %.2f", quote.ask)
 end
 
-local function placeActiveTraderOrder(action)
+-- Refreshes the held share count for the current ticker, which Sell
+-- presets are a percentage of.
+updateActiveTraderPosition = function()
+	if currentDisplayedTicker == "" then
+		activeTraderPositionQty = 0
+		ActiveTraderPositionLabel.Text = ""
+		updateSellPresetsEnabled()
+
+		return
+	end
+
+	local positions = GetPositionsEvent:InvokeServer(currentDisplayedTicker)
+	local quantity = (positions and positions[1] and positions[1].quantity) or 0
+
+	activeTraderPositionQty = quantity
+	ActiveTraderPositionLabel.Text = quantity > 0 and (quantity .. " shares") or "No position"
+	updateSellPresetsEnabled()
+end
+
+local function placeActiveTraderBuy(dollarAmount)
 	if currentDisplayedTicker == "" then
 		ActiveTraderStatusLabel.TextColor3 = GRAY
 		ActiveTraderStatusLabel.Text = "Load a ticker on the chart first."
@@ -325,16 +379,30 @@ local function placeActiveTraderOrder(action)
 		return
 	end
 
-	local isOpen = MarketHoursModule.getMarketStatus(os.time())
-
-	if not isOpen then
+	if not MarketHoursModule.getMarketStatus(os.time()) then
 		ActiveTraderStatusLabel.TextColor3 = GRAY
 		ActiveTraderStatusLabel.Text = "Market is closed."
 
 		return
 	end
 
-	local result = PlayerOrderEvent:InvokeServer(action, currentDisplayedTicker, activeTraderQuantity)
+	if not activeTraderAsk then
+		ActiveTraderStatusLabel.TextColor3 = GRAY
+		ActiveTraderStatusLabel.Text = "Price unavailable, try again."
+
+		return
+	end
+
+	local shares = math.floor(dollarAmount / activeTraderAsk)
+
+	if shares < 1 then
+		ActiveTraderStatusLabel.TextColor3 = GRAY
+		ActiveTraderStatusLabel.Text = "Preset amount is below one share."
+
+		return
+	end
+
+	local result = PlayerOrderEvent:InvokeServer("Buy", currentDisplayedTicker, shares)
 
 	if not result or not result.success then
 		ActiveTraderStatusLabel.TextColor3 = RED
@@ -347,6 +415,41 @@ local function placeActiveTraderOrder(action)
 	ActiveTraderStatusLabel.Text = result.message
 
 	updateActiveTraderPrices()
+	updateActiveTraderPosition()
+end
+
+local function placeActiveTraderSell(fraction)
+	if activeTraderPositionQty <= 0 then
+		ActiveTraderStatusLabel.TextColor3 = GRAY
+		ActiveTraderStatusLabel.Text = "No position to sell."
+
+		return
+	end
+
+	if not MarketHoursModule.getMarketStatus(os.time()) then
+		ActiveTraderStatusLabel.TextColor3 = GRAY
+		ActiveTraderStatusLabel.Text = "Market is closed."
+
+		return
+	end
+
+	local shares = math.max(1, math.floor(activeTraderPositionQty * fraction))
+	shares = math.min(shares, activeTraderPositionQty)
+
+	local result = PlayerOrderEvent:InvokeServer("Sell", currentDisplayedTicker, shares)
+
+	if not result or not result.success then
+		ActiveTraderStatusLabel.TextColor3 = RED
+		ActiveTraderStatusLabel.Text = (result and result.message) or "Order failed."
+
+		return
+	end
+
+	ActiveTraderStatusLabel.TextColor3 = GREEN
+	ActiveTraderStatusLabel.Text = result.message
+
+	updateActiveTraderPrices()
+	updateActiveTraderPosition()
 end
 
 -- ScrollBar Logic
@@ -680,6 +783,7 @@ TickerInput.FocusLost:Connect(function(enterPressed)
 			ActiveTraderStatusLabel.Text = ""
 			updateViewport()
 			updateActiveTraderPrices()
+			updateActiveTraderPosition()
 		else
 			TickerInput.Text = " . . . "
 			ChartTickerLabel.Text = "Error"
@@ -767,6 +871,7 @@ task.spawn(function()
 
 			if isActiveTradeVisible then
 				updateActiveTraderPrices()
+				updateActiveTraderPosition()
 			end
 		end
 	end
@@ -816,22 +921,20 @@ Player:GetAttributeChangedSignal("NetWorth"):Connect(updateAccountInfo)
 
 ToggleActiveTraderButton.MouseButton1Click:Connect(toggleActiveTrader)
 
-ActiveTraderQuantityInput.FocusLost:Connect(function()
-	local parsed = math.floor(tonumber(ActiveTraderQuantityInput.Text) or 1)
+for _, preset in ipairs(ActiveTraderBuyPresets) do
+	preset.button.MouseButton1Click:Connect(function()
+		placeActiveTraderBuy(preset.amount)
+	end)
+end
 
-	activeTraderQuantity = math.max(1, parsed)
-	ActiveTraderQuantityInput.Text = tostring(activeTraderQuantity)
-end)
-
-ActiveTraderBuyButton.MouseButton1Click:Connect(function()
-	placeActiveTraderOrder("Buy")
-end)
-
-ActiveTraderSellButton.MouseButton1Click:Connect(function()
-	placeActiveTraderOrder("Sell")
-end)
+for _, preset in ipairs(ActiveTraderSellPresets) do
+	preset.button.MouseButton1Click:Connect(function()
+		placeActiveTraderSell(preset.fraction)
+	end)
+end
 
 switchTab("Dashboard")
 updateGreeting()
 updateAccountInfo()
+updateActiveTraderPosition() -- grays out Sell presets until a position exists
 ChartTickerLabel.Text = "—" -- otherwise this shows Studio's literal default "Label" until a ticker loads
