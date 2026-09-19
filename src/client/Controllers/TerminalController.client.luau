@@ -9,6 +9,7 @@ local UserInputService = game:GetService("UserInputService")
 local NumberModule = require(ReplicatedStorage.Modules.Multi.NumberModule)
 local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursModule)
 local ChartRenderer = require(ReplicatedStorage.Modules.Multi.ChartRenderer)
+local DrawingModule = require(ReplicatedStorage.Modules.Multi.DrawingModule)
 
 -- Remotes
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
@@ -128,6 +129,11 @@ local ScrollTrack = ChartCanvas:WaitForChild("ScrollTrack")
 local ScrollThumb = ScrollTrack:WaitForChild("ScrollThumb")
 local CandlesContainer = ChartCanvas:WaitForChild("CandlesContainer")
 local GridContainer = ChartCanvas:WaitForChild("GridContainer")
+local DrawingsContainer = ChartCanvas:WaitForChild("DrawingsContainer")
+local CursorToolButton = LeftToolbar:WaitForChild("CursorToolButton")
+local TrendLineToolButton = LeftToolbar:WaitForChild("TrendLineToolButton")
+local HorizontalLineToolButton = LeftToolbar:WaitForChild("HorizontalLineToolButton")
+local ClearDrawingsButton = LeftToolbar:WaitForChild("ClearDrawingsButton")
 
 -- Tween Constants
 local SWEEP_INFO = TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
@@ -182,6 +188,11 @@ local isDraggingScroll = false
 local currentChartData = {} -- Data of current chart
 local masterChartData = {}
 local viewportUpdateScheduled = false
+
+-- Drawing tools (session-only, per ticker; not persisted to DataStore)
+local currentDrawingTool = "cursor" -- "cursor" | "trendline" | "horizontal"
+local pendingTrendLineStart = nil -- { timestamp, price } while placing a trend line's 2nd point
+local drawingsByTicker = {} -- [ticker] = { horizontalLines = {}, trendLines = {} }
 
 local TIMEFRAME_SECONDS = {
 	M = 60,
@@ -293,7 +304,108 @@ local function renderChart(ticker, chartData)
 	if minPrice and maxPrice then
 		currentMinPrice = minPrice
 		currentMaxPrice = maxPrice
+
+		DrawingModule.render({
+			DrawingsContainer = DrawingsContainer,
+			MainChart = MainChart,
+		}, chartData, minPrice, maxPrice, drawingsByTicker[ticker])
 	end
+end
+
+local DRAWING_TOOL_BUTTONS = {
+	cursor = CursorToolButton,
+	trendline = TrendLineToolButton,
+	horizontal = HorizontalLineToolButton,
+}
+
+local function setDrawingTool(tool)
+	currentDrawingTool = tool
+	pendingTrendLineStart = nil
+
+	for toolName, button in pairs(DRAWING_TOOL_BUTTONS) do
+		local isActive = toolName == tool
+
+		button.BackgroundColor3 = isActive and COLOR_ACTIVE_BACKGROUND or COLOR_INACTIVE_BACKGROUND
+		button.TextColor3 = isActive and COLOR_ACTIVE_TEXT or COLOR_INACTIVE_TEXT
+	end
+end
+
+local function getTickerDrawings(ticker)
+	drawingsByTicker[ticker] = drawingsByTicker[ticker] or { horizontalLines = {}, trendLines = {} }
+
+	return drawingsByTicker[ticker]
+end
+
+-- Converts a mouse position over ChartCanvas into a (timestamp, price) point
+-- on the currently-rendered candle window, for placing drawings. Uses the
+-- same snap-to-candle-index and price-scale math as the crosshair hover.
+local function getChartPointFromPosition(mousePosition)
+	if #currentChartData == 0 or not currentMinPrice or not currentMaxPrice then
+		return nil
+	end
+
+	local canvasPosition = ChartCanvas.AbsolutePosition
+	local canvasSize = ChartCanvas.AbsoluteSize
+
+	local relativeX = mousePosition.X - canvasPosition.X
+	local relativeY = mousePosition.Y - canvasPosition.Y
+
+	if relativeX < 0 or relativeX > canvasSize.X or relativeY < 0 or relativeY > canvasSize.Y then
+		return nil
+	end
+
+	local percentX = math.clamp(relativeX / canvasSize.X, 0, 1)
+	local index = math.clamp(math.ceil(percentX * #currentChartData), 1, #currentChartData)
+
+	local priceRange = currentMaxPrice - currentMinPrice
+	local yPercentage = relativeY / canvasSize.Y
+	local price = currentMaxPrice - (yPercentage * priceRange)
+
+	local candle = currentChartData[index]
+
+	return { timestamp = candle.Timestamp, price = price }
+end
+
+-- Handles a click on ChartCanvas while a drawing tool is active. Returns
+-- true if it consumed the click (so the caller skips starting a pan-drag).
+local function handleDrawingClick(mousePosition)
+	if currentDrawingTool == "cursor" or currentDisplayedTicker == "" then
+		return false
+	end
+
+	local point = getChartPointFromPosition(mousePosition)
+
+	if not point then
+		return false
+	end
+
+	local drawings = getTickerDrawings(currentDisplayedTicker)
+
+	if currentDrawingTool == "horizontal" then
+		table.insert(drawings.horizontalLines, { price = point.price })
+		renderChart(currentDisplayedTicker, currentChartData)
+
+		return true
+	end
+
+	if currentDrawingTool == "trendline" then
+		if not pendingTrendLineStart then
+			pendingTrendLineStart = point
+		else
+			table.insert(drawings.trendLines, {
+				t1 = pendingTrendLineStart.timestamp,
+				p1 = pendingTrendLineStart.price,
+				t2 = point.timestamp,
+				p2 = point.price,
+			})
+			pendingTrendLineStart = nil
+			renderChart(currentDisplayedTicker, currentChartData)
+		end
+
+		return true
+	end
+
+	return false
 end
 
 -- Switching tab function
@@ -755,6 +867,10 @@ loadTicker = function(ticker)
 		return
 	end
 
+	-- A pending trend-line first point belongs to whatever ticker's candle
+	-- series was showing when it was placed - discard it on ticker switch.
+	pendingTrendLineStart = nil
+
 	isFetchingData = true
 
 	TickerInput.Text = " . . . "
@@ -808,6 +924,7 @@ for button, data in pairs(TimeDropdownOptions) do
 		print(data.query)
 		currentTimeframe = data.query
 		updateTimeframeUI(data.query)
+		pendingTrendLineStart = nil
 
 		if currentDisplayedTicker ~= "" then
 			ChartTickerLabel.Text = "Loading"
@@ -984,6 +1101,10 @@ ChartCanvas.InputBegan:Connect(function(input)
 	end
 
 	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		if handleDrawingClick(input.Position) then
+			return
+		end
+
 		isDraggingChart = true
 		lastMouseDragX = input.Position.X
 
@@ -1244,6 +1365,28 @@ Player:GetAttributeChangedSignal("NetWorth"):Connect(updateAccountInfo)
 ToggleActiveTraderButton.MouseButton1Click:Connect(toggleActiveTrader)
 ToggleSymbolInfoButton.MouseButton1Click:Connect(toggleSymbolInfo)
 ToggleWatchlistButton.MouseButton1Click:Connect(toggleWatchlist)
+
+CursorToolButton.MouseButton1Click:Connect(function()
+	setDrawingTool("cursor")
+end)
+
+TrendLineToolButton.MouseButton1Click:Connect(function()
+	setDrawingTool("trendline")
+end)
+
+HorizontalLineToolButton.MouseButton1Click:Connect(function()
+	setDrawingTool("horizontal")
+end)
+
+ClearDrawingsButton.MouseButton1Click:Connect(function()
+	if currentDisplayedTicker == "" then
+		return
+	end
+
+	drawingsByTicker[currentDisplayedTicker] = { horizontalLines = {}, trendLines = {} }
+	pendingTrendLineStart = nil
+	renderChart(currentDisplayedTicker, currentChartData)
+end)
 
 local function addTickerToWatchlist()
 	local targetTicker = string.gsub(string.upper(AddTickerInput.Text), "%s+", "")
