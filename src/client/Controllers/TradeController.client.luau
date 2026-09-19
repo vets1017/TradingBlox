@@ -66,18 +66,21 @@ local TWEEN_FAST = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirecti
 local TWEEN_MED = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
 local QUOTE_FIELDS = {
-	{ label = "Volume", key = "volume", format = "number" },
+	{ label = "Volume", key = "volume", format = "count" },
+	{ label = "Avg Volume", key = "avgVolume", format = "count" },
 	{ label = "Beta", key = "beta", format = "decimal2" },
-	{ label = "Market Cap", key = "marketCap", format = "auto" },
-	{ label = "Yield", key = "yield", format = "percent" },
-	{ label = "VWAP", key = "vwap", format = "price" },
-	{ label = "IV", key = "impliedVolatility", format = "percent" },
-	{ label = "PE", key = "pe", format = "decimal2" },
-	{ label = "Div Amount", key = "divAmount", format = "price" },
-	{ label = "50-Day Avg Vol", key = "avgVolume50", format = "number" },
-	{ label = "EPS", key = "eps", format = "decimal2" },
+	{ label = "Market Cap", key = "marketCap", format = "compact" },
+	{ label = "Yield", key = "dividendYield", format = "percent" },
+	{ label = "Div Amount", key = "dividendRate", format = "price" },
 	{ label = "Ex Date", key = "exDividendDate", format = "date" },
+	{ label = "PE (Trailing)", key = "trailingPE", format = "decimal2" },
+	{ label = "PE (Forward)", key = "forwardPE", format = "decimal2" },
+	{ label = "EPS", key = "eps", format = "decimal2" },
 	{ label = "Earnings", key = "earningsDate", format = "date" },
+	{ label = "Day High", key = "dayHigh", format = "price" },
+	{ label = "Day Low", key = "dayLow", format = "price" },
+	{ label = "52-Wk High", key = "fiftyTwoWeekHigh", format = "price" },
+	{ label = "52-Wk Low", key = "fiftyTwoWeekLow", format = "price" },
 }
 
 local POSITION_COLUMNS = {
@@ -138,6 +141,10 @@ local function formatValue(value, formatType)
 		return string.format("%s%.2f", sign, value)
 	elseif formatType == "number" then
 		return NumberModule.format(value)
+	elseif formatType == "count" then
+		return NumberModule.formatShares(value)
+	elseif formatType == "compact" then
+		return NumberModule.formatCompact(value)
 	elseif formatType == "date" or formatType == "auto" then
 		return tostring(value)
 	end
@@ -218,14 +225,12 @@ local function updateHeader(data, livePrice)
 	end
 end
 
-local QUOTE_ROW_HEIGHT = 24
-local QUOTE_ROW_GAP = 2
-local QUOTE_COLUMN = 2
-
--- Quote Details
-local function renderQuoteDetails(data)
-	for _, child in pairs(ContentQuoteDetails:GetChildren()) do
-		if child:IsA("Frame") and string.match(child.Name, "^QF_") then
+-- Renders a flat label/value grid into `container`, clearing any previous
+-- rows tagged with `prefix` first. Shared by Quote Details, Analyst
+-- Reports, and Fundamentals - all three are flat field-list tabs.
+local function renderFieldGrid(container, fields, data, prefix)
+	for _, child in pairs(container:GetChildren()) do
+		if child:IsA("Frame") and string.match(child.Name, "^" .. prefix) then
 			child:Destroy()
 		end
 	end
@@ -234,23 +239,14 @@ local function renderQuoteDetails(data)
 		return
 	end
 
-	for i, field in ipairs(QUOTE_FIELDS) do
-		local col = (i - 1) % QUOTE_COLUMN
+	for i, field in ipairs(fields) do
 		local row = Instance.new("Frame")
 
-		row.Name = "QF_" .. field.key
+		row.Name = prefix .. field.key
 		row.Size = UDim2.new(0.5, -4, 0, 22)
 		row.BackgroundTransparency = 1
 		row.LayoutOrder = i
-		row.Parent = ContentQuoteDetails
-
-		local rowFrame = Instance.new("Frame")
-
-		rowFrame.Name = "QF_" .. field.key
-		rowFrame.nSize = UDim2.new(1 / QUOTE_COLUMN, -8, 0, QUOTE_ROW_HEIGHT)
-		rowFrame.Position = UDim2.new(col / QUOTE_COLUMN, 4, 0, row * (QUOTE_ROW_HEIGHT + QUOTE_ROW_GAP))
-		rowFrame.BackgroundTransparency = 1
-		rowFrame = ContentQuoteDetails
+		row.Parent = container
 
 		local lbl = Instance.new("TextLabel")
 
@@ -277,6 +273,10 @@ local function renderQuoteDetails(data)
 		val.TextXAlignment = Enum.TextXAlignment.Right
 		val.Parent = row
 	end
+end
+
+local function renderQuoteDetails(data)
+	renderFieldGrid(ContentQuoteDetails, QUOTE_FIELDS, data, "QF_")
 end
 
 -- Refresh Quotes
