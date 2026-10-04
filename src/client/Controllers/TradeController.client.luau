@@ -662,7 +662,7 @@ local function makeSeparator(parent)
 	return sep
 end
 
--- s = { strike, callBid, callAsk, putBid, putAsk }
+-- s = { strike, call = { contractSymbol, bid, ask, lastPrice, impliedVolatility, volume, openInterest } | nil, put = {...} | nil }
 local function createStrikeRow(parent, index, s, spotPrice)
 	local callITM = spotPrice > s.strike
 	local putITM = spotPrice < s.strike
@@ -679,9 +679,14 @@ local function createStrikeRow(parent, index, s, spotPrice)
 
 	makeSeparator(row)
 
+	local callBid = s.call and s.call.bid
+	local callAsk = s.call and s.call.ask
+	local putBid = s.put and s.put.bid
+	local putAsk = s.put and s.put.ask
+
 	makeLabel(row, {
 		name = "CallBidAsk",
-		text = string.format("%.2f / %.2f", s.callBid or 0, s.callAsk or 0),
+		text = string.format("%.2f / %.2f", callBid or 0, callAsk or 0),
 		sz = UDim2.new(0.38, -8, 1, 0),
 		pos = UDim2.fromOffset(8, 0),
 		color = callITM and TEXT_PRIMARY or TEXT_SECONDARY,
@@ -700,7 +705,7 @@ local function createStrikeRow(parent, index, s, spotPrice)
 
 	makeLabel(row, {
 		name = "PutBidAsk",
-		text = string.format("%.2f / %.2f", s.putBid or 0, s.putAsk or 0),
+		text = string.format("%.2f / %.2f", putBid or 0, putAsk or 0),
 		sz = UDim2.new(0.38, -8, 1, 0),
 		pos = UDim2.new(0.62, 0, 0, 0),
 		color = putITM and TEXT_PRIMARY or TEXT_SECONDARY,
@@ -870,23 +875,25 @@ local function clearOptionChain()
 	end
 end
 
+-- Real shape, from GetOptionsDataEvent / the backend's /api/option-chain/:ticker:
 -- {
---   currentPrice = 150.25,
---   expiryLabel  = "Jul 18",
+--   available = true,
+--   spotPrice = 150.25,
+--   expiration = "2026-01-17",
+--   expirationDates = { "2026-01-17", ... },
 --   strikes = {
---     { strike = 145, callBid = 5.20, callAsk = 5.30, putBid = 0.15, putAsk = 0.20 },
---     { strike = 150, callBid = 2.10, callAsk = 2.20, putBid = 1.80, putAsk = 1.90 },
+--     { strike = 145, call = { contractSymbol, bid, ask, lastPrice, impliedVolatility, volume, openInterest }, put = {...} },
 --     ...
 --   }
 -- }
 local function renderOptionChain(optionData)
 	clearOptionChain()
 
-	if not optionData or not optionData.strikes then
+	if not optionData or optionData.available == false or not optionData.strikes then
 		return
 	end
 
-	local spotPrice = optionData.currentPrice or currentPrice
+	local spotPrice = optionData.spotPrice or currentPrice
 
 	for i, s in ipairs(optionData.strikes) do
 		createStrikeRow(ChainData, i, s, spotPrice)
@@ -1149,12 +1156,12 @@ local function loadTicker(rawTicker)
 	end
 
 	-- ── Options data ──────────────────────────────────────────────────────────
-	-- Uncomment when GetOptionsDataEvent is live on the server.
-	-- local optionData = GetOptionsDataEvent:InvokeServer(ticker)
-	-- if optionData then
-	--     currentOptionData = optionData
-	--     renderOptionChain(optionData)
-	-- end
+	local optionData = GetOptionsDataEvent:InvokeServer(ticker)
+
+	if optionData then
+		currentOptionData = optionData
+		renderOptionChain(optionData)
+	end
 
 	-- ── Player positions ──────────────────────────────────────────────────────
 	refreshPositions()
