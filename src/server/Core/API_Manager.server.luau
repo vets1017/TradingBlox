@@ -15,6 +15,7 @@ local GetMarketDataEvent = EventsFolder:WaitForChild("GetMarketDataEvent")
 local GetAnalystReportEvent = EventsFolder:WaitForChild("GetAnalystReportEvent")
 local GetFundamentalsEvent = EventsFolder:WaitForChild("GetFundamentalsEvent")
 local GetOptionStatsEvent = EventsFolder:WaitForChild("GetOptionStatsEvent")
+local GetOptionsDataEvent = EventsFolder:WaitForChild("GetOptionsDataEvent")
 
 -- Config
 local PLAYER_COOLDOWN = 1
@@ -110,6 +111,27 @@ GetMarketDataEvent.OnServerInvoke = function(player, ticker)
 	end
 
 	return quote
+end
+
+-- GetOptionsDataEvent
+GetOptionsDataEvent.OnServerInvoke = function(player, ticker)
+	if isThrottled(player, "GetOptionsDataEvent") then
+		return nil
+	end
+
+	if not MarketDataModule.isValidTicker(ticker) then
+		warn(string.format("[API_Manager] Invalid ticker from %s: %s", player.Name, tostring(ticker)))
+
+		return nil
+	end
+
+	local chain, err = MarketDataModule.getOptionChain(ticker)
+
+	if not chain then
+		warn(string.format("[API_Manager] Option chain fetch failed for %s: %s", string.upper(ticker), tostring(err)))
+	end
+
+	return chain
 end
 
 -- GetAnalystReportEvent
