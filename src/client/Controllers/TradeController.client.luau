@@ -21,6 +21,7 @@ local GetOptionsDataEvent = EventsFolder:WaitForChild("GetOptionsDataEvent")
 local GetPositionsEvent = EventsFolder:WaitForChild("GetPositionsEvent")
 local GetNewsFeedEvent = EventsFolder:WaitForChild("GetNewsFeedEvent")
 local PlayerOrderEvent = EventsFolder:WaitForChild("PlayerOrderEvent")
+local PlayerOptionOrderEvent = EventsFolder:WaitForChild("PlayerOptionOrderEvent")
 local GetAnalystReportEvent = EventsFolder:WaitForChild("GetAnalystReportEvent")
 local GetFundamentalsEvent = EventsFolder:WaitForChild("GetFundamentalsEvent")
 local GetOptionStatsEvent = EventsFolder:WaitForChild("GetOptionStatsEvent")
@@ -1317,7 +1318,21 @@ local function placeOrder(action)
 		return
 	end
 
-	local result = PlayerOrderEvent:InvokeServer(action, currentTicker, orderQuantity)
+	local result
+
+	if selectedContract then
+		result = PlayerOptionOrderEvent:InvokeServer(
+			action,
+			selectedContract.contractSymbol,
+			selectedContract.ticker,
+			selectedContract.expiration,
+			selectedContract.strike,
+			selectedContract.type,
+			orderQuantity
+		)
+	else
+		result = PlayerOrderEvent:InvokeServer(action, currentTicker, orderQuantity)
+	end
 
 	if not result or not result.success then
 		print(string.format("[TradeController] %s failed: %s", action, (result and result.message) or "Unknown error"))
