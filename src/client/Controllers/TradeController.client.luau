@@ -158,6 +158,75 @@ local activeTabName = ""
 local chainExpanded = true
 local orderQuantity = 1
 
+local selectedContract = nil
+
+-- Script-generated indicator shown in the (mostly empty) space next to the
+-- ticker input while an option contract is selected for trading instead of
+-- shares. Clicking it clears the selection and returns to share-trading
+-- mode. Created once here rather than per-row, since only one contract can
+-- be selected at a time.
+local ContractIndicator = Instance.new("TextButton")
+
+ContractIndicator.Name = "ContractIndicator"
+ContractIndicator.Size = UDim2.new(0.86, 0, 1, 0)
+ContractIndicator.Position = UDim2.new(0.12, 0, 0, 0)
+ContractIndicator.BackgroundTransparency = 1
+ContractIndicator.Text = ""
+ContractIndicator.TextColor3 = TEXT_PRIMARY
+ContractIndicator.Font = Enum.Font.SourceSansSemibold
+ContractIndicator.TextSize = 13
+ContractIndicator.TextXAlignment = Enum.TextXAlignment.Left
+ContractIndicator.Visible = false
+ContractIndicator.Parent = InputRow
+
+local function updateContractIndicator()
+	if not selectedContract then
+		ContractIndicator.Visible = false
+
+		return
+	end
+
+	local expLabel = string.match(tostring(selectedContract.expiration), "^%d%d%d%d%-%d%d%-%d%d")
+		or tostring(selectedContract.expiration)
+	local typeLabel = selectedContract.type == "C" and "Call" or "Put"
+
+	ContractIndicator.Text = string.format(
+		"Now trading: %s $%.2f %s exp %s — Back to Shares",
+		selectedContract.ticker,
+		selectedContract.strike,
+		typeLabel,
+		expLabel
+	)
+	ContractIndicator.Visible = true
+end
+
+local function clearContractSelection()
+	selectedContract = nil
+	updateContractIndicator()
+end
+
+-- contractType: "C" | "P". strikeEntry: a single entry from optionData.strikes
+-- (the `s` passed into createStrikeRow), so it carries both call and put.
+local function selectContract(contractType, strikeEntry, strike)
+	local contract = contractType == "C" and strikeEntry.call or strikeEntry.put
+
+	if not contract or not contract.contractSymbol then
+		return
+	end
+
+	selectedContract = {
+		contractSymbol = contract.contractSymbol,
+		ticker = currentTicker,
+		expiration = currentOptionData and currentOptionData.expiration,
+		strike = strike,
+		type = contractType,
+	}
+
+	updateContractIndicator()
+end
+
+ContractIndicator.MouseButton1Click:Connect(clearContractSelection)
+
 -- Map
 local TabButtons = {
 	QuoteDetails = TabHeaderContainer:WaitForChild("Tab_QuoteDetails"),
@@ -712,6 +781,38 @@ local function createStrikeRow(parent, index, s, spotPrice)
 		align = Enum.TextXAlignment.Right,
 	})
 
+	if s.call and s.call.contractSymbol then
+		local callHit = Instance.new("TextButton")
+
+		callHit.Name = "CallHitArea"
+		callHit.Size = UDim2.new(0.38, -8, 1, 0)
+		callHit.Position = UDim2.fromOffset(8, 0)
+		callHit.BackgroundTransparency = 1
+		callHit.Text = ""
+		callHit.ZIndex = 2
+		callHit.Parent = row
+
+		callHit.MouseButton1Click:Connect(function()
+			selectContract("C", s, s.strike)
+		end)
+	end
+
+	if s.put and s.put.contractSymbol then
+		local putHit = Instance.new("TextButton")
+
+		putHit.Name = "PutHitArea"
+		putHit.Size = UDim2.new(0.38, -8, 1, 0)
+		putHit.Position = UDim2.new(0.62, 0, 0, 0)
+		putHit.BackgroundTransparency = 1
+		putHit.Text = ""
+		putHit.ZIndex = 2
+		putHit.Parent = row
+
+		putHit.MouseButton1Click:Connect(function()
+			selectContract("P", s, s.strike)
+		end)
+	end
+
 	return row
 end
 
@@ -1117,6 +1218,7 @@ local function loadTicker(rawTicker)
 
 	setLoadingState(true)
 	clearOptionChain()
+	clearContractSelection()
 	clearPositions()
 	clearNewsFeed()
 
