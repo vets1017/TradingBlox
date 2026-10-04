@@ -38,6 +38,14 @@ PlayerOptionOrderEvent.OnServerInvoke = function(player, action, contractSymbol,
 		return { success = false, message = "Invalid option type." }
 	end
 
+	if type(strike) ~= "number" then
+		return { success = false, message = "Invalid strike." }
+	end
+
+	if type(expiration) ~= "string" or expiration == "" then
+		return { success = false, message = "Invalid expiration." }
+	end
+
 	if not isPositiveInteger(contracts) then
 		return { success = false, message = "Invalid contract quantity." }
 	end
