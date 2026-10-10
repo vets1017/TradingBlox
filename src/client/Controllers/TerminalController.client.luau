@@ -10,6 +10,7 @@ local NumberModule = require(ReplicatedStorage.Modules.Multi.NumberModule)
 local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursModule)
 local ChartRenderer = require(ReplicatedStorage.Modules.Multi.ChartRenderer)
 local DrawingModule = require(ReplicatedStorage.Modules.Multi.DrawingModule)
+local Theme = require(ReplicatedStorage.Modules.Multi.Theme)
 
 -- Remotes
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
@@ -143,15 +144,15 @@ local SLIDE_EASING = TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDire
 local HIDDEN_POSITION = UDim2.new(1, 300, 0.5, 0)
 local VISIBLE_POSITION = UDim2.new(1, -50, 0.5, 0)
 
--- RGB Constants
-local GREEN = Color3.fromRGB(8, 153, 129)
-local RED = Color3.fromRGB(242, 54, 69)
-local GRAY = Color3.fromRGB(132, 142, 156)
+-- Theme Colors (names kept from the pre-theme constants so call sites stay put)
+local GREEN = Theme.Colors.Up
+local RED = Theme.Colors.Down
+local GRAY = Theme.Colors.TextMuted
 
-local COLOR_ACTIVE_BACKGROUND = Color3.fromRGB(38, 166, 154)
-local COLOR_ACTIVE_TEXT = Color3.fromRGB(255, 255, 255)
-local COLOR_INACTIVE_BACKGROUND = Color3.fromRGB(30, 34, 45)
-local COLOR_INACTIVE_TEXT = Color3.fromRGB(132, 142, 156)
+local COLOR_ACTIVE_BACKGROUND = Theme.Colors.Accent
+local COLOR_ACTIVE_TEXT = Theme.Colors.Text
+local COLOR_INACTIVE_BACKGROUND = Theme.Colors.Raised
+local COLOR_INACTIVE_TEXT = Theme.Colors.TextMuted
 
 -- UI Dragging variables
 local dragging = false
@@ -261,7 +262,7 @@ local IndicatorOptions = {
 		key = "EMA50",
 		type = "ema",
 		period = 50,
-		color = Color3.fromRGB(150, 100, 255),
+		color = Color3.fromRGB(220, 222, 230), -- near-white: the old purple was nearly the UI accent
 		active = false,
 	},
 }
@@ -412,12 +413,12 @@ end
 local function switchTab(tabName)
 	for _, data in pairs(Tabs) do
 		data.Frame.Visible = false
-		data.Button.TextColor3 = Color3.fromRGB(120, 123, 134)
+		data.Button.TextColor3 = COLOR_INACTIVE_TEXT
 	end
 
 	if Tabs[tabName] then
 		Tabs[tabName].Frame.Visible = true
-		Tabs[tabName].Button.TextColor3 = Color3.fromRGB(209, 212, 220)
+		Tabs[tabName].Button.TextColor3 = COLOR_ACTIVE_BACKGROUND -- the accent, as text
 
 		AccentGradient.Offset = Vector2.new(-1, 0)
 
@@ -456,10 +457,10 @@ local function updateCountdown()
 
 	if isOpen then
 		TitleText.Text = "NYSE Closes In"
-		TitleText.TextColor3 = Color3.fromRGB(8, 153, 129)
+		TitleText.TextColor3 = GREEN
 	else
 		TitleText.Text = "NYSE Opens In"
-		TitleText.TextColor3 = Color3.fromRGB(120, 123, 134)
+		TitleText.TextColor3 = GRAY
 	end
 
 	local differenceTime = targetTime - time
@@ -493,7 +494,7 @@ local toggleWatchlist
 local refreshWatchlist
 local loadTicker
 
-local ACTIVE_TRADER_DISABLED_COLOR = Color3.fromRGB(90, 95, 105)
+local ACTIVE_TRADER_DISABLED_COLOR = Theme.Colors.TextDisabled
 
 -- Toggle for ActiveTrader window. Mutually exclusive with Symbol Info and
 -- Watchlist - all three flyouts share the same anchored screen slot.
@@ -973,7 +974,8 @@ for button, indicator in pairs(IndicatorOptions) do
 		indicator.active = not indicator.active
 		button.BackgroundTransparency = indicator.active and 0 or 1
 		button.BackgroundColor3 = indicator.active and indicator.color or COLOR_INACTIVE_BACKGROUND
-		button.TextColor3 = indicator.active and COLOR_ACTIVE_TEXT or COLOR_INACTIVE_TEXT
+		-- Dark text: every series color is bright (EMA50 is near-white)
+		button.TextColor3 = indicator.active and Theme.Colors.Background or COLOR_INACTIVE_TEXT
 
 		renderChart(currentDisplayedTicker, currentChartData)
 	end)
@@ -1420,7 +1422,36 @@ for _, preset in ipairs(ActiveTraderSellPresets) do
 	end)
 end
 
+-- Preset pills: the stroke outlines the pill (Border mode - the default,
+-- Contextual, outlines a text object's glyphs). Buy pills never dim, so their
+-- green is set once here; Sell pills are recolored by updateSellPresetsEnabled.
+local function stylePresetPill(button, color)
+	local stroke = button:FindFirstChild("Stroke")
+
+	button.TextColor3 = color
+
+	if stroke then
+		stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		stroke.Color = color
+	end
+end
+
+for _, preset in ipairs(ActiveTraderBuyPresets) do
+	stylePresetPill(preset.button, GREEN)
+end
+
+for _, preset in ipairs(ActiveTraderSellPresets) do
+	stylePresetPill(preset.button, RED)
+end
+
+for button in pairs(IndicatorOptions) do
+	button.BackgroundColor3 = COLOR_INACTIVE_BACKGROUND
+	button.TextColor3 = COLOR_INACTIVE_TEXT
+end
+
 switchTab("Dashboard")
+setDrawingTool(currentDrawingTool) -- the Studio defaults no longer show which tool is active
+updateTimeframeUI(currentTimeframe)
 updateGreeting()
 updateAccountInfo()
 updateActiveTraderPosition() -- grays out Sell presets until a position exists
