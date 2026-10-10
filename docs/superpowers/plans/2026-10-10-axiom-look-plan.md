@@ -221,8 +221,10 @@ local navBottom = topBar.AbsolutePosition.Y + topBar.AbsoluteSize.Y
 local result = {
 	fullWidth = math.abs(mb.AbsoluteSize.X - viewport.X) <= 1,
 	fullHeight = math.abs(mb.AbsoluteSize.Y - viewport.Y) <= 1,
-	wordmarkClearOfRobloxButtons = wordmark ~= nil and wordmark.AbsolutePosition.X >= inset.Min.X,
-	tabsAfterWordmark = wordmark ~= nil and tabs.AbsolutePosition.X >= wordmark.AbsolutePosition.X + wordmark.AbsoluteSize.X,
+	-- On narrow windows the wordmark hides to make room for the tabs
+	wordmarkClearOfRobloxButtons = wordmark ~= nil and (not wordmark.Visible or wordmark.AbsolutePosition.X >= inset.Min.X),
+	tabsAfterWordmark = wordmark ~= nil and (not wordmark.Visible or tabs.AbsolutePosition.X >= wordmark.AbsolutePosition.X + wordmark.AbsoluteSize.X),
+	tabsClearOfRobloxButtons = tabs.AbsolutePosition.X >= inset.Min.X,
 	tabsFit = tabsWidth <= tabs.AbsoluteSize.X,
 	pillAfterTabs = pill ~= nil and pill.AbsolutePosition.X >= tabs.AbsolutePosition.X + tabs.AbsoluteSize.X,
 	pillOnScreen = pill ~= nil and pill.AbsolutePosition.X + pill.AbsoluteSize.X <= mb.AbsolutePosition.X + mb.AbsoluteSize.X,

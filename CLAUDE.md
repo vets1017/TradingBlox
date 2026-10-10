@@ -38,8 +38,9 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
 
 ### Client/server split
 
-- **Client (`src/client/Controllers/`)** — one controller per screen/UI area (Terminal shell, Trade screen,
-  Quote tabs, Options chain). Controllers `WaitForChild` their way through a large, hand-built UI tree (no UI
+- **Client (`src/client/Controllers/`)** — one controller per screen/UI area (`ShellController` for the
+  full-screen shell — nav bar, balance pill, status bar; `TerminalController` for tab switching, Dashboard and
+  Charts; `TradeController` for the Trade screen; Quote tabs and Options chain stubs). Controllers `WaitForChild` their way through a large, hand-built UI tree (no UI
   framework/library), wire up `TweenService` animations and `UserInputService` input handling directly, and
   call server `RemoteFunction`s to fetch data. Several controllers (`QuoteTabsController`,
   `OptionsChainController`) are stubs (empty or fully commented out) awaiting their corresponding server
@@ -78,6 +79,20 @@ Server scripts share mutable state via `_G` (e.g. `_G.PlayerData`, `_G.UpdatePla
 `_G.UpdatePortfolio`, `_G.LiveMarketData` referenced from `CalculatorModule`) rather than `require`d modules
 returning shared tables. This is deliberate but fragile — code depending on `_G.*` assumes
 `Data_Manager.server.luau` (and `API_Manager.server.luau` for market data) has already run and initialized it.
+
+### Theme system (Axiom-style look)
+
+All colors, fonts and text sizes come from `src/shared/Modules/Multi/Theme.luau`. Hand-built Studio UI opts in
+with a `ThemeRole` string attribute (e.g. `Panel`, `Number`, `Tab`); `Theme.apply(root)` stamps each role's
+properties, and `ShellController` calls it on `TerminalGui` at startup. Rules:
+
+- **New Studio-built UI must set a `ThemeRole`.** Untagged elements are never styled, on purpose — they stand out.
+- **UI built in code reads `Theme.Colors` / `Theme.Fonts` / `Theme.TextSize` directly** — never `Color3.fromRGB`
+  literals, except chart data series (indicator/drawing colors).
+- **A role never sets a property a controller changes at runtime** (up/down colors, active tab, toggles). Elements
+  like that use the color-less roles (`NumberDynamic`, `Tab`, `Toggle`, `Preset`, `ActionButton`, …) and their
+  controller owns the color.
+- A pre-restyle copy of the UI lives at `ServerStorage.TerminalGui_PreAxiomBackup` in the place file.
 
 ### Data flow for a typical UI action
 
