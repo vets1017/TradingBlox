@@ -1,9 +1,14 @@
 local IndicatorModule = require(script.Parent.IndicatorModule)
+local Theme = require(script.Parent.Theme)
 
 local ChartRenderer = {}
 
-local GREEN = Color3.fromRGB(8, 153, 129)
-local RED = Color3.fromRGB(242, 54, 69)
+local GREEN = Theme.Colors.Up
+local RED = Theme.Colors.Down
+
+-- The live-price badge sits in the 60px-wide right axis; six-figure prices
+-- (e.g. BTC) only fit without decimals
+local BADGE_DECIMALS_CUTOFF = 10000
 
 local INDICATOR_FUNCTIONS = {
 	sma = IndicatorModule.sma,
@@ -214,9 +219,9 @@ function ChartRenderer.render(elements, ticker, chartData, timeframe, liveCandle
 			priceLabel.Size = UDim2.fromOffset(80, 20)
 			priceLabel.Position = UDim2.new(1, -85, yScale, -10)
 			priceLabel.BackgroundTransparency = 1
-			priceLabel.TextColor3 = Color3.fromRGB(132, 142, 156)
-			priceLabel.Font = Enum.Font.SourceSans
-			priceLabel.TextSize = 13
+			priceLabel.TextColor3 = Theme.Colors.TextMuted
+			priceLabel.FontFace = Theme.Fonts.Mono
+			priceLabel.TextSize = Theme.TextSize.Caption
 			priceLabel.TextXAlignment = Enum.TextXAlignment.Right
 			priceLabel.Parent = RightAxis
 
@@ -224,8 +229,8 @@ function ChartRenderer.render(elements, ticker, chartData, timeframe, liveCandle
 			horizontalGrid.Name = "HorizontalGrid_" .. index
 			horizontalGrid.Size = UDim2.new(1, 0, 0, 1)
 			horizontalGrid.Position = UDim2.fromScale(0, yScale)
-			horizontalGrid.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-			horizontalGrid.BackgroundTransparency = 0.95
+			horizontalGrid.BackgroundColor3 = Theme.Colors.Border
+			horizontalGrid.BackgroundTransparency = 0
 			horizontalGrid.ZIndex = 1
 			horizontalGrid.Parent = GridContainer
 		end
@@ -244,9 +249,9 @@ function ChartRenderer.render(elements, ticker, chartData, timeframe, liveCandle
 			timeLabel.Name = "AxisLabel_Time" .. index
 			timeLabel.BackgroundTransparency = 1
 			timeLabel.Size = UDim2.new(0, 60, 1, 0)
-			timeLabel.TextColor3 = Color3.fromRGB(132, 142, 156)
-			timeLabel.Font = Enum.Font.SourceSans
-			timeLabel.TextSize = 13
+			timeLabel.TextColor3 = Theme.Colors.TextMuted
+			timeLabel.FontFace = Theme.Fonts.Mono
+			timeLabel.TextSize = Theme.TextSize.Caption
 
 			if index == 0 then
 				timeLabel.AnchorPoint = Vector2.new(0, 0)
@@ -278,8 +283,8 @@ function ChartRenderer.render(elements, ticker, chartData, timeframe, liveCandle
 				verticalGrid.Name = "VerticalGrid_" .. index
 				verticalGrid.Size = UDim2.new(0, 1, 1, 0)
 				verticalGrid.Position = UDim2.fromScale(candleCenterScale, 0)
-				verticalGrid.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-				verticalGrid.BackgroundTransparency = 0.95
+				verticalGrid.BackgroundColor3 = Theme.Colors.Border
+				verticalGrid.BackgroundTransparency = 0
 				verticalGrid.ZIndex = 1
 				verticalGrid.Parent = GridContainer
 			end
@@ -320,13 +325,13 @@ function ChartRenderer.render(elements, ticker, chartData, timeframe, liveCandle
 
 		local BadgeText = Instance.new("TextLabel")
 		BadgeText.Name = "PriceText"
-		BadgeText.Text = string.format("%.2f", currentPrice)
+		BadgeText.Text = string.format(currentPrice >= BADGE_DECIMALS_CUTOFF and "%.0f" or "%.2f", currentPrice)
 		BadgeText.Size = UDim2.new(1, -6, 0, 12)
 		BadgeText.Position = UDim2.fromOffset(3, 1)
 		BadgeText.BackgroundTransparency = 1
-		BadgeText.TextColor3 = Color3.fromRGB(255, 255, 255)
-		BadgeText.Font = Enum.Font.SourceSansBold
-		BadgeText.TextSize = 13
+		BadgeText.TextColor3 = Theme.Colors.Text
+		BadgeText.FontFace = Theme.Fonts.UIBold
+		BadgeText.TextSize = Theme.TextSize.Caption -- the text box is only 12px tall
 		BadgeText.TextXAlignment = Enum.TextXAlignment.Center
 		BadgeText.ZIndex = 5
 		BadgeText.Parent = PriceBadge
@@ -337,9 +342,9 @@ function ChartRenderer.render(elements, ticker, chartData, timeframe, liveCandle
 		TimerText.Size = UDim2.new(1, -6, 0, 12)
 		TimerText.Position = UDim2.fromOffset(3, 11)
 		TimerText.BackgroundTransparency = 1
-		TimerText.TextColor3 = Color3.fromRGB(240, 240, 240)
-		TimerText.Font = Enum.Font.SourceSans
-		TimerText.TextSize = 11
+		TimerText.TextColor3 = Theme.Colors.Text
+		TimerText.FontFace = Theme.Fonts.UI
+		TimerText.TextSize = Theme.TextSize.Caption
 		TimerText.TextXAlignment = Enum.TextXAlignment.Center
 		TimerText.ZIndex = 5
 		TimerText.Parent = PriceBadge
