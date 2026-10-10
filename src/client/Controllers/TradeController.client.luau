@@ -9,6 +9,7 @@ local UserInputService = game:GetService("UserInputService")
 
 local NumberModule = require(ReplicatedStorage.Modules.Multi.NumberModule)
 local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursModule)
+local Theme = require(ReplicatedStorage.Modules.Multi.Theme)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -54,20 +55,20 @@ local ContentAnalystReports = TabContentContainer:WaitForChild("Content_AnalystR
 local ContentFundamentals = TabContentContainer:WaitForChild("Content_Fundamentals")
 local ContentOptionStats = TabContentContainer:WaitForChild("Content_OptionStats")
 
--- Contants
-local GREEN = Color3.fromRGB(8, 153, 129)
-local RED = Color3.fromRGB(242, 54, 69)
-local GRAY = Color3.fromRGB(132, 142, 156)
+-- Theme Colors (names kept from the pre-theme constants so call sites stay put)
+local GREEN = Theme.Colors.Up
+local RED = Theme.Colors.Down
+local GRAY = Theme.Colors.TextMuted
 
-local TEXT_PRIMARY = Color3.fromRGB(209, 212, 220)
-local TEXT_SECONDARY = Color3.fromRGB(132, 142, 156)
-local BG_ROW_EVEN = Color3.fromRGB(22, 26, 35)
-local BG_ROW_ODD = Color3.fromRGB(18, 22, 30)
-local BG_ITM = Color3.fromRGB(28, 40, 58) -- In-The-Money
-local BG_OTM = Color3.fromRGB(18, 22, 30) -- Out-The-Money
+local TEXT_PRIMARY = Theme.Colors.Text
+local TEXT_SECONDARY = Theme.Colors.TextMuted
+local BG_ROW_EVEN = Theme.Colors.Panel
+local BG_ROW_ODD = Theme.Colors.Background
+local BG_ITM = Theme.Colors.AccentTint -- In-The-Money
+local BG_OTM = Theme.Colors.Background -- Out-The-Money
 
-local COLOR_TAB_ACTIVE = Color3.fromRGB(209, 212, 220)
-local COLOR_TAB_INACTIVE = Color3.fromRGB(120, 123, 134)
+local COLOR_TAB_ACTIVE = Theme.Colors.Accent
+local COLOR_TAB_INACTIVE = Theme.Colors.TextMuted
 
 local TWEEN_FAST = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local TWEEN_MED = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
@@ -174,8 +175,8 @@ ContractIndicator.Position = UDim2.new(0.12, 0, 0, 0)
 ContractIndicator.BackgroundTransparency = 1
 ContractIndicator.Text = ""
 ContractIndicator.TextColor3 = TEXT_PRIMARY
-ContractIndicator.Font = Enum.Font.SourceSansSemibold
-ContractIndicator.TextSize = 13
+ContractIndicator.FontFace = Theme.Fonts.UISemibold
+ContractIndicator.TextSize = Theme.TextSize.Body
 ContractIndicator.TextXAlignment = Enum.TextXAlignment.Left
 ContractIndicator.Visible = false
 ContractIndicator.Parent = InputRow
@@ -405,8 +406,8 @@ local function renderFieldGrid(container, fields, data, prefix)
 		lbl.Size = UDim2.new(0.55, 0, 1, 0)
 		lbl.BackgroundTransparency = 1
 		lbl.TextColor3 = TEXT_SECONDARY
-		lbl.Font = Enum.Font.SourceSans
-		lbl.TextSize = 13
+		lbl.FontFace = Theme.Fonts.UI
+		lbl.TextSize = Theme.TextSize.Body
 		lbl.TextXAlignment = Enum.TextXAlignment.Left
 		lbl.Parent = row
 
@@ -418,8 +419,8 @@ local function renderFieldGrid(container, fields, data, prefix)
 		val.Position = UDim2.fromScale(0.55, 0)
 		val.BackgroundTransparency = 1
 		val.TextColor3 = TEXT_PRIMARY
-		val.Font = Enum.Font.SourceSansSemibold
-		val.TextSize = 13
+		val.FontFace = Theme.Fonts.Mono
+		val.TextSize = Theme.TextSize.Body
 		val.TextXAlignment = Enum.TextXAlignment.Right
 		val.Parent = row
 	end
@@ -455,8 +456,8 @@ local function renderUnavailable(container, prefix, message)
 	lbl.Size = UDim2.new(1, 0, 1, 0)
 	lbl.BackgroundTransparency = 1
 	lbl.TextColor3 = TEXT_SECONDARY
-	lbl.Font = Enum.Font.SourceSans
-	lbl.TextSize = 13
+	lbl.FontFace = Theme.Fonts.UI
+	lbl.TextSize = Theme.TextSize.Body
 	lbl.TextXAlignment = Enum.TextXAlignment.Center
 	lbl.Parent = row
 end
@@ -473,8 +474,8 @@ local function makeLabel(parent, props)
 	lbl.Size = props.sz or UDim2.new(1, 0, 1, 0)
 	lbl.Position = props.pos or UDim2.fromOffset(0, 0)
 	lbl.BackgroundTransparency = 1
-	lbl.Font = props.font or Enum.Font.SourceSans
-	lbl.TextSize = props.size or 13
+	lbl.FontFace = props.font or Theme.Fonts.UI
+	lbl.TextSize = props.size or Theme.TextSize.Body
 	lbl.TextColor3 = props.color or TEXT_PRIMARY
 	lbl.TextXAlignment = props.align or Enum.TextXAlignment.Left
 	lbl.TextTruncate = Enum.TextTruncate.AtEnd
@@ -573,7 +574,7 @@ local function renderOptionStats(data)
 		text = string.format("Nearest Expiry: %s   ·   Strike: %.2f", formatValue(data.expiration, "date"), data.strike or 0),
 		sz = UDim2.new(1, 0, 1, 0),
 		color = TEXT_SECONDARY,
-		font = Enum.Font.SourceSansSemibold,
+		font = Theme.Fonts.UISemibold,
 		align = Enum.TextXAlignment.Left,
 	})
 
@@ -591,7 +592,7 @@ local function renderOptionStats(data)
 		sz = UDim2.new(0.35, 0, 1, 0),
 		pos = UDim2.fromScale(0.4, 0),
 		color = TEXT_SECONDARY,
-		font = Enum.Font.SourceSansSemibold,
+		font = Theme.Fonts.UISemibold,
 		align = Enum.TextXAlignment.Center,
 	})
 
@@ -601,7 +602,7 @@ local function renderOptionStats(data)
 		sz = UDim2.new(0.35, 0, 1, 0),
 		pos = UDim2.fromScale(0.75, 0),
 		color = TEXT_SECONDARY,
-		font = Enum.Font.SourceSansSemibold,
+		font = Theme.Fonts.UISemibold,
 		align = Enum.TextXAlignment.Center,
 	})
 
@@ -628,6 +629,7 @@ local function renderOptionStats(data)
 			sz = UDim2.new(0.3, 0, 1, 0),
 			pos = UDim2.fromScale(0.4, 0),
 			color = TEXT_PRIMARY,
+			font = Theme.Fonts.Mono,
 			align = Enum.TextXAlignment.Center,
 		})
 
@@ -637,6 +639,7 @@ local function renderOptionStats(data)
 			sz = UDim2.new(0.3, 0, 1, 0),
 			pos = UDim2.fromScale(0.75, 0),
 			color = TEXT_PRIMARY,
+			font = Theme.Fonts.Mono,
 			align = Enum.TextXAlignment.Center,
 		})
 	end
@@ -724,7 +727,7 @@ local function makeSeparator(parent)
 	sep.Name = "Separator"
 	sep.Size = UDim2.new(1, 0, 0, 1)
 	sep.Position = UDim2.fromScale(0, 0)
-	sep.BackgroundColor3 = Color3.fromRGB(35, 40, 52)
+	sep.BackgroundColor3 = Theme.Colors.Border
 	sep.BorderSizePixel = 0
 	sep.ZIndex = 2
 	sep.Parent = parent
@@ -760,6 +763,7 @@ local function createStrikeRow(parent, index, s, spotPrice)
 		sz = UDim2.new(0.38, -8, 1, 0),
 		pos = UDim2.fromOffset(8, 0),
 		color = callITM and TEXT_PRIMARY or TEXT_SECONDARY,
+		font = Theme.Fonts.Mono,
 		align = Enum.TextXAlignment.Left,
 	})
 
@@ -769,7 +773,7 @@ local function createStrikeRow(parent, index, s, spotPrice)
 		sz = UDim2.new(0.24, 0, 1, 0),
 		pos = UDim2.fromScale(0.38, 0),
 		color = isATM and TEXT_PRIMARY or TEXT_SECONDARY,
-		font = isATM and Enum.Font.SourceSansBold or Enum.Font.SourceSans,
+		font = isATM and Theme.Fonts.MonoBold or Theme.Fonts.Mono,
 		align = Enum.TextXAlignment.Center,
 	})
 
@@ -779,6 +783,7 @@ local function createStrikeRow(parent, index, s, spotPrice)
 		sz = UDim2.new(0.38, -8, 1, 0),
 		pos = UDim2.new(0.62, 0, 0, 0),
 		color = putITM and TEXT_PRIMARY or TEXT_SECONDARY,
+		font = Theme.Fonts.Mono,
 		align = Enum.TextXAlignment.Right,
 	})
 
@@ -828,7 +833,7 @@ local function createPositionsHeader(parent)
 
 	header.Name = "PosHeader"
 	header.Size = UDim2.new(1, 0, 0, ROW_HEIGHT_POS)
-	header.BackgroundColor3 = Color3.fromRGB(25, 29, 40)
+	header.BackgroundColor3 = Theme.Colors.Raised
 	header.BorderSizePixel = 0
 	header.LayoutOrder = 0
 	header.Parent = parent
@@ -839,8 +844,8 @@ local function createPositionsHeader(parent)
 		sz = UDim2.new(0, TICKER_COL_WIDTH, 1, 0),
 		pos = UDim2.fromOffset(8, 0),
 		color = TEXT_SECONDARY,
-		font = Enum.Font.SourceSansSemibold,
-		size = 11,
+		font = Theme.Fonts.UISemibold,
+		size = Theme.TextSize.Caption,
 		align = Enum.TextXAlignment.Left,
 	})
 
@@ -853,8 +858,8 @@ local function createPositionsHeader(parent)
 			sz = UDim2.new(0, col.width, 1, 0),
 			pos = UDim2.fromOffset(xOffset, 0),
 			color = TEXT_SECONDARY,
-			font = Enum.Font.SourceSansSemibold,
-			size = 11,
+			font = Theme.Fonts.UISemibold,
+			size = Theme.TextSize.Caption,
 			align = Enum.TextXAlignment.Right,
 		})
 
@@ -881,7 +886,7 @@ local function createPositionRow(parent, index, pos)
 		sz = UDim2.new(0, TICKER_COL_WIDTH, 1, 0),
 		pos = UDim2.fromOffset(8, 0),
 		color = GREEN,
-		font = Enum.Font.SourceSansSemibold,
+		font = Theme.Fonts.UISemibold,
 		align = Enum.TextXAlignment.Left,
 	})
 
@@ -897,6 +902,7 @@ local function createPositionRow(parent, index, pos)
 			sz = UDim2.new(0, col.width, 1, 0),
 			pos = UDim2.fromOffset(xOffset, 0),
 			color = isColored and getChangeColor(v) or TEXT_PRIMARY,
+			font = Theme.Fonts.Mono,
 			align = Enum.TextXAlignment.Right,
 		})
 
@@ -927,8 +933,9 @@ local function createNewsItem(parent, index, item)
 	headline.Position = UDim2.fromOffset(8, 1)
 	headline.BackgroundTransparency = 1
 	headline.TextColor3 = TEXT_PRIMARY
-	headline.Font = Enum.Font.SourceSans
-	headline.TextSize = 13
+	headline.FontFace = Theme.Fonts.UI
+	headline.TextSize = Theme.TextSize.Body
+	headline.TextTruncate = Enum.TextTruncate.AtEnd -- long headlines end in "…" instead of clipping mid-line
 	headline.TextXAlignment = Enum.TextXAlignment.Left
 	headline.TextYAlignment = Enum.TextYAlignment.Center
 	headline.TextWrapped = true
@@ -940,7 +947,7 @@ local function createNewsItem(parent, index, item)
 		sz = UDim2.new(0, 78, 0, 16),
 		pos = UDim2.new(1, -82, 0, 4),
 		color = TEXT_SECONDARY,
-		size = 11,
+		size = Theme.TextSize.Caption,
 		align = Enum.TextXAlignment.Right,
 	})
 
@@ -951,13 +958,13 @@ local function createNewsItem(parent, index, item)
 			sz = UDim2.new(0, 78, 0, 13),
 			pos = UDim2.new(1, -82, 1, -16),
 			color = TEXT_SECONDARY,
-			size = 10,
+			size = Theme.TextSize.Caption,
 			align = Enum.TextXAlignment.Right,
 		})
 	end
 
 	row.MouseEnter:Connect(function()
-		row.BackgroundColor3 = Color3.fromRGB(28, 36, 50)
+		row.BackgroundColor3 = Theme.Colors.Raised
 	end)
 	row.MouseLeave:Connect(function()
 		row.BackgroundColor3 = BG_ROW_ODD
@@ -1093,8 +1100,8 @@ local function renderNewsFeed(newsItems)
 end
 
 -- Mini Chart
-local MINI_CHART_GRADIENT_START = Color3.fromRGB(224, 170, 255) -- pale violet (older)
-local MINI_CHART_GRADIENT_END = Color3.fromRGB(124, 58, 237) -- vivid purple (most recent)
+local MINI_CHART_GRADIENT_START = Theme.Colors.AccentSoft -- pale violet (older)
+local MINI_CHART_GRADIENT_END = Theme.Colors.Accent -- the UI accent (most recent)
 
 local function lerpColor(fromColor, toColor, t)
 	return Color3.new(
@@ -1353,8 +1360,10 @@ SellButton.MouseButton1Click:Connect(function()
 	placeOrder("Sell")
 end)
 
-attachHover(BuyButton, Color3.fromRGB(38, 166, 154), Color3.fromRGB(25, 140, 128))
-attachHover(SellButton, Color3.fromRGB(200, 50, 50), Color3.fromRGB(170, 35, 35))
+BuyButton.BackgroundColor3 = Theme.Colors.Up
+SellButton.BackgroundColor3 = Theme.Colors.Down
+attachHover(BuyButton, Theme.Colors.Up, Theme.Colors.UpHover)
+attachHover(SellButton, Theme.Colors.Down, Theme.Colors.DownHover)
 
 -- Ticker Input
 TickerInput.FocusLost:Connect(function(enterPressed)
