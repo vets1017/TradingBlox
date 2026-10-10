@@ -132,4 +132,22 @@ function MarketHoursModule.getMarketStatus(currentTime)
 	return false, targetTime
 end
 
+-- Public: compact countdown for the status bar - "2d 17h", "3h 12m" or
+-- "12m 30s" depending on how far away the target is. Never negative.
+function MarketHoursModule.formatCountdown(seconds)
+	seconds = math.max(0, math.floor(seconds))
+
+	local days = math.floor(seconds / 86400)
+	local hours = math.floor((seconds % 86400) / 3600)
+	local minutes = math.floor((seconds % 3600) / 60)
+
+	if days >= 1 then
+		return string.format("%dd %dh", days, hours)
+	elseif hours >= 1 then
+		return string.format("%dh %dm", hours, minutes)
+	end
+
+	return string.format("%dm %ds", minutes, seconds % 60)
+end
+
 return MarketHoursModule
