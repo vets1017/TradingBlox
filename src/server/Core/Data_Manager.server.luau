@@ -1,6 +1,9 @@
 local Players = game:GetService("Players")
 local DataStoreService = game:GetService("DataStoreService")
+local ServerScriptService = game:GetService("ServerScriptService")
 local PlayerDataStore = DataStoreService:GetDataStore("PlayerData_v1")
+
+local CalculatorModule = require(ServerScriptService.Modules.CalculatorModule)
 
 _G.PlayerData = _G.PlayerData or {}
 
@@ -102,6 +105,10 @@ local function onPlayerAdded(player)
 		_G.PlayerData[player.UserId].Portfolio = createDefaultData().Portfolio
 		_G.PlayerData[player.UserId].Watchlist = createDefaultData().Watchlist
 	end
+
+	-- Seed NetWorth so the status bar has a value before the first trade;
+	-- spawned because pricing held shares fetches candles over HTTP
+	task.spawn(CalculatorModule.calculateNetWorth, player)
 end
 
 local function onPlayerRemoving(player)

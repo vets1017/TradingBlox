@@ -329,7 +329,7 @@ function ChartRenderer.render(elements, ticker, chartData, timeframe, liveCandle
 		BadgeText.Size = UDim2.new(1, -6, 0, 12)
 		BadgeText.Position = UDim2.fromOffset(3, 1)
 		BadgeText.BackgroundTransparency = 1
-		BadgeText.TextColor3 = Theme.Colors.Text
+		BadgeText.TextColor3 = Theme.Colors.Background -- dark text stays readable on the Up/Down fill
 		BadgeText.FontFace = Theme.Fonts.UIBold
 		BadgeText.TextSize = Theme.TextSize.Caption -- the text box is only 12px tall
 		BadgeText.TextXAlignment = Enum.TextXAlignment.Center
@@ -342,7 +342,7 @@ function ChartRenderer.render(elements, ticker, chartData, timeframe, liveCandle
 		TimerText.Size = UDim2.new(1, -6, 0, 12)
 		TimerText.Position = UDim2.fromOffset(3, 11)
 		TimerText.BackgroundTransparency = 1
-		TimerText.TextColor3 = Theme.Colors.Text
+		TimerText.TextColor3 = Theme.Colors.Background
 		TimerText.FontFace = Theme.Fonts.UI
 		TimerText.TextSize = Theme.TextSize.Caption
 		TimerText.TextXAlignment = Enum.TextXAlignment.Center

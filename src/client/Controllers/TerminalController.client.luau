@@ -150,7 +150,7 @@ local RED = Theme.Colors.Down
 local GRAY = Theme.Colors.TextMuted
 
 local COLOR_ACTIVE_BACKGROUND = Theme.Colors.Accent
-local COLOR_ACTIVE_TEXT = Theme.Colors.Text
+local COLOR_ACTIVE_TEXT = Theme.Colors.Background -- white on the violet fill is under 3:1
 local COLOR_INACTIVE_BACKGROUND = Theme.Colors.Raised
 local COLOR_INACTIVE_TEXT = Theme.Colors.TextMuted
 
