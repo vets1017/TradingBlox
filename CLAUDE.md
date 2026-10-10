@@ -47,17 +47,22 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
 - **Server (`src/server/Core/`)** — one script per subsystem:
   - `ServerSetup.server.luau` creates the `EventsFolder` in `ReplicatedStorage` and all `RemoteFunction`s the
     client calls (`RequestChartEvent`, `GetMarketDataEvent`, `GetOptionsDataEvent`, `GetPositionsEvent`,
-    `GetNewsFeedEvent`, `PlayerOrderEvent`). This must run before other server scripts wire up
+    `GetNewsFeedEvent`, `PlayerOrderEvent`, `PlayerOptionOrderEvent`). This must run before other server scripts wire up
     `OnServerInvoke` handlers.
-  - `API_Manager.server.luau` is the sole bridge to the outside world: it polls an external HTTP backend
-    (`SERVER_URL`, currently a Render-hosted service) for live quotes and serves candle/chart data, with its
-    own ticker validation, per-player request-cooldown throttling, and a time-based chart cache
-    (`ChartCache`, swept periodically). `GetOptionsDataEvent`, `GetPositionsEvent`, `GetNewsFeedEvent`, and
-    `PlayerOrderEvent` are declared but have no server-side handler yet — client calls to them will hang.
+  - `API_Manager.server.luau` is the sole bridge to the outside world for market data: it polls an external
+    HTTP backend (`SERVER_URL`, currently a Render-hosted service) for live quotes, option chains, and
+    candle/chart data, with its own ticker validation, per-player request-cooldown throttling, and
+    time-based caches (`ChartCache`, `OptionChainCache`, etc., swept periodically). It handles
+    `GetOptionsDataEvent` (multi-strike option chain, via `MarketDataModule.getOptionChain`).
+    `GetNewsFeedEvent` is declared but has no server-side handler yet — client calls to it will hang.
+    `PlayerOrderEvent` and `GetPositionsEvent` are handled in `TradeSystem.server.luau` (share buy/sell and
+    position listing), not here.
   - `Data_Manager.server.luau` owns player persistence (`DataStoreService`, key `PlayerData_v1`): balance,
     portfolio shares/options, load on `PlayerAdded`, save on `PlayerRemoving`/`BindToClose`.
-  - `OptionSystem.server.luau` and the buy/sell logic in `TradeSystem.server.luau` are currently
-    empty/commented-out placeholders — trading is not wired up end-to-end yet.
+  - `TradeSystem.server.luau` handles `PlayerOrderEvent` (share buy/sell, long-only) and `GetPositionsEvent`
+    (share position listing). `OptionSystem.server.luau` handles `PlayerOptionOrderEvent` (long-only option
+    contract buy/sell at ask/bid, NYSE-hours-gated with no crypto exemption), writing
+    `playerData.Portfolio.Options[contractSymbol] = { contracts, ticker, expiration, strike, type, avgCost }`.
   - `Modules/CalculatorModule.luau` computes net worth from portfolio + live market data.
 - **Shared (`src/shared/Modules/`)**:
   - `Multi/` — cross-boundary utilities used by both client and server-side logic conceptually:
@@ -88,6 +93,6 @@ returning shared tables. This is deliberate but fragile — code depending on `_
 ### Known WIP areas
 
 Several files intentionally contain large commented-out blocks or are empty, representing not-yet-wired
-features rather than dead code: `TradeSystem.server.luau` (buy/sell handler), `OptionsChainController.client.luau`,
-`QuoteTabsController.client.luau`, `OptionSystem.server.luau`, and all files under `shared/Modules/Terminal/`
-and `shared/Modules/Trade/`. Check git blame/history before deleting anything that looks unused.
+features rather than dead code: `OptionsChainController.client.luau`, `QuoteTabsController.client.luau`, and
+all files under `shared/Modules/Terminal/` and `shared/Modules/Trade/`. Check git blame/history before
+deleting anything that looks unused.

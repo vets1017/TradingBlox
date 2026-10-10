@@ -17,12 +17,14 @@ local QUOTE_DETAILS_ENDPOINT = SERVER_URL .. "/api/quote-details/"
 local ANALYST_ENDPOINT = SERVER_URL .. "/api/analyst/"
 local FUNDAMENTALS_ENDPOINT = SERVER_URL .. "/api/fundamentals/"
 local OPTIONS_ENDPOINT = SERVER_URL .. "/api/options/"
+local OPTIONS_CHAIN_ENDPOINT = SERVER_URL .. "/api/option-chain/"
 
 local CHART_CACHE_DURATION = 300
 local QUOTE_DETAILS_CACHE_DURATION = 60
 local ANALYST_CACHE_DURATION = 21600 -- 6 hours
 local FUNDAMENTALS_CACHE_DURATION = 21600 -- 6 hours
 local OPTION_STATS_CACHE_DURATION = 300
+local OPTION_CHAIN_CACHE_DURATION = 300
 local CACHE_SWEEP_INTERVAL = 600
 local MAX_TICKER_LENGTH = 10
 local VALID_TIMEFRAMES = { ["1M"] = true, ["5M"] = true, ["30M"] = true, ["H"] = true, ["D"] = true }
@@ -33,6 +35,7 @@ local QuoteDetailsCache = {}
 local AnalystCache = {}
 local FundamentalsCache = {}
 local OptionStatsCache = {}
+local OptionChainCache = {}
 
 --
 
@@ -343,6 +346,50 @@ function MarketDataModule.getOptionStats(ticker)
 	end)
 end
 
+-- Option Chain panel (Trade tab): nearest-expiration, multi-strike chain
+-- (~±20% of spot, set server-side). Returns { available = false } if no
+-- listed options.
+function MarketDataModule.getOptionChain(ticker)
+	if not MarketDataModule.isValidTicker(ticker) then
+		return nil, "Invalid ticker"
+	end
+
+	local targetTicker = string.upper(ticker)
+
+	return cachedFetch(OptionChainCache, targetTicker, OPTION_CHAIN_CACHE_DURATION, function()
+		local data, err = fetchJSON(OPTIONS_CHAIN_ENDPOINT .. HttpService:UrlEncode(targetTicker))
+
+		if data and data.error then
+			return nil, tostring(data.error)
+		end
+
+		return data, err
+	end)
+end
+
+-- Looks up a single contract's live fields by OCC contractSymbol, reusing
+-- the cached chain so order pricing and net-worth mark-to-market share one
+-- lookup path instead of two independently-written ones.
+function MarketDataModule.getOptionQuote(ticker, contractSymbol)
+	local chain, err = MarketDataModule.getOptionChain(ticker)
+
+	if not chain or chain.available == false or not chain.strikes then
+		return nil, err or "Option chain unavailable"
+	end
+
+	for _, entry in ipairs(chain.strikes) do
+		if entry.call and entry.call.contractSymbol == contractSymbol then
+			return entry.call, nil
+		end
+
+		if entry.put and entry.put.contractSymbol == contractSymbol then
+			return entry.put, nil
+		end
+	end
+
+	return nil, "Contract not found"
+end
+
 -- Cache sweep
 local ALL_CACHES = {
 	{ cache = ChartCache, ttl = CHART_CACHE_DURATION },
@@ -350,6 +397,7 @@ local ALL_CACHES = {
 	{ cache = AnalystCache, ttl = ANALYST_CACHE_DURATION },
 	{ cache = FundamentalsCache, ttl = FUNDAMENTALS_CACHE_DURATION },
 	{ cache = OptionStatsCache, ttl = OPTION_STATS_CACHE_DURATION },
+	{ cache = OptionChainCache, ttl = OPTION_CHAIN_CACHE_DURATION },
 }
 
 task.spawn(function()

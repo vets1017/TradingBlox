@@ -22,12 +22,17 @@ function CalculatorModule.calculateNetWorth(player)
 				totalShareValue = (totalShareValue or 0) + (shares * price)
 			end
 		end
-	elseif playerData.Portfolio and playerData.Portfolio.Options then
-		for contractID, contractsOwned in pairs(playerData.Portfolio.Options) do
-			local currentPremium = nil -- WIP optionPremium(contractID)
-			local contractValue = currentPremium * 100
+	end
 
-			totalOptionValue = (totalOptionValue or 0) + (contractsOwned * contractValue)
+	if playerData.Portfolio and playerData.Portfolio.Options then
+		for contractSymbol, position in pairs(playerData.Portfolio.Options) do
+			local quote = MarketDataModule.getOptionQuote(position.ticker, contractSymbol)
+			local premium = quote and quote.bid and quote.ask and (quote.bid + quote.ask) / 2
+				or quote and quote.lastPrice
+
+			if premium then
+				totalOptionValue = (totalOptionValue or 0) + (position.contracts * premium * 100)
+			end
 		end
 	end
 

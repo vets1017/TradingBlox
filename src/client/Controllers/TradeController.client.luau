@@ -21,6 +21,7 @@ local GetOptionsDataEvent = EventsFolder:WaitForChild("GetOptionsDataEvent")
 local GetPositionsEvent = EventsFolder:WaitForChild("GetPositionsEvent")
 local GetNewsFeedEvent = EventsFolder:WaitForChild("GetNewsFeedEvent")
 local PlayerOrderEvent = EventsFolder:WaitForChild("PlayerOrderEvent")
+local PlayerOptionOrderEvent = EventsFolder:WaitForChild("PlayerOptionOrderEvent")
 local GetAnalystReportEvent = EventsFolder:WaitForChild("GetAnalystReportEvent")
 local GetFundamentalsEvent = EventsFolder:WaitForChild("GetFundamentalsEvent")
 local GetOptionStatsEvent = EventsFolder:WaitForChild("GetOptionStatsEvent")
@@ -157,6 +158,75 @@ local isFetchingData = false
 local activeTabName = ""
 local chainExpanded = true
 local orderQuantity = 1
+
+local selectedContract = nil
+
+-- Script-generated indicator shown in the (mostly empty) space next to the
+-- ticker input while an option contract is selected for trading instead of
+-- shares. Clicking it clears the selection and returns to share-trading
+-- mode. Created once here rather than per-row, since only one contract can
+-- be selected at a time.
+local ContractIndicator = Instance.new("TextButton")
+
+ContractIndicator.Name = "ContractIndicator"
+ContractIndicator.Size = UDim2.new(0.86, 0, 1, 0)
+ContractIndicator.Position = UDim2.new(0.12, 0, 0, 0)
+ContractIndicator.BackgroundTransparency = 1
+ContractIndicator.Text = ""
+ContractIndicator.TextColor3 = TEXT_PRIMARY
+ContractIndicator.Font = Enum.Font.SourceSansSemibold
+ContractIndicator.TextSize = 13
+ContractIndicator.TextXAlignment = Enum.TextXAlignment.Left
+ContractIndicator.Visible = false
+ContractIndicator.Parent = InputRow
+
+local function updateContractIndicator()
+	if not selectedContract then
+		ContractIndicator.Visible = false
+
+		return
+	end
+
+	local expLabel = string.match(tostring(selectedContract.expiration), "^%d%d%d%d%-%d%d%-%d%d")
+		or tostring(selectedContract.expiration)
+	local typeLabel = selectedContract.type == "C" and "Call" or "Put"
+
+	ContractIndicator.Text = string.format(
+		"Now trading: %s $%.2f %s exp %s — Back to Shares",
+		selectedContract.ticker,
+		selectedContract.strike,
+		typeLabel,
+		expLabel
+	)
+	ContractIndicator.Visible = true
+end
+
+local function clearContractSelection()
+	selectedContract = nil
+	updateContractIndicator()
+end
+
+-- contractType: "C" | "P". strikeEntry: a single entry from optionData.strikes
+-- (the `s` passed into createStrikeRow), so it carries both call and put.
+local function selectContract(contractType, strikeEntry, strike)
+	local contract = contractType == "C" and strikeEntry.call or strikeEntry.put
+
+	if not contract or not contract.contractSymbol then
+		return
+	end
+
+	selectedContract = {
+		contractSymbol = contract.contractSymbol,
+		ticker = currentTicker,
+		expiration = currentOptionData and currentOptionData.expiration,
+		strike = strike,
+		type = contractType,
+	}
+
+	updateContractIndicator()
+end
+
+ContractIndicator.MouseButton1Click:Connect(clearContractSelection)
 
 -- Map
 local TabButtons = {
@@ -662,7 +732,7 @@ local function makeSeparator(parent)
 	return sep
 end
 
--- s = { strike, callBid, callAsk, putBid, putAsk }
+-- s = { strike, call = { contractSymbol, bid, ask, lastPrice, impliedVolatility, volume, openInterest } | nil, put = {...} | nil }
 local function createStrikeRow(parent, index, s, spotPrice)
 	local callITM = spotPrice > s.strike
 	local putITM = spotPrice < s.strike
@@ -679,9 +749,14 @@ local function createStrikeRow(parent, index, s, spotPrice)
 
 	makeSeparator(row)
 
+	local callBid = s.call and s.call.bid
+	local callAsk = s.call and s.call.ask
+	local putBid = s.put and s.put.bid
+	local putAsk = s.put and s.put.ask
+
 	makeLabel(row, {
 		name = "CallBidAsk",
-		text = string.format("%.2f / %.2f", s.callBid or 0, s.callAsk or 0),
+		text = string.format("%.2f / %.2f", callBid or 0, callAsk or 0),
 		sz = UDim2.new(0.38, -8, 1, 0),
 		pos = UDim2.fromOffset(8, 0),
 		color = callITM and TEXT_PRIMARY or TEXT_SECONDARY,
@@ -700,12 +775,44 @@ local function createStrikeRow(parent, index, s, spotPrice)
 
 	makeLabel(row, {
 		name = "PutBidAsk",
-		text = string.format("%.2f / %.2f", s.putBid or 0, s.putAsk or 0),
+		text = string.format("%.2f / %.2f", putBid or 0, putAsk or 0),
 		sz = UDim2.new(0.38, -8, 1, 0),
 		pos = UDim2.new(0.62, 0, 0, 0),
 		color = putITM and TEXT_PRIMARY or TEXT_SECONDARY,
 		align = Enum.TextXAlignment.Right,
 	})
+
+	if s.call and s.call.contractSymbol then
+		local callHit = Instance.new("TextButton")
+
+		callHit.Name = "CallHitArea"
+		callHit.Size = UDim2.new(0.38, -8, 1, 0)
+		callHit.Position = UDim2.fromOffset(8, 0)
+		callHit.BackgroundTransparency = 1
+		callHit.Text = ""
+		callHit.ZIndex = 2
+		callHit.Parent = row
+
+		callHit.MouseButton1Click:Connect(function()
+			selectContract("C", s, s.strike)
+		end)
+	end
+
+	if s.put and s.put.contractSymbol then
+		local putHit = Instance.new("TextButton")
+
+		putHit.Name = "PutHitArea"
+		putHit.Size = UDim2.new(0.38, -8, 1, 0)
+		putHit.Position = UDim2.new(0.62, 0, 0, 0)
+		putHit.BackgroundTransparency = 1
+		putHit.Text = ""
+		putHit.ZIndex = 2
+		putHit.Parent = row
+
+		putHit.MouseButton1Click:Connect(function()
+			selectContract("P", s, s.strike)
+		end)
+	end
 
 	return row
 end
@@ -870,23 +977,25 @@ local function clearOptionChain()
 	end
 end
 
+-- Real shape, from GetOptionsDataEvent / the backend's /api/option-chain/:ticker:
 -- {
---   currentPrice = 150.25,
---   expiryLabel  = "Jul 18",
+--   available = true,
+--   spotPrice = 150.25,
+--   expiration = "2026-01-17",
+--   expirationDates = { "2026-01-17", ... },
 --   strikes = {
---     { strike = 145, callBid = 5.20, callAsk = 5.30, putBid = 0.15, putAsk = 0.20 },
---     { strike = 150, callBid = 2.10, callAsk = 2.20, putBid = 1.80, putAsk = 1.90 },
+--     { strike = 145, call = { contractSymbol, bid, ask, lastPrice, impliedVolatility, volume, openInterest }, put = {...} },
 --     ...
 --   }
 -- }
 local function renderOptionChain(optionData)
 	clearOptionChain()
 
-	if not optionData or not optionData.strikes then
+	if not optionData or optionData.available == false or not optionData.strikes then
 		return
 	end
 
-	local spotPrice = optionData.currentPrice or currentPrice
+	local spotPrice = optionData.spotPrice or currentPrice
 
 	for i, s in ipairs(optionData.strikes) do
 		createStrikeRow(ChainData, i, s, spotPrice)
@@ -1110,6 +1219,7 @@ local function loadTicker(rawTicker)
 
 	setLoadingState(true)
 	clearOptionChain()
+	clearContractSelection()
 	clearPositions()
 	clearNewsFeed()
 
@@ -1149,12 +1259,12 @@ local function loadTicker(rawTicker)
 	end
 
 	-- ── Options data ──────────────────────────────────────────────────────────
-	-- Uncomment when GetOptionsDataEvent is live on the server.
-	-- local optionData = GetOptionsDataEvent:InvokeServer(ticker)
-	-- if optionData then
-	--     currentOptionData = optionData
-	--     renderOptionChain(optionData)
-	-- end
+	local optionData = GetOptionsDataEvent:InvokeServer(ticker)
+
+	if optionData then
+		currentOptionData = optionData
+		renderOptionChain(optionData)
+	end
 
 	-- ── Player positions ──────────────────────────────────────────────────────
 	refreshPositions()
@@ -1208,7 +1318,21 @@ local function placeOrder(action)
 		return
 	end
 
-	local result = PlayerOrderEvent:InvokeServer(action, currentTicker, orderQuantity)
+	local result
+
+	if selectedContract then
+		result = PlayerOptionOrderEvent:InvokeServer(
+			action,
+			selectedContract.contractSymbol,
+			selectedContract.ticker,
+			selectedContract.expiration,
+			selectedContract.strike,
+			selectedContract.type,
+			orderQuantity
+		)
+	else
+		result = PlayerOrderEvent:InvokeServer(action, currentTicker, orderQuantity)
+	end
 
 	if not result or not result.success then
 		print(string.format("[TradeController] %s failed: %s", action, (result and result.message) or "Unknown error"))
