@@ -76,7 +76,9 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
   - `Multi/` — cross-boundary utilities used by both client and server-side logic conceptually:
     `ChartRenderer` (pure UI-building candlestick/grid/axis renderer, takes a table of UI element refs +
     OHLC data and returns min/max price), `MarketHoursModule` (NYSE open/closed + holiday calendar, computed
-    algorithmically including Easter-relative Good Friday), `NumberModule` (currency formatting).
+    algorithmically including Easter-relative Good Friday), `NumberModule` (currency formatting), `Navigation`
+    (client-only: `Navigation.openTicker(ticker)` lets any controller send the player to that ticker on the Trade
+    tab — the only link between controllers, which otherwise can't reach each other's locals).
   - `Terminal/` and `Trade/` subfolders are placeholder modules (currently empty) reserved for pulling
     per-screen rendering logic out of the client controllers as they grow.
 

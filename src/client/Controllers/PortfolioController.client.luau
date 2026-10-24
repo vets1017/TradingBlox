@@ -12,6 +12,7 @@ local TweenService = game:GetService("TweenService")
 
 local Theme = require(ReplicatedStorage.Modules.Multi.Theme)
 local NumberModule = require(ReplicatedStorage.Modules.Multi.NumberModule)
+local Navigation = require(ReplicatedStorage.Modules.Multi.Navigation)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -45,6 +46,7 @@ local RANGE_PILL_GAP = 4
 local CASH_ROW_HEIGHT = 24
 local SECTION_HEADER_HEIGHT = 24
 local ROW_HEIGHT = 56
+local ROW_INSET = 8 -- the hover highlight reaches this far past the row's content
 local ROW_ICON_SIZE = 40
 local ROW_VALUE_WIDTH = 120
 
@@ -320,12 +322,13 @@ PositionsCount.TextTruncate = Enum.TextTruncate.None
 
 local LIST_TOP = POSITIONS_HEADER_Y + SECTION_HEADER_HEIGHT + 8
 
--- Runs to the panel's right edge so the scrollbar sits in the padding
--- beside the rows instead of over them
+-- Starts ROW_INSET left of the content so a row's highlight can extend past
+-- it, and runs to the panel's right edge so the scrollbar sits in the
+-- padding beside the rows instead of over them
 local PositionsList = Instance.new("ScrollingFrame")
 PositionsList.Name = "PositionsList"
-PositionsList.Position = UDim2.fromOffset(PADDING, LIST_TOP)
-PositionsList.Size = UDim2.new(1, -PADDING, 1, -(LIST_TOP + PADDING / 2))
+PositionsList.Position = UDim2.fromOffset(PADDING - ROW_INSET, LIST_TOP)
+PositionsList.Size = UDim2.new(1, -(PADDING - ROW_INSET), 1, -(LIST_TOP + PADDING / 2))
 PositionsList.BackgroundTransparency = 1
 PositionsList.BorderSizePixel = 0
 PositionsList.ScrollBarThickness = 4
@@ -659,13 +662,40 @@ local function buildRows(sharePositions, optionPositions)
 	return rows
 end
 
+-- Clicking a row opens its ticker on the Trade tab (the underlying for an
+-- option, whose chain lives there)
 local function createPositionRow(index, row)
-	local frame = makeFrame("Position_" .. index, PositionsList)
-	frame.LayoutOrder = index
-	frame.Size = UDim2.new(1, -PADDING, 0, ROW_HEIGHT)
+	local rowButton = Instance.new("TextButton")
+	rowButton.Name = "Position_" .. index
+	rowButton.LayoutOrder = index
+	rowButton.Size = UDim2.new(1, -(PADDING - ROW_INSET), 0, ROW_HEIGHT)
+	rowButton.AutoButtonColor = false
+	rowButton.BorderSizePixel = 0
+	rowButton.BackgroundColor3 = Theme.Colors.Raised
+	rowButton.BackgroundTransparency = 1
+	rowButton.Text = ""
+	rowButton.Parent = PositionsList
+	addCorner(rowButton)
+
+	local padding = Instance.new("UIPadding")
+	padding.PaddingLeft = UDim.new(0, ROW_INSET)
+	padding.PaddingRight = UDim.new(0, ROW_INSET)
+	padding.Parent = rowButton
+
+	rowButton.MouseEnter:Connect(function()
+		rowButton.BackgroundTransparency = 0
+	end)
+
+	rowButton.MouseLeave:Connect(function()
+		rowButton.BackgroundTransparency = 1
+	end)
+
+	rowButton.MouseButton1Click:Connect(function()
+		Navigation.openTicker(row.ticker)
+	end)
 
 	-- Options get the accent tint so they stand apart from shares at a glance
-	local icon = makeFrame("Icon", frame)
+	local icon = makeFrame("Icon", rowButton)
 	icon.BackgroundTransparency = 0
 	icon.BackgroundColor3 = row.isOption and Theme.Colors.AccentTint or Theme.Colors.Raised
 	icon.AnchorPoint = Vector2.new(0, 0.5)
@@ -688,24 +718,24 @@ local function createPositionRow(index, row)
 	local textX = ROW_ICON_SIZE + 12
 	local textWidth = -(textX + ROW_VALUE_WIDTH + 8)
 
-	local title = makeLabel("Title", frame, Theme.Fonts.UISemibold, Theme.TextSize.Title, Theme.Colors.Text)
+	local title = makeLabel("Title", rowButton, Theme.Fonts.UISemibold, Theme.TextSize.Title, Theme.Colors.Text)
 	title.Position = UDim2.fromOffset(textX, 9)
 	title.Size = UDim2.new(1, textWidth, 0, 20)
 	title.Text = row.title
 
-	local subtitle = makeLabel("Subtitle", frame, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.TextMuted)
+	local subtitle = makeLabel("Subtitle", rowButton, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.TextMuted)
 	subtitle.Position = UDim2.fromOffset(textX, 31)
 	subtitle.Size = UDim2.new(1, textWidth, 0, 16)
 	subtitle.Text = row.subtitle
 
-	local value = makeLabel("Value", frame, Theme.Fonts.Mono, Theme.TextSize.Title, Theme.Colors.Text)
+	local value = makeLabel("Value", rowButton, Theme.Fonts.Mono, Theme.TextSize.Title, Theme.Colors.Text)
 	value.AnchorPoint = Vector2.new(1, 0)
 	value.Position = UDim2.new(1, 0, 0, 9)
 	value.Size = UDim2.fromOffset(ROW_VALUE_WIDTH, 20)
 	value.TextXAlignment = Enum.TextXAlignment.Right
 	value.Text = row.value and NumberModule.format(row.value) or "—"
 
-	local change = makeLabel("Change", frame, Theme.Fonts.Mono, Theme.TextSize.Caption, Theme.Colors.TextMuted)
+	local change = makeLabel("Change", rowButton, Theme.Fonts.Mono, Theme.TextSize.Caption, Theme.Colors.TextMuted)
 	change.AnchorPoint = Vector2.new(1, 0)
 	change.Position = UDim2.new(1, 0, 0, 31)
 	change.Size = UDim2.fromOffset(ROW_VALUE_WIDTH, 16)
@@ -719,7 +749,7 @@ end
 
 local function renderPositions(rows)
 	for _, child in ipairs(PositionsList:GetChildren()) do
-		if child:IsA("Frame") then
+		if child:IsA("GuiObject") then
 			child:Destroy()
 		end
 	end

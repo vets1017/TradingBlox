@@ -11,6 +11,7 @@ local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursMod
 local ChartRenderer = require(ReplicatedStorage.Modules.Multi.ChartRenderer)
 local DrawingModule = require(ReplicatedStorage.Modules.Multi.DrawingModule)
 local Theme = require(ReplicatedStorage.Modules.Multi.Theme)
+local Navigation = require(ReplicatedStorage.Modules.Multi.Navigation)
 
 -- Remotes
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
@@ -952,6 +953,11 @@ for tabName, data in pairs(Tabs) do
 		switchTab(tabName)
 	end)
 end
+
+-- Another screen opened a ticker (e.g. a Portfolio row); TradeController loads it
+Navigation.TickerRequested:Connect(function()
+	switchTab("Trade")
+end)
 
 MainTimeframeButton.MouseButton1Click:Connect(function()
 	isDropdownOpen = not isDropdownOpen

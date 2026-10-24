@@ -10,6 +10,7 @@ local UserInputService = game:GetService("UserInputService")
 local NumberModule = require(ReplicatedStorage.Modules.Multi.NumberModule)
 local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursModule)
 local Theme = require(ReplicatedStorage.Modules.Multi.Theme)
+local Navigation = require(ReplicatedStorage.Modules.Multi.Navigation)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -1381,6 +1382,10 @@ TickerInput.FocusLost:Connect(function(enterPressed)
 
 	loadTicker(raw)
 end)
+
+-- Another screen opened a ticker (e.g. a Portfolio row); TerminalController
+-- switches to this tab
+Navigation.TickerRequested:Connect(loadTicker)
 
 -- Option Chain Toggle
 ChainToggle.MouseButton1Click:Connect(function()
