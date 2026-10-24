@@ -45,7 +45,9 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
 - **Client (`src/client/Controllers/`)** — one controller per screen/UI area (`ShellController` for the
   full-screen shell — nav bar, balance pill, status bar; `TerminalController` for tab switching, Dashboard and
   Charts; `TradeController` for the Trade screen; `PortfolioController` for the Portfolio screen, which it builds
-  entirely in code inside the empty Studio `PortfolioScreen` frame; Quote tabs and Options chain stubs). Controllers `WaitForChild` their way through a large, hand-built UI tree (no UI
+  entirely in code inside the empty Studio `PortfolioScreen` frame; `LeaderboardController` for the Leaderboards
+  tab, whose nav button and empty screen `ShellController` creates in code (`CODE_BUILT_TABS`) and
+  `TerminalController` registers for switching; Quote tabs and Options chain stubs). Controllers `WaitForChild` their way through a large, hand-built UI tree (no UI
   framework/library), wire up `TweenService` animations and `UserInputService` input handling directly, and
   call server `RemoteFunction`s to fetch data. Several controllers (`QuoteTabsController`,
   `OptionsChainController`) are stubs (empty or fully commented out) awaiting their corresponding server
@@ -53,7 +55,8 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
 - **Server (`src/server/Core/`)** — one script per subsystem:
   - `ServerSetup.server.luau` creates the `EventsFolder` in `ReplicatedStorage` and all `RemoteFunction`s the
     client calls (`RequestChartEvent`, `GetMarketDataEvent`, `GetOptionsDataEvent`, `GetPositionsEvent`,
-    `GetPortfolioEvent`, `GetNewsFeedEvent`, `PlayerOrderEvent`, `PlayerOptionOrderEvent`). This must run before other server scripts wire up
+    `GetPortfolioEvent`, `GetLeaderboardEvent`, `GetPublicProfileEvent`, `GetNewsFeedEvent`, `PlayerOrderEvent`,
+    `PlayerOptionOrderEvent`, plus watchlist and research remotes). This must run before other server scripts wire up
     `OnServerInvoke` handlers.
   - `API_Manager.server.luau` is the sole bridge to the outside world for market data: it polls an external
     HTTP backend (`SERVER_URL`, currently a Render-hosted service) for live quotes, option chains, and
@@ -86,12 +89,25 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     (store `PlayerData_v2`, key `Player_<userId>`, $50,000 start), autosaved every 60 s. A failed load kicks the
     player rather than handing them default data. `get(player)`, `setStat`, `updateShares`, `PlayerLoaded`.
     The profile template is the source of truth for the data shape; `Reconcile` adds new fields to old saves.
-  - `ProgressionService` — XP, levels and feature unlocks (`hasFeature(player, feature)`, `onFill` after every
-    order). Mirrors `XP` and `Level` to player attributes.
+  - `ProgressionService` — XP, levels and feature unlocks (`hasFeature(player, feature)`). Mirrors `XP` and
+    `Level` to player attributes.
+  - `OrderEvents` — `Filled` fires after every share or option fill; progression, leaderboards and profiles
+    subscribe rather than the order scripts calling each of them. Fire it from any new order path.
+  - `LeaderboardService` — scores players on the boards in `Config/Leaderboards`; each board+period is its own
+    OrderedDataStore (`LB_<board>_<period>`); top pages cached per server for 60 s.
+  - `PublicProfileService` — the public profile snapshot in DataStore `PublicProfile_v1` (written ≤ 1/min
+    after trades, every 5 min, and on leave via `PlayerDataService.onPlayerLeaving`); also submits leaderboard
+    scores.
+  - `Core/LeaderboardSystem.server.luau` wires `GetLeaderboardEvent` / `GetPublicProfileEvent` (1 req/s per
+    board or profile per player).
 - **Vendored (`src/server/Vendor/`)** — `ProfileStore.luau`, unmodified below a provenance header (pinned
   commit, Apache-2.0; license in `THIRD_PARTY_LICENSES/`). Don't edit it in place.
-- **Shared config (`src/shared/Config/`)** — `Progression` (levels, what each unlocks, XP rules) is read by both
-  sides: the server enforces it, the client shows locks and progress.
+- **Shared config (`src/shared/Config/`)** — read by both sides: the server enforces it, the client explains it.
+  `Progression` (levels, unlocks, XP rules), `Leaderboards` (boards, periods, eligibility, score encoding),
+  `Economy` (starting cash).
+- **Shared UI (`src/shared/UI/`)** — the in-house kit for UI built in code: `UIKit` (frame/label/panel/dot/
+  avatar builders on Theme tokens) and `LineChart` (the gradient line + fill used by the Portfolio chart and
+  profile panel). New code-built screens should use these instead of copying builders.
 - **Shared (`src/shared/Modules/`)**:
   - `Multi/` — cross-boundary utilities used by both client and server-side logic conceptually:
     `ChartRenderer` (pure UI-building candlestick/grid/axis renderer, takes a table of UI element refs +

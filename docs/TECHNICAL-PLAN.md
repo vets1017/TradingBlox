@@ -510,8 +510,8 @@ rest of Phase 0 (backend cache, rate limits, UI export, CI) runs alongside.
 3. ✅ Trade log and realized P/L.
 4. ✅ Progression, levels 1–3 gating.
 5. ✅ Portfolio analytics. Sector allocation still needs a backend route.
-6. Public profiles.
-7. Leaderboards.
+6. ✅ Public profiles (holdings stay private until Phase 2's sharing setting).
+7. ✅ Leaderboards: net worth, weekly and monthly return.
 8. Limit orders.
 9. Dashboard modules and news.
 10. Tutorial.
