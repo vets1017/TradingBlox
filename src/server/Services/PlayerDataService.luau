@@ -44,6 +44,7 @@ local TEMPLATE = {
 		Milestones = {}, -- [milestone] = true once claimed
 		XPDay = "", -- UTC date of the last fill XP
 		FillXPToday = 0,
+		TutorialSteps = {}, -- [stepId] = true for the steps the client reports
 	},
 	Orders = {}, -- [orderId] = open limit order; see OrderService
 	OrderSequence = 0, -- numbers the next order id

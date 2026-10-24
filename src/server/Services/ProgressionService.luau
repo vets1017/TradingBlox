@@ -14,9 +14,29 @@ local OrderEvents = require(ServerScriptService.Services.OrderEvents)
 
 local ProgressionService = {}
 
+local function isTutorialStepDone(progression, step)
+	if step.milestone then
+		return progression.Milestones[step.id] == true
+	end
+
+	return progression.TutorialSteps[step.id] == true
+end
+
+-- "TutorialProgress" lists the done step ids ("FirstTrade,ViewedTicker")
+-- for the client's checklist
 local function publish(player, progression)
+	local doneSteps = {}
+
+	for _, step in ipairs(Progression.TUTORIAL) do
+		if isTutorialStepDone(progression, step) then
+			table.insert(doneSteps, step.id)
+		end
+	end
+
 	player:SetAttribute("XP", progression.XP)
 	player:SetAttribute("Level", Progression.getLevel(progression.XP))
+	player:SetAttribute("TutorialProgress", table.concat(doneSteps, ","))
+	player:SetAttribute("TutorialComplete", progression.Milestones.TutorialComplete == true)
 end
 
 local function countKeys(dictionary)
@@ -38,6 +58,17 @@ local function claimMilestone(progression, milestone)
 	progression.Milestones[milestone] = true
 
 	return Progression.MILESTONES[milestone]
+end
+
+-- The completion bonus, the first time every tutorial step is done
+local function claimTutorialIfDone(progression)
+	for _, step in ipairs(Progression.TUTORIAL) do
+		if not isTutorialStepDone(progression, step) then
+			return 0
+		end
+	end
+
+	return claimMilestone(progression, "TutorialComplete")
 end
 
 function ProgressionService.getLevel(player): number
@@ -99,7 +130,29 @@ local function onFill(player, realizedPL: number?, now: number)
 		xp += claimMilestone(progression, "Diversified")
 	end
 
+	xp += claimTutorialIfDone(progression)
 	ProgressionService.addXP(player, xp)
+end
+
+-- A tutorial step only the client can see happen (opening a screen).
+-- Milestone steps can't be reported this way.
+local function completeTutorialStep(player, stepId)
+	local data = PlayerDataService.get(player)
+	local step = type(stepId) == "string" and Progression.getTutorialStep(stepId)
+
+	if not data or not step or step.milestone or data.Progression.TutorialSteps[stepId] then
+		return
+	end
+
+	data.Progression.TutorialSteps[stepId] = true
+
+	local xp = claimTutorialIfDone(data.Progression)
+
+	if xp > 0 then
+		ProgressionService.addXP(player, xp)
+	else
+		publish(player, data.Progression)
+	end
 end
 
 -- Must run before PlayerDataService.start so no PlayerLoaded is missed
@@ -113,6 +166,9 @@ function ProgressionService.start()
 	end)
 
 	OrderEvents.Filled:Connect(onFill)
+
+	-- Small enough not to need its own Core script
+	ReplicatedStorage:WaitForChild("EventsFolder"):WaitForChild("CompleteTutorialStepEvent").OnServerInvoke = completeTutorialStep
 end
 
 return ProgressionService

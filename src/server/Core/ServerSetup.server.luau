@@ -20,6 +20,7 @@ local EVENTS = {
 	"GetOptionStatsEvent",
 	"GetWatchlistEvent",
 	"ToggleWatchlistEvent",
+	"CompleteTutorialStepEvent",
 }
 
 -- Server-to-client pushes (RemoteEvents rather than RemoteFunctions)

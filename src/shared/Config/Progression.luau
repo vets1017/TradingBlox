@@ -44,9 +44,31 @@ Progression.MILESTONES = {
 	FirstTrade = 50,
 	FirstProfitableSale = 50,
 	Diversified = 100, -- holding DIVERSIFIED_HOLDINGS positions at once
+	TutorialComplete = 100, -- every TUTORIAL step done
 }
 
 Progression.DIVERSIFIED_HOLDINGS = 3
+
+-- The getting-started checklist. A `milestone` step is done once that
+-- milestone is claimed; the others are things only the client sees (opening
+-- a screen) and are reported by it.
+Progression.TUTORIAL = {
+	{ id = "ViewedTicker", text = "Look up a stock on the Trade tab" },
+	{ id = "FirstTrade", text = "Buy your first shares", milestone = true },
+	{ id = "ViewedPortfolio", text = "Check your Portfolio tab" },
+	{ id = "Diversified", text = "Hold 3 different positions", milestone = true },
+	{ id = "FirstProfitableSale", text = "Sell something for a profit", milestone = true },
+}
+
+function Progression.getTutorialStep(stepId: string)
+	for _, step in ipairs(Progression.TUTORIAL) do
+		if step.id == stepId then
+			return step
+		end
+	end
+
+	return nil
+end
 
 function Progression.getLevel(xp: number): number
 	local level = 1
