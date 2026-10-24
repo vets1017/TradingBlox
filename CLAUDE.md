@@ -43,8 +43,10 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
 ### Client/server split
 
 - **Client (`src/client/Controllers/`)** — one controller per screen/UI area (`ShellController` for the
-  full-screen shell — nav bar, balance pill, status bar; `TerminalController` for tab switching, Dashboard and
-  Charts; `TradeController` for the Trade screen; `PortfolioController` for the Portfolio screen, which it builds
+  full-screen shell — nav bar, balance and level pills, status bar, toasts; `TerminalController` for tab
+  switching, the Dashboard greeting and countdown, and Charts; `DashboardController` for the Dashboard's widgets
+  (account info, watchlist, orders, performance, market overview, top traders), built in code inside the
+  Studio widget frames; `TutorialController` for the "Getting started" checklist card; `TradeController` for the Trade screen; `PortfolioController` for the Portfolio screen, which it builds
   entirely in code inside the empty Studio `PortfolioScreen` frame; `LeaderboardController` for the Leaderboards
   tab, whose nav button and empty screen `ShellController` creates in code (`CODE_BUILT_TABS`) and
   `TerminalController` registers for switching; Quote tabs and Options chain stubs). Controllers `WaitForChild` their way through a large, hand-built UI tree (no UI
@@ -62,7 +64,8 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     HTTP backend (`SERVER_URL`, currently a Render-hosted service) for live quotes, option chains, and
     candle/chart data, with its own ticker validation, per-player request-cooldown throttling, and
     time-based caches (`ChartCache`, `OptionChainCache`, etc., swept periodically). It handles
-    `GetOptionsDataEvent` (multi-strike option chain, via `MarketDataModule.getOptionChain`).
+    `GetOptionsDataEvent` (multi-strike option chain, via `MarketDataModule.getOptionChain`) and
+    `GetMarketOverviewEvent` (the Dashboard's benchmark quotes, cached 60 s per server).
     `GetNewsFeedEvent` is declared but has no server-side handler yet — client calls to it will hang.
     `PlayerOrderEvent` and `GetPositionsEvent` are handled in `TradeSystem.server.luau` (share buy/sell and
     position listing), not here.
@@ -91,8 +94,9 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     (fires with the player only: a BindableEvent would hand listeners a *copy* of a data table — always read
     data with `get`), `onPlayerLeaving` (synchronous, just before the final save).
     The profile template is the source of truth for the data shape; `Reconcile` adds new fields to old saves.
-  - `ProgressionService` — XP, levels and feature unlocks (`hasFeature(player, feature)`). Mirrors `XP` and
-    `Level` to player attributes.
+  - `ProgressionService` — XP, levels, feature unlocks (`hasFeature(player, feature)`) and the getting-started
+    tutorial. Mirrors `XP`, `Level`, `TutorialProgress` and `TutorialComplete` to player attributes, and handles
+    `CompleteTutorialStepEvent` itself.
   - `OrderService` — share execution: `fillShares` (market orders and limit fills share it) and level 2 limit
     orders kept in `playerData.Orders`: checked every 15 s while the player is online, caught up at login
     against candles since placement, expired after 30 days. Pushes fills/cancellations through the
@@ -119,8 +123,9 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     `ChartRenderer` (pure UI-building candlestick/grid/axis renderer, takes a table of UI element refs +
     OHLC data and returns min/max price), `MarketHoursModule` (NYSE open/closed + holiday calendar, computed
     algorithmically including Easter-relative Good Friday), `NumberModule` (currency formatting), `Navigation`
-    (client-only: `Navigation.openTicker(ticker)` lets any controller send the player to that ticker on the Trade
-    tab — the only link between controllers, which otherwise can't reach each other's locals).
+    (client-only: `Navigation.openTicker(ticker)` and `Navigation.openTab(name)` let any controller send the
+    player to a ticker on the Trade tab or to another tab — the only link between controllers, which otherwise
+    can't reach each other's locals).
   - `Terminal/` and `Trade/` subfolders hold per-screen logic pulled out of the client controllers as they
     grow. `Trade/OrderTicketModule` is the Trade screen's Market/Limit preset ticket (one-click presets, the
     house style for order entry); the other files there are still empty placeholders.

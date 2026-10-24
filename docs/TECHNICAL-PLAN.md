@@ -513,8 +513,9 @@ rest of Phase 0 (backend cache, rate limits, UI export, CI) runs alongside.
 6. ✅ Public profiles (holdings stay private until Phase 2's sharing setting).
 7. ✅ Leaderboards: net worth, weekly and monthly return.
 8. ✅ Limit orders, plus a preset order ticket on the Trade screen.
-9. Dashboard modules and news.
-10. Tutorial.
+9. ◐ Dashboard modules: account info, watchlist, orders, performance, market overview, top traders. News
+   and top gainers/losers still need backend routes.
+10. ✅ Getting-started checklist (tutorial).
 
 ## Sources
 
