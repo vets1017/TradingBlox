@@ -10,12 +10,20 @@ local EVENTS = {
 	"GetPublicProfileEvent",
 	"GetNewsFeedEvent",
 	"PlayerOrderEvent",
+	"PlaceLimitOrderEvent",
+	"CancelOrderEvent",
+	"GetOrdersEvent",
 	"PlayerOptionOrderEvent",
 	"GetAnalystReportEvent",
 	"GetFundamentalsEvent",
 	"GetOptionStatsEvent",
 	"GetWatchlistEvent",
 	"ToggleWatchlistEvent",
+}
+
+-- Server-to-client pushes (RemoteEvents rather than RemoteFunctions)
+local PUSH_EVENTS = {
+	"OrderUpdateEvent", -- a limit order filled or was cancelled while the player wasn't waiting on it
 }
 
 local Event = {}
@@ -48,6 +56,10 @@ local EventsFolder = getOrCreateFolder(ReplicatedStorage, "EventsFolder")
 
 for _, eventName in ipairs(EVENTS) do
 	Event[eventName] = getOrCreateRemote(EventsFolder, eventName, "RemoteFunction")
+end
+
+for _, eventName in ipairs(PUSH_EVENTS) do
+	Event[eventName] = getOrCreateRemote(EventsFolder, eventName, "RemoteEvent")
 end
 
 local RequestChartEvent = Event.RequestChartEvent

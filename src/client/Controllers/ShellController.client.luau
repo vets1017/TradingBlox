@@ -105,24 +105,25 @@ local LevelValue = makeTextLabel("LevelValue", "TextStrong", LevelPill)
 LevelValue.Size = UDim2.fromScale(1, 1)
 LevelValue.TextXAlignment = Enum.TextXAlignment.Center
 
--- Level-up announcement under the nav bar; positioned by layoutShell
-local LevelToast = Instance.new("Frame")
-LevelToast.Name = "LevelToast"
-LevelToast.AnchorPoint = Vector2.new(0.5, 0)
-LevelToast.Size = UDim2.fromOffset(TOAST_WIDTH, TOAST_HEIGHT)
-LevelToast.BorderSizePixel = 0
-LevelToast.Visible = false
-LevelToast.ZIndex = 10
-LevelToast:SetAttribute("ThemeRole", "Panel")
-LevelToast.Parent = MainBackground
+-- Announcements under the nav bar (level-ups, limit-order fills);
+-- positioned by layoutShell
+local Toast = Instance.new("Frame")
+Toast.Name = "Toast"
+Toast.AnchorPoint = Vector2.new(0.5, 0)
+Toast.Size = UDim2.fromOffset(TOAST_WIDTH, TOAST_HEIGHT)
+Toast.BorderSizePixel = 0
+Toast.Visible = false
+Toast.ZIndex = 10
+Toast:SetAttribute("ThemeRole", "Panel")
+Toast.Parent = MainBackground
 
-local ToastTitle = makeTextLabel("Title", "Heading", LevelToast)
+local ToastTitle = makeTextLabel("Title", "Heading", Toast)
 ToastTitle.Position = UDim2.fromOffset(0, 8)
 ToastTitle.Size = UDim2.new(1, 0, 0, 20)
 ToastTitle.TextXAlignment = Enum.TextXAlignment.Center
 ToastTitle.ZIndex = 10
 
-local ToastBody = makeTextLabel("Body", "TextMuted", LevelToast)
+local ToastBody = makeTextLabel("Body", "TextMuted", Toast)
 ToastBody.Position = UDim2.fromOffset(12, 30)
 ToastBody.Size = UDim2.new(1, -24, 0, 18)
 ToastBody.TextXAlignment = Enum.TextXAlignment.Center
@@ -255,7 +256,7 @@ local function layoutShell()
 	BalancePill.Position = UDim2.new(0, rightEdge, 0.5, 0)
 	LevelPill.Size = UDim2.fromOffset(levelPillWidth, BALANCE_PILL_HEIGHT)
 	LevelPill.Position = UDim2.new(0, levelPillRight, 0.5, 0)
-	LevelToast.Position = UDim2.new(0.5, 0, 0, navHeight + 12)
+	Toast.Position = UDim2.new(0.5, 0, 0, navHeight + 12)
 
 	ScreenContainer.Position = UDim2.fromOffset(0, navHeight)
 	ScreenContainer.Size = UDim2.new(1, 0, 1, -(navHeight + STATUS_BAR_HEIGHT))
@@ -279,25 +280,32 @@ end
 local shownLevel = nil -- nil until the server first sets Level, so loading in isn't announced
 local toastVersion = 0
 
-local function showLevelToast(level)
-	local unlocks = Progression.getUnlocksAt(level)
-
+local function showToast(title, body)
 	toastVersion += 1
 
 	local version = toastVersion
 
-	ToastTitle.Text = string.format("Level %d · %s", level, Progression.LEVELS[level].name)
-	ToastBody.Text = #unlocks > 0 and ("Unlocked " .. table.concat(unlocks, ", ")) or "New level reached"
-	LevelToast.BackgroundTransparency = 1
-	LevelToast.Visible = true
-	TweenService:Create(LevelToast, TOAST_FADE, { BackgroundTransparency = 0 }):Play()
+	ToastTitle.Text = title
+	ToastBody.Text = body
+	Toast.BackgroundTransparency = 1
+	Toast.Visible = true
+	TweenService:Create(Toast, TOAST_FADE, { BackgroundTransparency = 0 }):Play()
 
 	task.delay(TOAST_SECONDS, function()
-		-- A newer level-up owns the toast now
+		-- A newer toast owns the frame now
 		if version == toastVersion then
-			LevelToast.Visible = false
+			Toast.Visible = false
 		end
 	end)
+end
+
+local function showLevelToast(level)
+	local unlocks = Progression.getUnlocksAt(level)
+
+	showToast(
+		string.format("Level %d · %s", level, Progression.LEVELS[level].name),
+		#unlocks > 0 and ("Unlocked " .. table.concat(unlocks, ", ")) or "New level reached"
+	)
 end
 
 local function updateLevel()
@@ -344,4 +352,15 @@ task.spawn(function()
 		task.wait(1)
 		updateMarketStatus()
 	end
+end)
+
+-- Limit orders fill or get cancelled on the server's schedule, so they're
+-- announced here wherever the player is. Spawned so waiting for the remote
+-- never holds up the shell.
+task.spawn(function()
+	local OrderUpdateEvent = ReplicatedStorage:WaitForChild("EventsFolder"):WaitForChild("OrderUpdateEvent")
+
+	OrderUpdateEvent.OnClientEvent:Connect(function(update)
+		showToast(update.kind == "filled" and "Order filled" or "Order cancelled", update.message)
+	end)
 end)

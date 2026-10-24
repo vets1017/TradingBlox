@@ -104,8 +104,12 @@ end
 
 -- Must run before PlayerDataService.start so no PlayerLoaded is missed
 function ProgressionService.start()
-	PlayerDataService.PlayerLoaded:Connect(function(player, data)
-		publish(player, data.Progression)
+	PlayerDataService.PlayerLoaded:Connect(function(player)
+		local data = PlayerDataService.get(player)
+
+		if data then
+			publish(player, data.Progression)
+		end
 	end)
 
 	OrderEvents.Filled:Connect(onFill)

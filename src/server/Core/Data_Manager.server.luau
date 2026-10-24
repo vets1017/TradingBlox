@@ -11,6 +11,7 @@ local PlayerDataService = require(ServerScriptService.Services.PlayerDataService
 local ProgressionService = require(ServerScriptService.Services.ProgressionService)
 local LeaderboardService = require(ServerScriptService.Services.LeaderboardService)
 local PublicProfileService = require(ServerScriptService.Services.PublicProfileService)
+local OrderService = require(ServerScriptService.Services.OrderService)
 local CalculatorModule = require(ServerScriptService.Modules.CalculatorModule)
 
 -- Reads resolve straight to the live profile data, so there's nothing to keep
@@ -36,4 +37,5 @@ end)
 ProgressionService.start()
 LeaderboardService.start()
 PublicProfileService.start()
+OrderService.start()
 PlayerDataService.start()

@@ -1,18 +1,22 @@
 -- TradeSystem.server.luau
 --
--- Order execution (Buy/Sell) and positions reporting.
+-- Share order remotes (market orders, and level 2 limit orders placed,
+-- cancelled and listed) and positions reporting. Execution itself lives in
+-- OrderService.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local MarketDataModule = require(ServerScriptService.Modules.MarketDataModule)
-local CalculatorModule = require(ServerScriptService.Modules.CalculatorModule)
-local TradeLogModule = require(ServerScriptService.Modules.TradeLogModule)
-local OrderEvents = require(ServerScriptService.Services.OrderEvents)
+local OrderService = require(ServerScriptService.Services.OrderService)
+local PlayerDataService = require(ServerScriptService.Services.PlayerDataService)
 local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursModule)
 
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
 local PlayerOrderEvent = EventsFolder:WaitForChild("PlayerOrderEvent")
+local PlaceLimitOrderEvent = EventsFolder:WaitForChild("PlaceLimitOrderEvent")
+local CancelOrderEvent = EventsFolder:WaitForChild("CancelOrderEvent")
+local GetOrdersEvent = EventsFolder:WaitForChild("GetOrdersEvent")
 local GetPositionsEvent = EventsFolder:WaitForChild("GetPositionsEvent")
 
 local VALID_ACTIONS = { Buy = true, Sell = true }
@@ -22,6 +26,7 @@ local function isPositiveInteger(value)
 end
 
 -- PlayerOrderEvent
+-- Market order: fills now at the live price
 PlayerOrderEvent.OnServerInvoke = function(player, action, ticker, shares)
 	if type(action) ~= "string" or not VALID_ACTIONS[action] then
 		return { success = false, message = "Invalid order type." }
@@ -41,9 +46,7 @@ PlayerOrderEvent.OnServerInvoke = function(player, action, ticker, shares)
 		return { success = false, message = "Market is closed." }
 	end
 
-	local playerData = _G.PlayerData[player.UserId]
-
-	if not playerData then
+	if not PlayerDataService.get(player) then
 		return { success = false, message = "Player data not loaded." }
 	end
 
@@ -53,51 +56,25 @@ PlayerOrderEvent.OnServerInvoke = function(player, action, ticker, shares)
 		return { success = false, message = "Price unavailable for " .. targetTicker .. "." }
 	end
 
-	-- Read before the fill: selling a whole position clears its average cost.
-	-- Every held ticker has one; the fallback only stops a malformed save from
-	-- failing a sale halfway through.
-	local costBasis = playerData.Portfolio.AvgCost[targetTicker] or price
+	return OrderService.fillShares(player, action, targetTicker, shares, price)
+end
 
-	if action == "Buy" then
-		local totalCost = price * shares
+-- PlaceLimitOrderEvent
+-- Can be placed while the market is closed; it fills once the market opens
+-- and the price crosses the limit
+PlaceLimitOrderEvent.OnServerInvoke = function(player, action, ticker, shares, limitPrice)
+	return OrderService.placeLimit(player, action, ticker, shares, limitPrice)
+end
 
-		if playerData.Balance < totalCost then
-			return { success = false, message = "Insufficient funds." }
-		end
+-- CancelOrderEvent
+CancelOrderEvent.OnServerInvoke = function(player, orderId)
+	return OrderService.cancel(player, orderId)
+end
 
-		_G.UpdatePlayerStat(player, "Balance", playerData.Balance - totalCost)
-		_G.UpdatePortfolio(player, targetTicker, shares, price)
-	else -- Sell
-		local portfolioShares = playerData.Portfolio and playerData.Portfolio.Shares
-		local ownedShares = (portfolioShares and portfolioShares[targetTicker]) or 0
-
-		if ownedShares < shares then
-			return { success = false, message = "Not enough shares to sell." }
-		end
-
-		local totalProceeds = price * shares
-
-		_G.UpdatePlayerStat(player, "Balance", playerData.Balance + totalProceeds)
-		_G.UpdatePortfolio(player, targetTicker, -shares, price)
-	end
-
-	local now = os.time()
-	local realizedPL = TradeLogModule.record(playerData, {
-		ticker = targetTicker,
-		side = action,
-		quantity = shares,
-		price = price,
-		costBasis = costBasis,
-	}, now)
-
-	OrderEvents.fireFilled(player, realizedPL, now)
-	CalculatorModule.calculateNetWorth(player)
-
-	return {
-		success = true,
-		message = string.format("%s %d x %s @ %.2f", action, shares, targetTicker, price),
-		price = price,
-	}
+-- GetOrdersEvent
+-- Open limit orders, oldest first
+GetOrdersEvent.OnServerInvoke = function(player)
+	return OrderService.getOrders(player)
 end
 
 -- GetPositionsEvent
@@ -106,13 +83,13 @@ end
 -- use case - one active symbol at a time); without one, returns every open
 -- position (the Portfolio tab's share rows).
 GetPositionsEvent.OnServerInvoke = function(player, ticker)
-	local playerData = _G.PlayerData[player.UserId]
+	local playerData = PlayerDataService.get(player)
 
-	if not playerData or not playerData.Portfolio or not playerData.Portfolio.Shares then
+	if not playerData then
 		return {}
 	end
 
-	local targetTicker = ticker and string.upper(ticker) or nil
+	local targetTicker = type(ticker) == "string" and string.upper(ticker) or nil
 	local positions = {}
 
 	for posTicker, quantity in pairs(playerData.Portfolio.Shares) do

@@ -11,6 +11,7 @@ local NumberModule = require(ReplicatedStorage.Modules.Multi.NumberModule)
 local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursModule)
 local Theme = require(ReplicatedStorage.Modules.Multi.Theme)
 local Navigation = require(ReplicatedStorage.Modules.Multi.Navigation)
+local OrderTicketModule = require(ReplicatedStorage.Modules.Trade.OrderTicketModule)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -160,6 +161,8 @@ local isFetchingData = false
 local activeTabName = ""
 local chainExpanded = true
 local orderQuantity = 1
+local currentPositionQuantity = 0 -- shares held of currentTicker, for the order ticket's sell presets
+local orderTicket = nil -- created once the functions it calls exist
 
 local selectedContract = nil
 
@@ -1098,7 +1101,12 @@ local function refreshPositions()
 	local positions = GetPositionsEvent:InvokeServer(currentTicker)
 
 	if positions then
+		currentPositionQuantity = positions[1] and positions[1].quantity or 0
 		renderPositions(positions)
+
+		if orderTicket then
+			orderTicket:update()
+		end
 	end
 end
 
@@ -1244,6 +1252,7 @@ local function loadTicker(rawTicker)
 	currentAnalystData = nil
 	currentFundamentalsData = nil
 	currentOptionStatsData = nil
+	currentPositionQuantity = 0
 
 	renderFieldGrid(ContentAnalystReports, ANALYST_FIELDS, nil, "AR_")
 	renderFieldGrid(ContentFundamentals, FUNDAMENTALS_FIELDS, nil, "FN_")
@@ -1309,6 +1318,7 @@ local function loadTicker(rawTicker)
 	-- end
 
 	isFetchingData = false
+	orderTicket:update() -- the new ticker and price
 end
 
 -- Polling
@@ -1434,6 +1444,29 @@ end
 
 Player:GetAttributeChangedSignal("Balance"):Connect(onBalanceChanged)
 Player:GetAttributeChangedSignal("NetWorth"):Connect(onBalanceChanged)
+
+-- Order ticket: a code-built section right under the header, so the
+-- Studio-built sections from QuoteDetails down move one slot further
+for _, section in ipairs(TradeScreen:GetChildren()) do
+	if section:IsA("GuiObject") and section.LayoutOrder >= 2 then
+		section.LayoutOrder += 1
+	end
+end
+
+orderTicket = OrderTicketModule.new({
+	parent = TradeScreen,
+	layoutOrder = 2,
+	getTicker = function()
+		return currentTicker
+	end,
+	getPrice = function()
+		return currentPrice
+	end,
+	getPosition = function()
+		return currentPositionQuantity
+	end,
+	onOrderPlaced = refreshPositions,
+})
 
 switchTab("QuoteDetails")
 

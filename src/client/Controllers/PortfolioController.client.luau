@@ -24,6 +24,9 @@ local PlayerGui = Player:WaitForChild("PlayerGui")
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
 local GetPortfolioEvent = EventsFolder:WaitForChild("GetPortfolioEvent")
 local GetPositionsEvent = EventsFolder:WaitForChild("GetPositionsEvent")
+local GetOrdersEvent = EventsFolder:WaitForChild("GetOrdersEvent")
+local CancelOrderEvent = EventsFolder:WaitForChild("CancelOrderEvent")
+local OrderUpdateEvent = EventsFolder:WaitForChild("OrderUpdateEvent")
 
 -- References
 local TerminalGui = PlayerGui:WaitForChild("TerminalGui")
@@ -53,6 +56,8 @@ local ROW_HEIGHT = 56
 local ROW_INSET = 8 -- the hover highlight reaches this far past the row's content
 local ROW_ICON_SIZE = 40
 local ROW_VALUE_WIDTH = 120
+local ORDER_ROW_HEIGHT = 36
+local MAX_ORDER_ROWS = 5 -- more than this collapses into "+N more"
 
 -- Chart Constants
 local END_DOT_SIZE = 8
@@ -280,10 +285,27 @@ Divider.BackgroundColor3 = Theme.Colors.Border
 Divider.Position = UDim2.fromOffset(PADDING, DIVIDER_Y)
 Divider.Size = UDim2.new(1, -PADDING * 2, 0, 1)
 
-local POSITIONS_HEADER_Y = DIVIDER_Y + 1 + GAP
+local SECTIONS_TOP = DIVIDER_Y + 1 + GAP
+
+-- Open orders sit above the positions and only show when there are some;
+-- layoutPositionsArea moves the positions down to make room
+local OrdersSection = makeFrame("OrdersSection", SidePanel)
+OrdersSection.Position = UDim2.fromOffset(PADDING, SECTIONS_TOP)
+OrdersSection.Size = UDim2.new(1, -PADDING * 2, 0, 0)
+OrdersSection.AutomaticSize = Enum.AutomaticSize.Y
+OrdersSection.Visible = false
+
+local OrdersLayout = Instance.new("UIListLayout")
+OrdersLayout.SortOrder = Enum.SortOrder.LayoutOrder
+OrdersLayout.Padding = UDim.new(0, 4)
+OrdersLayout.Parent = OrdersSection
+
+local OrdersHeader = makeLabel("Header", OrdersSection, Theme.Fonts.UISemibold, Theme.TextSize.Title, Theme.Colors.Text)
+OrdersHeader.LayoutOrder = 0
+OrdersHeader.Size = UDim2.new(1, 0, 0, SECTION_HEADER_HEIGHT)
 
 local PositionsHeader = makeFrame("PositionsHeader", SidePanel)
-PositionsHeader.Position = UDim2.fromOffset(PADDING, POSITIONS_HEADER_Y)
+PositionsHeader.Position = UDim2.fromOffset(PADDING, SECTIONS_TOP)
 PositionsHeader.Size = UDim2.new(1, -PADDING * 2, 0, SECTION_HEADER_HEIGHT)
 
 local PositionsHeaderLayout = Instance.new("UIListLayout")
@@ -309,7 +331,7 @@ PositionsCount.AutomaticSize = Enum.AutomaticSize.X
 PositionsCount.Size = UDim2.fromScale(0, 1)
 PositionsCount.TextTruncate = Enum.TextTruncate.None
 
-local LIST_TOP = POSITIONS_HEADER_Y + SECTION_HEADER_HEIGHT + 8
+local LIST_TOP = SECTIONS_TOP + SECTION_HEADER_HEIGHT + 8
 
 -- Starts ROW_INSET left of the content so a row's highlight can extend past
 -- it, and runs to the panel's right edge so the scrollbar sits in the
@@ -811,8 +833,8 @@ local function renderPositions(rows)
 end
 
 -- Refresh
-local function invoke(remote)
-	local success, result = pcall(remote.InvokeServer, remote)
+local function invoke(remote, ...)
+	local success, result = pcall(remote.InvokeServer, remote, ...)
 
 	if not success then
 		warn("[PortfolioController] " .. remote.Name .. " failed: " .. tostring(result))
@@ -823,8 +845,106 @@ local function invoke(remote)
 	return result
 end
 
--- Calls made while one is in flight collapse into a single follow-up
-local function refresh()
+-- Open Orders
+local refresh -- defined below; cancelling an order refreshes the tab
+
+-- "now", "12m", "3h", "2d"
+local function formatAge(seconds)
+	if seconds < 60 then
+		return "now"
+	elseif seconds < 3600 then
+		return math.floor(seconds / 60) .. "m"
+	elseif seconds < 86400 then
+		return math.floor(seconds / 3600) .. "h"
+	end
+
+	return math.floor(seconds / 86400) .. "d"
+end
+
+-- The positions header and list sit under the orders when there are any
+local function layoutPositionsArea()
+	local top = SECTIONS_TOP + (OrdersSection.Visible and OrdersSection.AbsoluteSize.Y + GAP or 0)
+	local listTop = top + SECTION_HEADER_HEIGHT + 8
+
+	PositionsHeader.Position = UDim2.fromOffset(PADDING, top)
+	PositionsList.Position = UDim2.fromOffset(PADDING - ROW_INSET, listTop)
+	PositionsList.Size = UDim2.new(1, -(PADDING - ROW_INSET), 1, -(listTop + PADDING / 2))
+	PositionsMessage.Position = UDim2.fromOffset(PADDING, listTop)
+end
+
+local function createOrderRow(index, order)
+	local row = makeFrame("Order_" .. index, OrdersSection)
+	row.LayoutOrder = index
+	row.Size = UDim2.new(1, 0, 0, ORDER_ROW_HEIGHT)
+
+	local sideColor = order.side == "Buy" and Theme.Colors.Up or Theme.Colors.Down
+
+	local title = makeLabel("Title", row, Theme.Fonts.UISemibold, Theme.TextSize.Body, Theme.Colors.Text)
+	title.RichText = true
+	title.Size = UDim2.new(1, -80, 0, 18)
+	title.Text = string.format(
+		'<font color="#%s">%s</font> %s %s',
+		sideColor:ToHex(),
+		order.side,
+		NumberModule.formatShares(order.quantity),
+		order.ticker
+	)
+
+	local detail = makeLabel("Detail", row, Theme.Fonts.Mono, Theme.TextSize.Caption, Theme.Colors.TextMuted)
+	detail.Position = UDim2.fromOffset(0, 18)
+	detail.Size = UDim2.new(1, -80, 0, 16)
+	detail.Text = string.format("limit %s · %s", NumberModule.format(order.limitPrice), formatAge(os.time() - order.createdAt))
+
+	local cancel = Instance.new("TextButton")
+	cancel.Name = "Cancel"
+	cancel.AnchorPoint = Vector2.new(1, 0.5)
+	cancel.Position = UDim2.fromScale(1, 0.5)
+	cancel.Size = UDim2.fromOffset(68, 24)
+	cancel.AutoButtonColor = false
+	cancel.BorderSizePixel = 0
+	cancel.BackgroundColor3 = Theme.Colors.Raised
+	cancel.FontFace = Theme.Fonts.UISemibold
+	cancel.TextSize = Theme.TextSize.Caption
+	cancel.TextColor3 = Theme.Colors.TextMuted
+	cancel.Text = "Cancel"
+	cancel.Parent = row
+	addCorner(cancel)
+	addStroke(cancel)
+
+	cancel.MouseButton1Click:Connect(function()
+		cancel.Text = "…"
+		invoke(CancelOrderEvent, order.id)
+		refresh()
+	end)
+end
+
+local function renderOrders(orders)
+	for _, child in ipairs(OrdersSection:GetChildren()) do
+		if child:IsA("GuiObject") and child ~= OrdersHeader then
+			child:Destroy()
+		end
+	end
+
+	OrdersHeader.Text = "Open orders · " .. #orders
+	OrdersSection.Visible = #orders > 0
+
+	for index = 1, math.min(#orders, MAX_ORDER_ROWS) do
+		createOrderRow(index, orders[index])
+	end
+
+	if #orders > MAX_ORDER_ROWS then
+		local more = makeLabel("More", OrdersSection, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.TextMuted)
+		more.LayoutOrder = MAX_ORDER_ROWS + 1
+		more.Size = UDim2.new(1, 0, 0, 16)
+		more.Text = string.format("+%d more", #orders - MAX_ORDER_ROWS)
+	end
+
+	layoutPositionsArea()
+end
+
+-- Calls made while one is in flight collapse into a single follow-up.
+-- Assigns the `refresh` declared above, so the order rows can call it.
+function refresh()
 	if isRefreshing then
 		isRefreshQueued = true
 
@@ -833,9 +953,10 @@ local function refresh()
 
 	isRefreshing = true
 
-	-- Both reprice holdings over HTTP on the server, so run them side by side
-	local summary, sharePositions
-	local pending = 2
+	-- The first two reprice holdings over HTTP on the server, so all three
+	-- run side by side
+	local summary, sharePositions, orders
+	local pending = 3
 
 	task.spawn(function()
 		summary = invoke(GetPortfolioEvent)
@@ -847,8 +968,17 @@ local function refresh()
 		pending -= 1
 	end)
 
+	task.spawn(function()
+		orders = invoke(GetOrdersEvent)
+		pending -= 1
+	end)
+
 	while pending > 0 do
 		task.wait()
+	end
+
+	if orders then
+		renderOrders(orders)
 	end
 
 	if summary then
@@ -926,6 +1056,15 @@ PortfolioScreen:GetPropertyChangedSignal("Visible"):Connect(function()
 end)
 
 -- Balance only moves on a trade, so positions changed too
+OrdersSection:GetPropertyChangedSignal("AbsoluteSize"):Connect(layoutPositionsArea)
+
+-- A limit order filled, was cancelled or expired on the server
+OrderUpdateEvent.OnClientEvent:Connect(function()
+	if PortfolioScreen.Visible then
+		refresh()
+	end
+end)
+
 Player:GetAttributeChangedSignal("Balance"):Connect(function()
 	updateCash()
 

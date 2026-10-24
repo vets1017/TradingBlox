@@ -45,6 +45,8 @@ local TEMPLATE = {
 		XPDay = "", -- UTC date of the last fill XP
 		FillXPToday = 0,
 	},
+	Orders = {}, -- [orderId] = open limit order; see OrderService
+	OrderSequence = 0, -- numbers the next order id
 	Leaderboard = { -- the current week and month; see LeaderboardService
 		Week = "", -- period key; a new key resets that period's fields
 		WeekStart = 0, -- net worth when the player first showed up that week
@@ -66,7 +68,9 @@ local playerLoaded = Instance.new("BindableEvent")
 
 local PlayerDataService = {}
 
--- Fires (player, data) once a player's profile has loaded
+-- Fires (player) once a player's profile has loaded. Read the data with
+-- get(player): a BindableEvent hands listeners a copy of any table it
+-- carries, and changes to a copy aren't saved.
 PlayerDataService.PlayerLoaded = playerLoaded.Event
 
 -- The player's live data table, or nil before it loads and after the session
@@ -174,7 +178,7 @@ local function onPlayerAdded(player)
 
 	profiles[player] = profile
 	player:SetAttribute("Balance", profile.Data.Balance)
-	playerLoaded:Fire(player, profile.Data)
+	playerLoaded:Fire(player)
 end
 
 local function onPlayerRemoving(player)
