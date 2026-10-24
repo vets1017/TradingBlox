@@ -12,6 +12,7 @@ local ChartRenderer = require(ReplicatedStorage.Modules.Multi.ChartRenderer)
 local DrawingModule = require(ReplicatedStorage.Modules.Multi.DrawingModule)
 local Theme = require(ReplicatedStorage.Modules.Multi.Theme)
 local Navigation = require(ReplicatedStorage.Modules.Multi.Navigation)
+local Progression = require(ReplicatedStorage.Config.Progression)
 
 -- Remotes
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
@@ -975,8 +976,33 @@ MainIndicatorsButton.MouseButton1Click:Connect(function()
 	TimeDropdownList.Visible = false
 end)
 
+local INDICATORS_BUTTON_TEXT = MainIndicatorsButton.Text
+
+local function areIndicatorsUnlocked()
+	return Progression.isUnlocked(Player:GetAttribute("Level") or 1, "ChartIndicators")
+end
+
+-- Below the unlock level the dropdown still opens, but its options are
+-- dimmed and do nothing, and the button names the level that unlocks them
+local function updateIndicatorLock()
+	local isUnlocked = areIndicatorsUnlocked()
+
+	MainIndicatorsButton.Text = isUnlocked and INDICATORS_BUTTON_TEXT
+		or string.format("%s · Lv %d", INDICATORS_BUTTON_TEXT, Progression.FEATURES.ChartIndicators)
+
+	for button, indicator in pairs(IndicatorOptions) do
+		if not indicator.active then
+			button.TextColor3 = isUnlocked and COLOR_INACTIVE_TEXT or Theme.Colors.TextDisabled
+		end
+	end
+end
+
 for button, indicator in pairs(IndicatorOptions) do
 	button.MouseButton1Click:Connect(function()
+		if not areIndicatorsUnlocked() then
+			return
+		end
+
 		indicator.active = not indicator.active
 		button.BackgroundTransparency = indicator.active and 0 or 1
 		button.BackgroundColor3 = indicator.active and indicator.color or COLOR_INACTIVE_BACKGROUND
@@ -1455,7 +1481,10 @@ for button in pairs(IndicatorOptions) do
 	button.TextColor3 = COLOR_INACTIVE_TEXT
 end
 
+Player:GetAttributeChangedSignal("Level"):Connect(updateIndicatorLock)
+
 switchTab("Dashboard")
+updateIndicatorLock()
 setDrawingTool(currentDrawingTool) -- the Studio defaults no longer show which tool is active
 updateTimeframeUI(currentTimeframe)
 updateGreeting()

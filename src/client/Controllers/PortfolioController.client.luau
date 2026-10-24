@@ -13,6 +13,7 @@ local TweenService = game:GetService("TweenService")
 local Theme = require(ReplicatedStorage.Modules.Multi.Theme)
 local NumberModule = require(ReplicatedStorage.Modules.Multi.NumberModule)
 local Navigation = require(ReplicatedStorage.Modules.Multi.Navigation)
+local Progression = require(ReplicatedStorage.Config.Progression)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -66,6 +67,7 @@ local MUTED_HEX = "#" .. Theme.Colors.TextMuted:ToHex()
 
 -- State
 local selectedRange = "24h"
+local profileSummary = nil -- trades and join date from the last refresh
 local histories = {} -- [range] = { { time, value }, ... } from the last refresh
 local chartPoints = {} -- the drawn points: { x, y (0-1 of the chart), time, value }
 local currentNetWorth = Player:GetAttribute("NetWorth")
@@ -442,11 +444,39 @@ local function updateCash()
 	CashValue.Text = balance and NumberModule.format(balance) or "—"
 end
 
-local function updateProfileStats(summary)
-	local parts = { pluralize(summary.trades or 0, "trade", "trades") }
+-- "Level 1 · Beginner · 120 / 300 XP" (no target once at the top level)
+local function formatLevel()
+	local level = Player:GetAttribute("Level")
+	local xp = Player:GetAttribute("XP")
 
-	if summary.joinedAt then
-		table.insert(parts, "Joined " .. os.date("%b %Y", summary.joinedAt))
+	if not level or not xp then
+		return nil
+	end
+
+	local nextLevel = Progression.LEVELS[level + 1]
+	local progress = nextLevel
+			and string.format("%s / %s XP", NumberModule.formatShares(xp), NumberModule.formatShares(nextLevel.xp))
+		or NumberModule.formatShares(xp) .. " XP"
+
+	return string.format("Level %d · %s · %s", level, Progression.LEVELS[level].name, progress)
+end
+
+-- Level comes from attributes and the rest from the last GetPortfolioEvent,
+-- so either one changing redraws the whole line
+local function updateProfileStats()
+	local parts = {}
+	local levelText = formatLevel()
+
+	if levelText then
+		table.insert(parts, levelText)
+	end
+
+	if profileSummary then
+		table.insert(parts, pluralize(profileSummary.trades or 0, "trade", "trades"))
+
+		if profileSummary.joinedAt then
+			table.insert(parts, "Joined " .. os.date("%b %Y", profileSummary.joinedAt))
+		end
 	end
 
 	StatsLabel.Text = table.concat(parts, "  ·  ")
@@ -808,7 +838,8 @@ local function refresh()
 		histories = summary.histories or {}
 		currentNetWorth = summary.netWorth
 		ChartMessage.Text = "No history yet"
-		updateProfileStats(summary)
+		profileSummary = summary
+		updateProfileStats()
 		renderChart()
 
 		-- Shares and options only render together: a list missing one kind
@@ -887,6 +918,9 @@ end)
 
 -- Every reprice (trades, the server's 5-minute sample) lands here; the
 -- chart itself catches up on the next refresh
+Player:GetAttributeChangedSignal("Level"):Connect(updateProfileStats)
+Player:GetAttributeChangedSignal("XP"):Connect(updateProfileStats)
+
 Player:GetAttributeChangedSignal("NetWorth"):Connect(function()
 	currentNetWorth = Player:GetAttribute("NetWorth")
 
@@ -923,4 +957,5 @@ end)
 layoutScreen()
 updateRangePills()
 updateCash()
+updateProfileStats()
 showCurrentValue()

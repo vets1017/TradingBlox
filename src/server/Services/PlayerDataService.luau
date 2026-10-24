@@ -38,6 +38,12 @@ local TEMPLATE = {
 	},
 	TradeLog = {}, -- the most recent fills; see TradeLogModule
 	NetWorthHistory = {}, -- see PortfolioHistoryModule
+	Progression = { -- see ProgressionService
+		XP = 0,
+		Milestones = {}, -- [milestone] = true once claimed
+		XPDay = "", -- UTC date of the last fill XP
+		FillXPToday = 0,
+	},
 }
 
 ProfileStore.SetConstant("AUTO_SAVE_PERIOD", AUTO_SAVE_PERIOD)

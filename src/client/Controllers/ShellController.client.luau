@@ -10,10 +10,12 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local GuiService = game:GetService("GuiService")
 local StarterGui = game:GetService("StarterGui")
+local TweenService = game:GetService("TweenService")
 
 local Theme = require(ReplicatedStorage.Modules.Multi.Theme)
 local NumberModule = require(ReplicatedStorage.Modules.Multi.NumberModule)
 local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursModule)
+local Progression = require(ReplicatedStorage.Config.Progression)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -37,6 +39,11 @@ local BALANCE_PILL_MIN_WIDTH = 90
 local BALANCE_PILL_PADDING = 12 -- each side of the balance text
 local TAB_TEXT_PADDING = 10
 local NET_WORTH_VALUE_WIDTH = 140
+local PILL_GAP = 8 -- between the level and balance pills
+local TOAST_WIDTH = 420
+local TOAST_HEIGHT = 56
+local TOAST_SECONDS = 6
+local TOAST_FADE = TweenInfo.new(0.3)
 
 -- The terminal is the whole game UI; these default HUD pieces would sit on
 -- top of it once it fills the screen. Chat stays available.
@@ -85,6 +92,42 @@ BalancePill.Parent = TopBar
 local BalanceValue = makeTextLabel("BalanceValue", "Number", BalancePill)
 BalanceValue.Size = UDim2.fromScale(1, 1)
 BalanceValue.TextXAlignment = Enum.TextXAlignment.Center
+
+local LevelPill = Instance.new("Frame")
+LevelPill.Name = "LevelPill"
+LevelPill.AnchorPoint = Vector2.new(1, 0.5)
+LevelPill.Size = UDim2.fromOffset(BALANCE_PILL_MIN_WIDTH, BALANCE_PILL_HEIGHT)
+LevelPill.BorderSizePixel = 0
+LevelPill:SetAttribute("ThemeRole", "Pill")
+LevelPill.Parent = TopBar
+
+local LevelValue = makeTextLabel("LevelValue", "TextStrong", LevelPill)
+LevelValue.Size = UDim2.fromScale(1, 1)
+LevelValue.TextXAlignment = Enum.TextXAlignment.Center
+
+-- Level-up announcement under the nav bar; positioned by layoutShell
+local LevelToast = Instance.new("Frame")
+LevelToast.Name = "LevelToast"
+LevelToast.AnchorPoint = Vector2.new(0.5, 0)
+LevelToast.Size = UDim2.fromOffset(TOAST_WIDTH, TOAST_HEIGHT)
+LevelToast.BorderSizePixel = 0
+LevelToast.Visible = false
+LevelToast.ZIndex = 10
+LevelToast:SetAttribute("ThemeRole", "Panel")
+LevelToast.Parent = MainBackground
+
+local ToastTitle = makeTextLabel("Title", "Heading", LevelToast)
+ToastTitle.Position = UDim2.fromOffset(0, 8)
+ToastTitle.Size = UDim2.new(1, 0, 0, 20)
+ToastTitle.TextXAlignment = Enum.TextXAlignment.Center
+ToastTitle.ZIndex = 10
+
+local ToastBody = makeTextLabel("Body", "TextMuted", LevelToast)
+ToastBody.Position = UDim2.fromOffset(12, 30)
+ToastBody.Size = UDim2.new(1, -24, 0, 18)
+ToastBody.TextXAlignment = Enum.TextXAlignment.Center
+ToastBody.TextTruncate = Enum.TextTruncate.AtEnd
+ToastBody.ZIndex = 10
 
 local StatusBar = Instance.new("Frame")
 StatusBar.Name = "StatusBar"
@@ -167,9 +210,11 @@ local function layoutShell()
 	local leftEdge = (hasTopbar and inset.Min.X or 0) + EDGE_PADDING
 	local rightEdge = (hasTopbar and inset.Max.X or MainBackground.AbsoluteSize.X) - EDGE_PADDING
 
-	-- The pill hugs the balance text so narrow windows keep room for the tabs
+	-- The pills hug their text so narrow windows keep room for the tabs
 	local pillWidth = math.max(BalanceValue.TextBounds.X + BALANCE_PILL_PADDING * 2, BALANCE_PILL_MIN_WIDTH)
-	local tabsRight = rightEdge - pillWidth - SECTION_GAP
+	local levelPillWidth = LevelValue.TextBounds.X + BALANCE_PILL_PADDING * 2
+	local levelPillRight = rightEdge - pillWidth - PILL_GAP
+	local tabsRight = levelPillRight - levelPillWidth - SECTION_GAP
 
 	-- On a narrow window the wordmark gives up its space before the tabs do
 	local tabsLeftWithWordmark = leftEdge + WORDMARK_WIDTH + SECTION_GAP
@@ -183,6 +228,9 @@ local function layoutShell()
 	TabContainer.Size = UDim2.new(0, math.max(tabsRight - tabsLeft, 0), 1, 0)
 	BalancePill.Size = UDim2.fromOffset(pillWidth, BALANCE_PILL_HEIGHT)
 	BalancePill.Position = UDim2.new(0, rightEdge, 0.5, 0)
+	LevelPill.Size = UDim2.fromOffset(levelPillWidth, BALANCE_PILL_HEIGHT)
+	LevelPill.Position = UDim2.new(0, levelPillRight, 0.5, 0)
+	LevelToast.Position = UDim2.new(0.5, 0, 0, navHeight + 12)
 
 	ScreenContainer.Position = UDim2.fromOffset(0, navHeight)
 	ScreenContainer.Size = UDim2.new(1, 0, 1, -(navHeight + STATUS_BAR_HEIGHT))
@@ -203,6 +251,42 @@ local function updateNetWorth()
 	NetWorthValue.Text = formatStat(Player:GetAttribute("NetWorth"))
 end
 
+local shownLevel = nil -- nil until the server first sets Level, so loading in isn't announced
+local toastVersion = 0
+
+local function showLevelToast(level)
+	local unlocks = Progression.getUnlocksAt(level)
+
+	toastVersion += 1
+
+	local version = toastVersion
+
+	ToastTitle.Text = string.format("Level %d · %s", level, Progression.LEVELS[level].name)
+	ToastBody.Text = #unlocks > 0 and ("Unlocked " .. table.concat(unlocks, ", ")) or "New level reached"
+	LevelToast.BackgroundTransparency = 1
+	LevelToast.Visible = true
+	TweenService:Create(LevelToast, TOAST_FADE, { BackgroundTransparency = 0 }):Play()
+
+	task.delay(TOAST_SECONDS, function()
+		-- A newer level-up owns the toast now
+		if version == toastVersion then
+			LevelToast.Visible = false
+		end
+	end)
+end
+
+local function updateLevel()
+	local level = Player:GetAttribute("Level")
+
+	LevelValue.Text = level and string.format("Lv %d · %s", level, Progression.LEVELS[level].name) or "—"
+
+	if level and shownLevel and level > shownLevel then
+		showLevelToast(level)
+	end
+
+	shownLevel = level
+end
+
 local function updateMarketStatus()
 	local now = os.time()
 	local isOpen, targetTime = MarketHoursModule.getMarketStatus(now)
@@ -218,11 +302,14 @@ MainBackground:GetPropertyChangedSignal("AbsoluteSize"):Connect(layoutShell)
 -- text changes with every trade
 TabLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(layoutShell)
 BalanceValue:GetPropertyChangedSignal("TextBounds"):Connect(layoutShell)
+LevelValue:GetPropertyChangedSignal("TextBounds"):Connect(layoutShell)
 Player:GetAttributeChangedSignal("Balance"):Connect(updateBalance)
 Player:GetAttributeChangedSignal("NetWorth"):Connect(updateNetWorth)
+Player:GetAttributeChangedSignal("Level"):Connect(updateLevel)
 
 updateBalance()
 updateNetWorth()
+updateLevel()
 updateMarketStatus()
 Theme.apply(TerminalGui)
 layoutShell()

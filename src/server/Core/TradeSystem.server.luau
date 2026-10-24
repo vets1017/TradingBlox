@@ -8,6 +8,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local MarketDataModule = require(ServerScriptService.Modules.MarketDataModule)
 local CalculatorModule = require(ServerScriptService.Modules.CalculatorModule)
 local TradeLogModule = require(ServerScriptService.Modules.TradeLogModule)
+local ProgressionService = require(ServerScriptService.Services.ProgressionService)
 local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursModule)
 
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
@@ -80,13 +81,16 @@ PlayerOrderEvent.OnServerInvoke = function(player, action, ticker, shares)
 		_G.UpdatePortfolio(player, targetTicker, -shares, price)
 	end
 
-	TradeLogModule.record(playerData, {
+	local now = os.time()
+	local realizedPL = TradeLogModule.record(playerData, {
 		ticker = targetTicker,
 		side = action,
 		quantity = shares,
 		price = price,
 		costBasis = costBasis,
-	}, os.time())
+	}, now)
+
+	ProgressionService.onFill(player, realizedPL, now)
 	CalculatorModule.calculateNetWorth(player)
 
 	return {

@@ -493,7 +493,7 @@ local function renderAnalystReport(data)
 	end
 
 	if data.available == false then
-		renderUnavailable(ContentAnalystReports, "AR_", "Not available for this asset")
+		renderUnavailable(ContentAnalystReports, "AR_", data.message or "Not available for this asset")
 		return
 	end
 
@@ -519,7 +519,7 @@ local function renderFundamentals(data)
 	end
 
 	if data.available == false then
-		renderUnavailable(ContentFundamentals, "FN_", "Not available for this asset")
+		renderUnavailable(ContentFundamentals, "FN_", data.message or "Not available for this asset")
 		return
 	end
 
@@ -558,7 +558,7 @@ local function renderOptionStats(data)
 	end
 
 	if data.available == false then
-		renderUnavailable(ContentOptionStats, "OS_", "Not available for this asset")
+		renderUnavailable(ContentOptionStats, "OS_", data.message or "Not available for this asset")
 		return
 	end
 
@@ -998,6 +998,30 @@ end
 -- }
 local function renderOptionChain(optionData)
 	clearOptionChain()
+
+	local isLocked = optionData ~= nil and optionData.locked == true
+
+	ColumnHeaders.Visible = not isLocked
+
+	-- Below the unlock level the server sends the unlock message instead of
+	-- a chain; a Strike_ frame so clearOptionChain removes it like a row
+	if isLocked then
+		local row = Instance.new("Frame")
+
+		row.Name = "Strike_Locked"
+		row.Size = UDim2.new(1, 0, 0, ROW_HEIGHT_CHAIN)
+		row.BackgroundTransparency = 1
+		row.Parent = ChainData
+
+		makeLabel(row, {
+			name = "Message",
+			text = optionData.message,
+			color = TEXT_SECONDARY,
+			align = Enum.TextXAlignment.Center,
+		})
+
+		return
+	end
 
 	if not optionData or optionData.available == false or not optionData.strikes then
 		return

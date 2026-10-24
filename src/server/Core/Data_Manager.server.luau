@@ -1,13 +1,14 @@
 -- Data_Manager.server.luau
 --
--- Starts PlayerDataService and keeps the `_G` names the other server scripts
--- still use pointing at it, until those scripts move onto services
--- (docs/TECHNICAL-PLAN.md, Phase 0).
+-- Starts the player services and keeps the `_G` names the other server
+-- scripts still use pointing at PlayerDataService, until those scripts move
+-- onto services (docs/TECHNICAL-PLAN.md, Phase 0).
 
 local Players = game:GetService("Players")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local PlayerDataService = require(ServerScriptService.Services.PlayerDataService)
+local ProgressionService = require(ServerScriptService.Services.ProgressionService)
 local CalculatorModule = require(ServerScriptService.Modules.CalculatorModule)
 
 -- Reads resolve straight to the live profile data, so there's nothing to keep
@@ -29,4 +30,6 @@ PlayerDataService.PlayerLoaded:Connect(function(player)
 	task.spawn(CalculatorModule.calculateNetWorth, player)
 end)
 
+-- Listeners first, so none of them misses a player who loads straight away
+ProgressionService.start()
 PlayerDataService.start()

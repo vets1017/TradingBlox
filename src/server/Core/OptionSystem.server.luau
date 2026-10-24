@@ -9,7 +9,9 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local MarketDataModule = require(ServerScriptService.Modules.MarketDataModule)
 local CalculatorModule = require(ServerScriptService.Modules.CalculatorModule)
 local TradeLogModule = require(ServerScriptService.Modules.TradeLogModule)
+local ProgressionService = require(ServerScriptService.Services.ProgressionService)
 local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursModule)
+local Progression = require(ReplicatedStorage.Config.Progression)
 
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
 local PlayerOptionOrderEvent = EventsFolder:WaitForChild("PlayerOptionOrderEvent")
@@ -49,6 +51,10 @@ PlayerOptionOrderEvent.OnServerInvoke = function(player, action, contractSymbol,
 
 	if not isPositiveInteger(contracts) then
 		return { success = false, message = "Invalid contract quantity." }
+	end
+
+	if not ProgressionService.hasFeature(player, "Options") then
+		return { success = false, message = "Options: " .. Progression.getLockedMessage("Options") }
 	end
 
 	-- Options don't trade 24/7 like crypto does - always gate on NYSE hours,
@@ -132,14 +138,17 @@ PlayerOptionOrderEvent.OnServerInvoke = function(player, action, contractSymbol,
 		_G.UpdatePlayerStat(player, "Balance", playerData.Balance + totalProceeds)
 	end
 
-	TradeLogModule.record(playerData, {
+	local now = os.time()
+	local realizedPL = TradeLogModule.record(playerData, {
 		ticker = targetTicker,
 		contract = contractSymbol,
 		side = action,
 		quantity = contracts,
 		price = fillPrice,
 		costBasis = costBasis,
-	}, os.time())
+	}, now)
+
+	ProgressionService.onFill(player, realizedPL, now)
 	CalculatorModule.calculateNetWorth(player)
 
 	return {

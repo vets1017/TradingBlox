@@ -7,6 +7,8 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local Players = game:GetService("Players")
 
 local MarketDataModule = require(ServerScriptService.Modules.MarketDataModule)
+local ProgressionService = require(ServerScriptService.Services.ProgressionService)
+local Progression = require(ReplicatedStorage.Config.Progression)
 
 -- Remotes
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
@@ -42,6 +44,16 @@ local function isThrottled(player, remoteName)
 	perRemote[remoteName] = now
 
 	return false
+end
+
+-- The "no data" shape the research tabs already render, carrying the
+-- unlock message; nil when the player has the feature
+local function getLockedResponse(player, feature)
+	if ProgressionService.hasFeature(player, feature) then
+		return nil
+	end
+
+	return { available = false, locked = true, message = Progression.getLockedMessage(feature) }
 end
 
 --
@@ -119,6 +131,12 @@ GetOptionsDataEvent.OnServerInvoke = function(player, ticker)
 		return nil
 	end
 
+	local locked = getLockedResponse(player, "Options")
+
+	if locked then
+		return locked
+	end
+
 	if not MarketDataModule.isValidTicker(ticker) then
 		warn(string.format("[API_Manager] Invalid ticker from %s: %s", player.Name, tostring(ticker)))
 
@@ -138,6 +156,12 @@ end
 GetAnalystReportEvent.OnServerInvoke = function(player, ticker)
 	if isThrottled(player, "GetAnalystReportEvent") then
 		return nil
+	end
+
+	local locked = getLockedResponse(player, "Fundamentals")
+
+	if locked then
+		return locked
 	end
 
 	if not MarketDataModule.isValidTicker(ticker) then
@@ -161,6 +185,12 @@ GetFundamentalsEvent.OnServerInvoke = function(player, ticker)
 		return nil
 	end
 
+	local locked = getLockedResponse(player, "Fundamentals")
+
+	if locked then
+		return locked
+	end
+
 	if not MarketDataModule.isValidTicker(ticker) then
 		warn(string.format("[API_Manager] Invalid ticker from %s: %s", player.Name, tostring(ticker)))
 
@@ -180,6 +210,12 @@ end
 GetOptionStatsEvent.OnServerInvoke = function(player, ticker)
 	if isThrottled(player, "GetOptionStatsEvent") then
 		return nil
+	end
+
+	local locked = getLockedResponse(player, "Options")
+
+	if locked then
+		return locked
 	end
 
 	if not MarketDataModule.isValidTicker(ticker) then
