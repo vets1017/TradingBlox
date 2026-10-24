@@ -506,10 +506,10 @@ Phase 1 starts with the Phase 0 pieces it can't ship without: safe player data a
 rest of Phase 0 (backend cache, rate limits, UI export, CI) runs alongside.
 
 1. ✅ Market hours: daylight saving, observed holidays, early closes and the 30-minute-early open.
-2. Player data v2: ProfileStore, $50,000 start, autosave and session lock, `_G` kept as a shim.
-3. Trade log and realized P/L.
-4. Progression, levels 1–3 gating.
-5. Portfolio analytics.
+2. ✅ Player data v2: ProfileStore, $50,000 start, autosave and session lock, `_G` kept as a shim.
+3. ✅ Trade log and realized P/L.
+4. ✅ Progression, levels 1–3 gating.
+5. ✅ Portfolio analytics. Sector allocation still needs a backend route.
 6. Public profiles.
 7. Leaderboards.
 8. Limit orders.
