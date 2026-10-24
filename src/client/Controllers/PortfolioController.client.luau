@@ -44,6 +44,7 @@ local CHANGE_HEIGHT = 20
 local RANGE_PILL_WIDTH = 44
 local RANGE_PILL_HEIGHT = 26
 local RANGE_PILL_GAP = 4
+local STATS_STRIP_HEIGHT = 56
 local CASH_ROW_HEIGHT = 24
 local SECTION_HEADER_HEIGHT = 24
 local ROW_HEIGHT = 56
@@ -183,6 +184,56 @@ UsernameLabel.Text = "@" .. Player.Name
 local StatsLabel = makeLabel("Stats", ProfileHeader, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.TextMuted)
 StatsLabel.Position = UDim2.fromOffset(PROFILE_TEXT_X, 46)
 StatsLabel.Size = UDim2.new(1, -PROFILE_TEXT_X, 0, 16)
+
+-- Stats Strip
+-- The first three are basic tracking; the `analytics` ones need level 2
+local STAT_TILES = {
+	{ key = "dayPL", caption = "Day P/L" },
+	{ key = "unrealizedPL", caption = "Unrealized P/L" },
+	{ key = "realizedPL", caption = "Realized P/L" },
+	{ key = "winRate", caption = "Win rate", analytics = true },
+	{ key = "averages", caption = "Avg gain / loss", analytics = true },
+	{ key = "maxDrawdown", caption = "Max drawdown (30d)", analytics = true },
+}
+
+local StatsStrip = makeFrame("StatsStrip", PortfolioScreen)
+StatsStrip.Position = UDim2.fromOffset(PADDING, PADDING + HEADER_HEIGHT + GAP)
+StatsStrip.Size = UDim2.new(1, -PADDING * 2, 0, STATS_STRIP_HEIGHT)
+
+local StatsStripLayout = Instance.new("UIListLayout")
+StatsStripLayout.FillDirection = Enum.FillDirection.Horizontal
+StatsStripLayout.HorizontalFlex = Enum.UIFlexAlignment.Fill -- equal shares of the width
+StatsStripLayout.SortOrder = Enum.SortOrder.LayoutOrder
+StatsStripLayout.Padding = UDim.new(0, GAP)
+StatsStripLayout.Parent = StatsStrip
+
+local statValueLabels = {} -- [tile key] = value TextLabel
+
+for index, tile in ipairs(STAT_TILES) do
+	local tileFrame = makePanel("Stat_" .. tile.key, StatsStrip)
+	tileFrame.LayoutOrder = index
+	tileFrame.Size = UDim2.fromScale(0, 1)
+
+	local caption = makeLabel("Caption", tileFrame, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.TextMuted)
+	caption.Position = UDim2.fromOffset(12, 8)
+	caption.Size = UDim2.new(1, -24, 0, 16)
+	caption.Text = tile.caption
+
+	-- RichText for the gain/loss pair; scaled so long amounts fit narrow tiles
+	local value = makeLabel("Value", tileFrame, Theme.Fonts.Mono, Theme.TextSize.Title, Theme.Colors.Text)
+	value.Position = UDim2.fromOffset(12, 26)
+	value.Size = UDim2.new(1, -24, 0, 22)
+	value.RichText = true
+	value.TextScaled = true
+	value.Text = "—"
+
+	local valueSizeConstraint = Instance.new("UITextSizeConstraint")
+	valueSizeConstraint.MaxTextSize = Theme.TextSize.Title
+	valueSizeConstraint.MinTextSize = Theme.TextSize.Caption
+	valueSizeConstraint.Parent = value
+
+	statValueLabels[tile.key] = value
+end
 
 -- Chart Panel
 local ChartPanel = makePanel("ChartPanel", PortfolioScreen)
@@ -482,6 +533,101 @@ local function updateProfileStats()
 	StatsLabel.Text = table.concat(parts, "  ·  ")
 end
 
+-- Stats
+local UP_HEX = Theme.Colors.Up:ToHex()
+local DOWN_HEX = Theme.Colors.Down:ToHex()
+
+local function getChangeColor(amount)
+	if amount > 0 then
+		return Theme.Colors.Up
+	elseif amount < 0 then
+		return Theme.Colors.Down
+	end
+
+	return Theme.Colors.Text
+end
+
+local function setStat(key, text, color)
+	local label = statValueLabels[key]
+
+	label.Text = text
+	label.TextColor3 = color or Theme.Colors.Text
+end
+
+local function setMoneyStat(key, amount)
+	if amount then
+		setStat(key, formatSignedMoney(amount), getChangeColor(amount))
+	else
+		setStat(key, "—", Theme.Colors.TextMuted)
+	end
+end
+
+-- Day and unrealized P/L add up the position rows (day P/L is shares only:
+-- option quotes carry no previous close); the rest is the server's summary
+local function renderStats(summary, sharePositions)
+	local dayPL, unrealizedPL = 0, 0
+
+	for _, position in ipairs(sharePositions) do
+		dayPL += position.plDay or 0
+		unrealizedPL += position.plOpen or 0
+	end
+
+	for _, position in ipairs(summary.options or {}) do
+		unrealizedPL += position.plOpen or 0
+	end
+
+	setMoneyStat("dayPL", dayPL)
+	setMoneyStat("unrealizedPL", unrealizedPL)
+	setMoneyStat("realizedPL", summary.realizedPL)
+
+	local analytics = summary.analytics
+
+	if not analytics then
+		local lockedText = "Unlocks at Lv " .. Progression.FEATURES.Analytics
+
+		for _, tile in ipairs(STAT_TILES) do
+			if tile.analytics then
+				setStat(tile.key, lockedText, Theme.Colors.TextDisabled)
+			end
+		end
+
+		return
+	end
+
+	if analytics.winRate then
+		setStat(
+			"winRate",
+			string.format("%.0f%% · %s", analytics.winRate * 100, pluralize(analytics.closedTrades, "trade", "trades"))
+		)
+	else
+		setStat("winRate", "—", Theme.Colors.TextMuted)
+	end
+
+	if analytics.averageGain or analytics.averageLoss then
+		local gain = analytics.averageGain
+				and string.format('<font color="#%s">+%s</font>', UP_HEX, NumberModule.format(analytics.averageGain))
+			or "—"
+		local loss = analytics.averageLoss
+				and string.format('<font color="#%s">-%s</font>', DOWN_HEX, NumberModule.format(analytics.averageLoss))
+			or "—"
+
+		setStat("averages", gain .. " / " .. loss)
+	else
+		setStat("averages", "—", Theme.Colors.TextMuted)
+	end
+
+	local drawdownPercent = analytics.maxDrawdown and analytics.maxDrawdown * 100
+
+	-- Below half a hundredth it would print as a red "-0.00%"
+	if drawdownPercent and drawdownPercent >= 0.005 then
+		setStat("maxDrawdown", string.format("-%.2f%%", drawdownPercent), Theme.Colors.Down)
+	elseif drawdownPercent then
+		setStat("maxDrawdown", "0.00%")
+	else
+		setStat("maxDrawdown", "—", Theme.Colors.TextMuted)
+	end
+end
+
 -- Chart
 -- Draws the selected range as one continuous line (rotated 2px segments -
 -- Roblox has no polyline), colored by whether the range is up or down and
@@ -649,8 +795,8 @@ local function getIconText(ticker)
 end
 
 -- Share rows (GetPositionsEvent) and option rows (GetPortfolioEvent) in one
--- display shape, biggest holding first
-local function buildRows(sharePositions, optionPositions)
+-- display shape, biggest holding first, each with its share of net worth
+local function buildRows(sharePositions, optionPositions, netWorth)
 	local rows = {}
 
 	for _, position in ipairs(sharePositions) do
@@ -682,6 +828,12 @@ local function buildRows(sharePositions, optionPositions)
 			value = position.value,
 			plOpenPct = position.plOpenPct,
 		})
+	end
+
+	for _, row in ipairs(rows) do
+		if row.value and netWorth and netWorth > 0 then
+			row.subtitle ..= string.format(" · %.1f%%", row.value / netWorth * 100)
+		end
 	end
 
 	-- Unpriced holdings sink to the bottom
@@ -845,7 +997,8 @@ local function refresh()
 		-- Shares and options only render together: a list missing one kind
 		-- would read as those positions having been closed
 		if sharePositions then
-			renderPositions(buildRows(sharePositions, summary.options or {}))
+			renderPositions(buildRows(sharePositions, summary.options or {}, summary.netWorth))
+			renderStats(summary, sharePositions)
 		end
 	elseif next(histories) == nil then
 		ChartMessage.Text = "Couldn't load your portfolio"
@@ -864,7 +1017,7 @@ end
 -- chart the rest; on a narrow screen the side panel stacks under the chart
 local function layoutScreen()
 	local screenSize = PortfolioScreen.AbsoluteSize
-	local bodyTop = PADDING + HEADER_HEIGHT + GAP
+	local bodyTop = PADDING + HEADER_HEIGHT + GAP + STATS_STRIP_HEIGHT + GAP
 
 	ChartPanel.Position = UDim2.fromOffset(PADDING, bodyTop)
 
@@ -918,8 +1071,16 @@ end)
 
 -- Every reprice (trades, the server's 5-minute sample) lands here; the
 -- chart itself catches up on the next refresh
-Player:GetAttributeChangedSignal("Level"):Connect(updateProfileStats)
 Player:GetAttributeChangedSignal("XP"):Connect(updateProfileStats)
+
+-- A new level can unlock analytics, which only arrive with a refresh
+Player:GetAttributeChangedSignal("Level"):Connect(function()
+	updateProfileStats()
+
+	if PortfolioScreen.Visible then
+		refresh()
+	end
+end)
 
 Player:GetAttributeChangedSignal("NetWorth"):Connect(function()
 	currentNetWorth = Player:GetAttribute("NetWorth")

@@ -113,4 +113,28 @@ function PortfolioHistoryModule.getRange(history, rangeSeconds, now)
 	return downsample(points, MAX_CHART_POINTS)
 end
 
+-- The largest fall from a high to a later low, as a fraction of that high
+-- (0.25 = down 25%), over the whole history (up to 30 days). Nil with fewer
+-- than two points.
+function PortfolioHistoryModule.getMaxDrawdown(history)
+	if #history < 2 then
+		return nil
+	end
+
+	local peak = history[1][2]
+	local maxDrawdown = 0
+
+	for _, point in ipairs(history) do
+		local value = point[2]
+
+		if value > peak then
+			peak = value
+		elseif peak > 0 then
+			maxDrawdown = math.max(maxDrawdown, (peak - value) / peak)
+		end
+	end
+
+	return maxDrawdown
+end
+
 return PortfolioHistoryModule

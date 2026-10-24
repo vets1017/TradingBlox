@@ -12,6 +12,9 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local MarketDataModule = require(ServerScriptService.Modules.MarketDataModule)
 local CalculatorModule = require(ServerScriptService.Modules.CalculatorModule)
 local PortfolioHistoryModule = require(ServerScriptService.Modules.PortfolioHistoryModule)
+local TradeLogModule = require(ServerScriptService.Modules.TradeLogModule)
+local ProgressionService = require(ServerScriptService.Services.ProgressionService)
+local Progression = require(ReplicatedStorage.Config.Progression)
 
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
 local GetPortfolioEvent = EventsFolder:WaitForChild("GetPortfolioEvent")
@@ -38,6 +41,7 @@ local function buildOptionPositions(playerData)
 			expiration = position.expiration,
 			contracts = position.contracts,
 			value = value,
+			plOpen = plOpen,
 			plOpenPct = (plOpen and cost ~= 0) and (plOpen / cost * 100) or nil,
 		})
 	end
@@ -62,15 +66,29 @@ GetPortfolioEvent.OnServerInvoke = function(player)
 	local histories = {}
 
 	for range, rangeSeconds in pairs(PortfolioHistoryModule.RANGES) do
-		histories[range] = PortfolioHistoryModule.getRange(playerData.NetWorthHistory or {}, rangeSeconds, now)
+		histories[range] = PortfolioHistoryModule.getRange(playerData.NetWorthHistory, rangeSeconds, now)
+	end
+
+	-- Realized P/L is basic tracking; the rest is level 2 portfolio analytics
+	local analytics = nil
+	local analyticsLockedMessage = nil
+
+	if ProgressionService.hasFeature(player, "Analytics") then
+		analytics = TradeLogModule.getSummary(playerData.Stats)
+		analytics.maxDrawdown = PortfolioHistoryModule.getMaxDrawdown(playerData.NetWorthHistory)
+	else
+		analyticsLockedMessage = Progression.getLockedMessage("Analytics")
 	end
 
 	return {
 		netWorth = netWorth,
 		balance = playerData.Balance,
 		histories = histories,
-		trades = playerData.Stats and playerData.Stats.Trades or 0,
-		joinedAt = playerData.Stats and playerData.Stats.JoinedAt,
+		trades = playerData.Stats.Trades,
+		joinedAt = playerData.Stats.JoinedAt,
+		realizedPL = playerData.Stats.RealizedPL,
+		analytics = analytics,
+		analyticsLockedMessage = analyticsLockedMessage,
 		options = buildOptionPositions(playerData),
 	}
 end
