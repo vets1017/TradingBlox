@@ -8,6 +8,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local MarketDataModule = require(ServerScriptService.Modules.MarketDataModule)
 local CalculatorModule = require(ServerScriptService.Modules.CalculatorModule)
+local TradeLogModule = require(ServerScriptService.Modules.TradeLogModule)
 local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursModule)
 
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
@@ -71,6 +72,8 @@ PlayerOptionOrderEvent.OnServerInvoke = function(player, action, contractSymbol,
 
 	playerData.Portfolio.Options = playerData.Portfolio.Options or {}
 
+	local fillPrice, costBasis -- per-share premium; average cost is read before a sale changes the position
+
 	if action == "Buy" then
 		local price = quote.ask
 
@@ -99,6 +102,7 @@ PlayerOptionOrderEvent.OnServerInvoke = function(player, action, contractSymbol,
 		}
 
 		_G.UpdatePlayerStat(player, "Balance", playerData.Balance - totalCost)
+		fillPrice = price
 	else -- Sell
 		local price = quote.bid
 
@@ -116,6 +120,9 @@ PlayerOptionOrderEvent.OnServerInvoke = function(player, action, contractSymbol,
 		local totalProceeds = price * 100 * contracts
 		local remainingContracts = ownedContracts - contracts
 
+		fillPrice = price
+		costBasis = existing.avgCost
+
 		if remainingContracts > 0 then
 			existing.contracts = remainingContracts
 		else
@@ -125,7 +132,14 @@ PlayerOptionOrderEvent.OnServerInvoke = function(player, action, contractSymbol,
 		_G.UpdatePlayerStat(player, "Balance", playerData.Balance + totalProceeds)
 	end
 
-	playerData.Stats.Trades += 1
+	TradeLogModule.record(playerData, {
+		ticker = targetTicker,
+		contract = contractSymbol,
+		side = action,
+		quantity = contracts,
+		price = fillPrice,
+		costBasis = costBasis,
+	}, os.time())
 	CalculatorModule.calculateNetWorth(player)
 
 	return {

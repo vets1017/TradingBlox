@@ -7,6 +7,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local MarketDataModule = require(ServerScriptService.Modules.MarketDataModule)
 local CalculatorModule = require(ServerScriptService.Modules.CalculatorModule)
+local TradeLogModule = require(ServerScriptService.Modules.TradeLogModule)
 local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursModule)
 
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
@@ -51,6 +52,11 @@ PlayerOrderEvent.OnServerInvoke = function(player, action, ticker, shares)
 		return { success = false, message = "Price unavailable for " .. targetTicker .. "." }
 	end
 
+	-- Read before the fill: selling a whole position clears its average cost.
+	-- Every held ticker has one; the fallback only stops a malformed save from
+	-- failing a sale halfway through.
+	local costBasis = playerData.Portfolio.AvgCost[targetTicker] or price
+
 	if action == "Buy" then
 		local totalCost = price * shares
 
@@ -74,7 +80,13 @@ PlayerOrderEvent.OnServerInvoke = function(player, action, ticker, shares)
 		_G.UpdatePortfolio(player, targetTicker, -shares, price)
 	end
 
-	playerData.Stats.Trades += 1
+	TradeLogModule.record(playerData, {
+		ticker = targetTicker,
+		side = action,
+		quantity = shares,
+		price = price,
+		costBasis = costBasis,
+	}, os.time())
 	CalculatorModule.calculateNetWorth(player)
 
 	return {
