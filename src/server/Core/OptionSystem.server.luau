@@ -10,6 +10,7 @@ local MarketDataModule = require(ServerScriptService.Modules.MarketDataModule)
 local CalculatorModule = require(ServerScriptService.Modules.CalculatorModule)
 local TradeLogModule = require(ServerScriptService.Modules.TradeLogModule)
 local ProgressionService = require(ServerScriptService.Services.ProgressionService)
+local OrderEvents = require(ServerScriptService.Services.OrderEvents)
 local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursModule)
 local Progression = require(ReplicatedStorage.Config.Progression)
 
@@ -148,7 +149,7 @@ PlayerOptionOrderEvent.OnServerInvoke = function(player, action, contractSymbol,
 		costBasis = costBasis,
 	}, now)
 
-	ProgressionService.onFill(player, realizedPL, now)
+	OrderEvents.fireFilled(player, realizedPL, now)
 	CalculatorModule.calculateNetWorth(player)
 
 	return {

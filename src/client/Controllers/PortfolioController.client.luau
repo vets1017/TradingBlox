@@ -12,6 +12,8 @@ local TweenService = game:GetService("TweenService")
 
 local Theme = require(ReplicatedStorage.Modules.Multi.Theme)
 local NumberModule = require(ReplicatedStorage.Modules.Multi.NumberModule)
+local LineChart = require(ReplicatedStorage.UI.LineChart)
+local UIKit = require(ReplicatedStorage.UI.UIKit)
 local Navigation = require(ReplicatedStorage.Modules.Multi.Navigation)
 local Progression = require(ReplicatedStorage.Config.Progression)
 
@@ -53,17 +55,13 @@ local ROW_ICON_SIZE = 40
 local ROW_VALUE_WIDTH = 120
 
 -- Chart Constants
-local LINE_THICKNESS = 2
-local CHART_VERTICAL_INSET = 0.1 -- headroom above the high and below the low
-local LINE_FADE = 0.6 -- how far the line's oldest end fades toward the panel
-local FILL_TOP_TRANSPARENCY = 0.85
 local END_DOT_SIZE = 8
 local HOVER_DOT_SIZE = 10
 local PULSE_INFO = TweenInfo.new(1.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, -1)
 
 local REFRESH_INTERVAL = 60
 local RANGES = { "24h", "7d", "30d" }
-local CIRCLE = UDim.new(0.5, 0)
+local CIRCLE = UIKit.CIRCLE
 local MUTED_HEX = "#" .. Theme.Colors.TextMuted:ToHex()
 
 -- State
@@ -79,74 +77,12 @@ local isRefreshing = false
 local isRefreshQueued = false
 
 -- UI Builders
-local function makeFrame(name, parent)
-	local frame = Instance.new("Frame")
-
-	frame.Name = name
-	frame.BackgroundTransparency = 1
-	frame.BorderSizePixel = 0
-	frame.Parent = parent
-
-	return frame
-end
-
-local function makeLabel(name, parent, font, textSize, color)
-	local label = Instance.new("TextLabel")
-
-	label.Name = name
-	label.BackgroundTransparency = 1
-	label.BorderSizePixel = 0
-	label.FontFace = font
-	label.TextSize = textSize
-	label.TextColor3 = color
-	label.TextXAlignment = Enum.TextXAlignment.Left
-	label.TextTruncate = Enum.TextTruncate.AtEnd
-	label.Text = ""
-	label.Parent = parent
-
-	return label
-end
-
-local function addCorner(instance, radius)
-	local corner = Instance.new("UICorner")
-
-	corner.CornerRadius = radius or Theme.Radius
-	corner.Parent = instance
-end
-
-local function addStroke(instance, color)
-	local stroke = Instance.new("UIStroke")
-
-	stroke.Color = color or Theme.Colors.Border
-	stroke.Thickness = 1
-	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	stroke.Parent = instance
-
-	return stroke
-end
-
-local function makePanel(name, parent)
-	local panel = makeFrame(name, parent)
-
-	panel.BackgroundTransparency = 0
-	panel.BackgroundColor3 = Theme.Colors.Panel
-	addCorner(panel)
-	addStroke(panel)
-
-	return panel
-end
-
-local function makeDot(name, parent, size, color)
-	local dot = makeFrame(name, parent)
-
-	dot.BackgroundTransparency = 0
-	dot.BackgroundColor3 = color
-	dot.AnchorPoint = Vector2.new(0.5, 0.5)
-	dot.Size = UDim2.fromOffset(size, size)
-	addCorner(dot, CIRCLE)
-
-	return dot
-end
+local makeFrame = UIKit.makeFrame
+local makeLabel = UIKit.makeLabel
+local addCorner = UIKit.addCorner
+local addStroke = UIKit.addStroke
+local makePanel = UIKit.makePanel
+local makeDot = UIKit.makeDot
 
 -- Profile Header
 local ProfileHeader = makeFrame("ProfileHeader", PortfolioScreen)
@@ -629,11 +565,7 @@ local function renderStats(summary, sharePositions)
 end
 
 -- Chart
--- Draws the selected range as one continuous line (rotated 2px segments -
--- Roblox has no polyline), colored by whether the range is up or down and
--- fading toward its oldest end, over a soft fill and a pulsing end dot.
--- Time runs left to right proportionally, so gaps while the player was
--- offline read as straight stretches.
+-- The selected range as a LineChart, plus a pulsing dot on the newest point
 local function renderChart()
 	if pulseTween then
 		pulseTween:Cancel()
@@ -657,77 +589,10 @@ local function renderChart()
 
 	ChartMessage.Visible = false
 
-	-- A single point (a brand-new account) draws as a flat line
-	if #points == 1 then
-		points = { points[1], points[1] }
-	end
-
-	local low, high = math.huge, -math.huge
-
-	for _, point in ipairs(points) do
-		low = math.min(low, point[2])
-		high = math.max(high, point[2])
-	end
-
-	local firstTime = points[1][1]
-	local timeSpan = points[#points][1] - firstTime
-
-	for index, point in ipairs(points) do
-		local x = timeSpan > 0 and (point[1] - firstTime) / timeSpan or (index - 1) / (#points - 1)
-		local y = high > low and CHART_VERTICAL_INSET + (1 - CHART_VERTICAL_INSET * 2) * (high - point[2]) / (high - low)
-			or 0.5
-
-		table.insert(chartPoints, { x = x, y = y, time = point[1], value = point[2] })
-	end
-
-	local width = math.max(Chart.AbsoluteSize.X, 1)
-	local height = math.max(Chart.AbsoluteSize.Y, 1)
-
-	lineColor = points[#points][2] >= points[1][2] and Theme.Colors.Up or Theme.Colors.Down
+	chartPoints = LineChart.layout(points)
+	lineColor = LineChart.getColor(points)
 	HoverDot.BackgroundColor3 = lineColor
-
-	local fadedColor = lineColor:Lerp(Theme.Colors.Panel, LINE_FADE)
-
-	for i = 1, #chartPoints - 1 do
-		local from = chartPoints[i]
-		local to = chartPoints[i + 1]
-		local dx = (to.x - from.x) * width
-		local dy = (to.y - from.y) * height
-
-		local segment = makeFrame("Segment_" .. i, Plot)
-		segment.BackgroundTransparency = 0
-		segment.BackgroundColor3 = Color3.new(1, 1, 1) -- tinted by the gradient
-		segment.AnchorPoint = Vector2.new(0.5, 0.5)
-		segment.Position = UDim2.fromScale((from.x + to.x) / 2, (from.y + to.y) / 2)
-		-- +1px overlaps neighbours so sharp turns don't show a notch
-		segment.Size = UDim2.fromOffset(math.sqrt(dx * dx + dy * dy) + 1, LINE_THICKNESS)
-		segment.Rotation = math.deg(math.atan2(dy, dx))
-		segment.ZIndex = 3
-
-		local segmentGradient = Instance.new("UIGradient")
-		segmentGradient.Color = ColorSequence.new(fadedColor:Lerp(lineColor, from.x), fadedColor:Lerp(lineColor, to.x))
-		segmentGradient.Parent = segment
-
-		-- Fill: a column under the segment's lower end, fading out downward.
-		-- Whole pixels, so neighbouring columns neither gap nor overlap.
-		local left = math.floor(from.x * width)
-		local right = math.floor(to.x * width)
-		local top = math.floor(math.max(from.y, to.y) * height)
-
-		if right > left and top < height then
-			local fill = makeFrame("Fill_" .. i, Plot)
-			fill.BackgroundTransparency = 0
-			fill.BackgroundColor3 = lineColor
-			fill.Position = UDim2.fromOffset(left, top)
-			fill.Size = UDim2.fromOffset(right - left, height - top)
-			fill.ZIndex = 2
-
-			local fillGradient = Instance.new("UIGradient")
-			fillGradient.Rotation = 90
-			fillGradient.Transparency = NumberSequence.new(FILL_TOP_TRANSPARENCY, 1)
-			fillGradient.Parent = fill
-		end
-	end
+	LineChart.draw(Plot, chartPoints, lineColor, Theme.Colors.Panel, 2)
 
 	local last = chartPoints[#chartPoints]
 

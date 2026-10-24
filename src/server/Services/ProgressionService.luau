@@ -10,6 +10,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local Progression = require(ReplicatedStorage.Config.Progression)
 local PlayerDataService = require(ServerScriptService.Services.PlayerDataService)
+local OrderEvents = require(ServerScriptService.Services.OrderEvents)
 
 local ProgressionService = {}
 
@@ -60,9 +61,9 @@ function ProgressionService.addXP(player, amount: number)
 	publish(player, data.Progression)
 end
 
--- Call after every filled order. The first fill of each UTC day earns a
--- bonus; each fill earns a little more up to a daily cap.
-function ProgressionService.onFill(player, realizedPL: number?, now: number)
+-- After every filled order. The first fill of each UTC day earns a bonus;
+-- each fill earns a little more up to a daily cap.
+local function onFill(player, realizedPL: number?, now: number)
 	local data = PlayerDataService.get(player)
 
 	if not data then
@@ -106,6 +107,8 @@ function ProgressionService.start()
 	PlayerDataService.PlayerLoaded:Connect(function(player, data)
 		publish(player, data.Progression)
 	end)
+
+	OrderEvents.Filled:Connect(onFill)
 end
 
 return ProgressionService

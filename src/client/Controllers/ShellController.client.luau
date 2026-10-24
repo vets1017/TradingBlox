@@ -176,6 +176,31 @@ NetWorthCaption.Position = UDim2.new(1, -(EDGE_PADDING + NET_WORTH_VALUE_WIDTH +
 NetWorthCaption.Size = UDim2.new(0, 70, 1, 0)
 NetWorthCaption.TextXAlignment = Enum.TextXAlignment.Right
 
+-- Tabs built in code rather than Studio: the shell adds each one's nav
+-- button and an empty screen, the tab's own controller fills the screen,
+-- and TerminalController switches to it like any other tab. They sort after
+-- the Studio tabs, which all have LayoutOrder 0.
+local CODE_BUILT_TABS = { "Leaderboards" }
+
+for index, tabName in ipairs(CODE_BUILT_TABS) do
+	local tabButton = Instance.new("TextButton")
+	tabButton.Name = tabName .. "Button"
+	tabButton.Text = tabName
+	tabButton.LayoutOrder = index
+	tabButton.BackgroundTransparency = 1
+	tabButton.BorderSizePixel = 0
+	tabButton:SetAttribute("ThemeRole", "Tab")
+	tabButton.Parent = TabContainer
+
+	local screen = Instance.new("Frame")
+	screen.Name = tabName .. "Screen"
+	screen.Size = UDim2.fromScale(1, 1)
+	screen.BorderSizePixel = 0
+	screen.Visible = false
+	screen:SetAttribute("ThemeRole", "Screen")
+	screen.Parent = ScreenContainer
+end
+
 -- Tabs sit left-aligned after the wordmark, sized to their text, instead of
 -- the old fixed-width row right-aligned against the window buttons
 TabLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left

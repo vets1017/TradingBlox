@@ -226,6 +226,11 @@ local Tabs = {
 		Button = TabContainer:WaitForChild("ChartsButton"),
 		Frame = ScreenContainer:WaitForChild("ChartsScreen"),
 	},
+	-- Built in code by ShellController and filled by LeaderboardController
+	Leaderboards = {
+		Button = TabContainer:WaitForChild("LeaderboardsButton"),
+		Frame = ScreenContainer:WaitForChild("LeaderboardsScreen"),
+	},
 }
 
 local TimeDropdownOptions = {

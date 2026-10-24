@@ -8,18 +8,19 @@
 -- over their real record.
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local ProfileStore = require(ServerScriptService.Vendor.ProfileStore)
+local Economy = require(ReplicatedStorage.Config.Economy)
 
 -- v1 saves are left in place; v2 starts every player fresh at the GDD's
 -- $50,000 (TECHNICAL-PLAN decision 2)
 local STORE_NAME = "PlayerData_v2"
-local STARTING_BALANCE = 50000
 local AUTO_SAVE_PERIOD = 60 -- ProfileStore's default is 300; a crash now loses at most a minute
 
 local TEMPLATE = {
-	Balance = STARTING_BALANCE,
+	Balance = Economy.STARTING_BALANCE,
 	Portfolio = {
 		Shares = {}, -- [ticker] = share count
 		AvgCost = {}, -- [ticker] = average cost per share
@@ -44,6 +45,14 @@ local TEMPLATE = {
 		XPDay = "", -- UTC date of the last fill XP
 		FillXPToday = 0,
 	},
+	Leaderboard = { -- the current week and month; see LeaderboardService
+		Week = "", -- period key; a new key resets that period's fields
+		WeekStart = 0, -- net worth when the player first showed up that week
+		WeekTrades = 0,
+		Month = "",
+		MonthStart = 0,
+		MonthTrades = 0,
+	},
 }
 
 ProfileStore.SetConstant("AUTO_SAVE_PERIOD", AUTO_SAVE_PERIOD)
@@ -52,11 +61,10 @@ local PlayerStore = ProfileStore.New(STORE_NAME, TEMPLATE)
 
 local profiles = {} -- [player] = profile, only while this server holds the session
 local startedPlayers = {} -- [player] = true once a load has begun
+local leavingCallbacks = {}
 local playerLoaded = Instance.new("BindableEvent")
 
 local PlayerDataService = {}
-
-PlayerDataService.STARTING_BALANCE = STARTING_BALANCE
 
 -- Fires (player, data) once a player's profile has loaded
 PlayerDataService.PlayerLoaded = playerLoaded.Event
@@ -68,6 +76,13 @@ function PlayerDataService.get(player)
 	local profile = profiles[player]
 
 	return profile and profile.Data
+end
+
+-- Calls `callback(player, data)` as a player leaves, just before their final
+-- save - after it, get() returns nil. Callbacks run in order and should
+-- spawn anything that yields, since the save waits for them.
+function PlayerDataService.onPlayerLeaving(callback)
+	table.insert(leavingCallbacks, callback)
 end
 
 -- Sets a top-level stat and mirrors it to the player's attribute of the same
@@ -168,6 +183,10 @@ local function onPlayerRemoving(player)
 	startedPlayers[player] = nil
 
 	if profile then
+		for _, callback in ipairs(leavingCallbacks) do
+			callback(player, profile.Data)
+		end
+
 		profile:EndSession()
 	end
 end
