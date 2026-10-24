@@ -87,10 +87,16 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
   `require` these rather than reach for `_G`:
   - `PlayerDataService` — every player's saved data: one session-locked ProfileStore profile per player
     (store `PlayerData_v2`, key `Player_<userId>`, $50,000 start), autosaved every 60 s. A failed load kicks the
-    player rather than handing them default data. `get(player)`, `setStat`, `updateShares`, `PlayerLoaded`.
+    player rather than handing them default data. `get(player)`, `setStat`, `updateShares`, `PlayerLoaded`
+    (fires with the player only: a BindableEvent would hand listeners a *copy* of a data table — always read
+    data with `get`), `onPlayerLeaving` (synchronous, just before the final save).
     The profile template is the source of truth for the data shape; `Reconcile` adds new fields to old saves.
   - `ProgressionService` — XP, levels and feature unlocks (`hasFeature(player, feature)`). Mirrors `XP` and
     `Level` to player attributes.
+  - `OrderService` — share execution: `fillShares` (market orders and limit fills share it) and level 2 limit
+    orders kept in `playerData.Orders`: checked every 15 s while the player is online, caught up at login
+    against candles since placement, expired after 30 days. Pushes fills/cancellations through the
+    `OrderUpdateEvent` RemoteEvent (ShellController shows them as a toast).
   - `OrderEvents` — `Filled` fires after every share or option fill; progression, leaderboards and profiles
     subscribe rather than the order scripts calling each of them. Fire it from any new order path.
   - `LeaderboardService` — scores players on the boards in `Config/Leaderboards`; each board+period is its own
@@ -115,8 +121,9 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     algorithmically including Easter-relative Good Friday), `NumberModule` (currency formatting), `Navigation`
     (client-only: `Navigation.openTicker(ticker)` lets any controller send the player to that ticker on the Trade
     tab — the only link between controllers, which otherwise can't reach each other's locals).
-  - `Terminal/` and `Trade/` subfolders are placeholder modules (currently empty) reserved for pulling
-    per-screen rendering logic out of the client controllers as they grow.
+  - `Terminal/` and `Trade/` subfolders hold per-screen logic pulled out of the client controllers as they
+    grow. `Trade/OrderTicketModule` is the Trade screen's Market/Limit preset ticket (one-click presets, the
+    house style for order entry); the other files there are still empty placeholders.
 
 ### Cross-script state sharing
 
