@@ -1,5 +1,9 @@
 # Player Memecoins + Pulse (Phase 2, Slice 1) Implementation Plan
 
+> **Shelved 2026-10-24. Don't execute.** Player memecoins aren't in the product spec
+> (`docs/GAME-DESIGN.md`), whose Roblox-native market replaces them. See
+> `docs/TECHNICAL-PLAN.md` §6, decision 1.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Any player can launch a coin (name + ticker, $1,000 fee, one per hour). Every server shows it on a new Pulse tab in New / About to graduate / Graduated columns, with one-click quick-buy, a coin panel for buy/sell presets, and a My coins list. Prices move only along a bonding curve, and graduation pays the creator $2,500 exactly once.

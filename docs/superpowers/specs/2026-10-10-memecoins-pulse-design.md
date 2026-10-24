@@ -1,5 +1,8 @@
 # Player Memecoins + Pulse (Phase 2, Slice 1)
 
+> **Shelved 2026-10-24.** Player memecoins aren't in the product spec (`docs/GAME-DESIGN.md`),
+> whose Roblox-native market replaces them. See `docs/TECHNICAL-PLAN.md` §6, decision 1.
+
 ## Roadmap context
 
 Phase 2 of the Axiom-style redesign (see `2026-10-10-axiom-look-design.md`) was first
