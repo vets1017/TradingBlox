@@ -8,6 +8,10 @@ TradingBlox is a Roblox experience (Luau) that simulates a stock/options trading
 [Rojo](https://rojo.space/) and synced into Roblox Studio for playtesting — there is no standalone way to run
 or test it outside Studio.
 
+- **Product spec:** `docs/GAME-DESIGN.md`. Treat it as the source of truth for what to build.
+- **Architecture and roadmap:** `docs/TECHNICAL-PLAN.md` — current-state inventory, platform limits, Phases
+  0–6, the decisions taken, and the Phase 1 build order (§6). Check it before starting a feature.
+
 ## Commands
 
 Tooling is managed by [Aftman](https://github.com/LPGhatguy/aftman) (`aftman.toml` pins `rojo`).
@@ -59,9 +63,11 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     `GetNewsFeedEvent` is declared but has no server-side handler yet — client calls to it will hang.
     `PlayerOrderEvent` and `GetPositionsEvent` are handled in `TradeSystem.server.luau` (share buy/sell and
     position listing), not here.
-  - `Data_Manager.server.luau` owns player persistence (`DataStoreService`, key `PlayerData_v1`): balance,
-    portfolio shares/options, `Stats` (`Trades` count, `JoinedAt`), `NetWorthHistory`, load on `PlayerAdded`,
-    save on `PlayerRemoving`/`BindToClose`.
+  - `Data_Manager.server.luau` is the bootstrap for the player services: it starts `ProgressionService` then
+    `PlayerDataService`, and keeps the `_G` names (below) pointing at them.
+  - `API_Manager`'s option and research remotes check level unlocks; a locked request gets
+    `{ available = false, locked = true, message = "Unlocks at Level N · Name" }`, the shape the Trade screen
+    already renders as "no data".
   - `TradeSystem.server.luau` handles `PlayerOrderEvent` (share buy/sell, long-only) and `GetPositionsEvent`
     (share position listing; per-ticker for the Trade screen, every position with no ticker for the Portfolio tab). `OptionSystem.server.luau` handles `PlayerOptionOrderEvent` (long-only option
     contract buy/sell at ask/bid, NYSE-hours-gated with no crypto exemption), writing
@@ -71,7 +77,21 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
   - `Modules/CalculatorModule.luau` computes net worth from portfolio + live market data, and records it into
     `NetWorthHistory` only when every holding was priced (a backend outage would otherwise read as a crash).
   - `Modules/PortfolioHistoryModule.luau` — net-worth history storage: 5-minute points for the last day, hourly
-    after, 30-day retention; slices and downsamples ranges for the chart.
+    after, 30-day retention; slices and downsamples ranges for the chart; max drawdown.
+  - `Modules/TradeLogModule.luau` — records every fill (last 500 in `TradeLog`) and running realized-P/L stats
+    (`RealizedPL`, `Wins`, `Losses`, `GrossGain`, `GrossLoss`) used for win rate and average gain/loss.
+- **Server services (`src/server/Services/`)** — ModuleScripts that own a subsystem; new server code should
+  `require` these rather than reach for `_G`:
+  - `PlayerDataService` — every player's saved data: one session-locked ProfileStore profile per player
+    (store `PlayerData_v2`, key `Player_<userId>`, $50,000 start), autosaved every 60 s. A failed load kicks the
+    player rather than handing them default data. `get(player)`, `setStat`, `updateShares`, `PlayerLoaded`.
+    The profile template is the source of truth for the data shape; `Reconcile` adds new fields to old saves.
+  - `ProgressionService` — XP, levels and feature unlocks (`hasFeature(player, feature)`, `onFill` after every
+    order). Mirrors `XP` and `Level` to player attributes.
+- **Vendored (`src/server/Vendor/`)** — `ProfileStore.luau`, unmodified below a provenance header (pinned
+  commit, Apache-2.0; license in `THIRD_PARTY_LICENSES/`). Don't edit it in place.
+- **Shared config (`src/shared/Config/`)** — `Progression` (levels, what each unlocks, XP rules) is read by both
+  sides: the server enforces it, the client shows locks and progress.
 - **Shared (`src/shared/Modules/`)**:
   - `Multi/` — cross-boundary utilities used by both client and server-side logic conceptually:
     `ChartRenderer` (pure UI-building candlestick/grid/axis renderer, takes a table of UI element refs +
@@ -84,10 +104,12 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
 
 ### Cross-script state sharing
 
-Server scripts share mutable state via `_G` (e.g. `_G.PlayerData`, `_G.UpdatePlayerStat`,
-`_G.UpdatePortfolio`, `_G.LiveMarketData` referenced from `CalculatorModule`) rather than `require`d modules
-returning shared tables. This is deliberate but fragile — code depending on `_G.*` assumes
-`Data_Manager.server.luau` (and `API_Manager.server.luau` for market data) has already run and initialized it.
+Older server scripts still use `_G.PlayerData[userId]`, `_G.UpdatePlayerStat` and `_G.UpdatePortfolio`. These
+are now a shim set up by `Data_Manager.server.luau`: `_G.PlayerData` is a proxy whose reads resolve to
+`PlayerDataService.get(player)` (nil before the profile loads and after the session ends), and the two
+functions are `PlayerDataService.setStat` / `updateShares`. Scripts are moving onto services one at a time
+(`docs/TECHNICAL-PLAN.md`, Phase 0); don't add new `_G` uses. Note that `execute_luau` from the Studio MCP runs
+with its own isolated `_G` — inject a real `Script` to inspect it.
 
 ### Theme system (Axiom-style look)
 
@@ -111,8 +133,8 @@ properties, and `ShellController` calls it on `TerminalGui` at startup. Rules:
    API if needed, returning a plain Luau table.
 3. Client renders the result directly into pre-built UI instances (e.g. `ChartRenderer.render(...)`) — there
    is no client-side state management layer beyond local variables in each controller.
-4. Player-specific stats (`Balance`, `NetWorth`) are exposed to the client as Roblox `Attribute`s on the
-   `Player` instance and read reactively via `GetAttributeChangedSignal`.
+4. Player-specific stats (`Balance`, `NetWorth`, `XP`, `Level`) are exposed to the client as Roblox
+   `Attribute`s on the `Player` instance and read reactively via `GetAttributeChangedSignal`.
 
 ### Known WIP areas
 
