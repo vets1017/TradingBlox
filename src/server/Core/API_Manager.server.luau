@@ -14,6 +14,7 @@ local Progression = require(ReplicatedStorage.Config.Progression)
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
 local RequestChartEvent = EventsFolder:WaitForChild("RequestChartEvent")
 local GetMarketDataEvent = EventsFolder:WaitForChild("GetMarketDataEvent")
+local GetMarketOverviewEvent = EventsFolder:WaitForChild("GetMarketOverviewEvent")
 local GetAnalystReportEvent = EventsFolder:WaitForChild("GetAnalystReportEvent")
 local GetFundamentalsEvent = EventsFolder:WaitForChild("GetFundamentalsEvent")
 local GetOptionStatsEvent = EventsFolder:WaitForChild("GetOptionStatsEvent")
@@ -231,6 +232,56 @@ GetOptionStatsEvent.OnServerInvoke = function(player, ticker)
 	end
 
 	return stats
+end
+
+-- GetMarketOverviewEvent
+-- The Dashboard's market overview: a fixed set of benchmarks, fetched once a
+-- minute per server however many players are looking. Returns
+-- { quotes = { ticker, name, price, change, changePct }, updatedAt }.
+local MARKET_OVERVIEW = {
+	{ ticker = "SPY", name = "S&P 500" },
+	{ ticker = "QQQ", name = "Nasdaq 100" },
+	{ ticker = "DIA", name = "Dow 30" },
+	{ ticker = "IWM", name = "Russell 2000" },
+	{ ticker = "BTC-USD", name = "Bitcoin" },
+	{ ticker = "ETH-USD", name = "Ethereum" },
+}
+local MARKET_OVERVIEW_CACHE_SECONDS = 60
+
+local marketOverview = nil -- { quotes, updatedAt, fetchedAt = os.clock() }
+local isFetchingMarketOverview = false
+
+local function fetchMarketOverview()
+	local quotes = {}
+
+	for _, benchmark in ipairs(MARKET_OVERVIEW) do
+		local quote = MarketDataModule.getQuote(benchmark.ticker)
+		local change = quote and quote.price - quote.prevClose
+
+		table.insert(quotes, {
+			ticker = benchmark.ticker,
+			name = benchmark.name,
+			price = quote and quote.price,
+			change = change,
+			changePct = (change and quote.prevClose ~= 0) and (change / quote.prevClose * 100) or nil,
+		})
+	end
+
+	return { quotes = quotes, updatedAt = os.time(), fetchedAt = os.clock() }
+end
+
+GetMarketOverviewEvent.OnServerInvoke = function()
+	while isFetchingMarketOverview do
+		task.wait()
+	end
+
+	if not marketOverview or os.clock() - marketOverview.fetchedAt >= MARKET_OVERVIEW_CACHE_SECONDS then
+		isFetchingMarketOverview = true
+		marketOverview = fetchMarketOverview()
+		isFetchingMarketOverview = false
+	end
+
+	return { quotes = marketOverview.quotes, updatedAt = marketOverview.updatedAt }
 end
 
 -- Clean up

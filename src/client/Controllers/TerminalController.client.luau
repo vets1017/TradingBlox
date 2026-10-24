@@ -37,12 +37,6 @@ local GreetingBar = DashboardScreen:WaitForChild("GreetingBar")
 local GreetingText = GreetingBar:WaitForChild("GreetingText")
 local DateText = GreetingBar:WaitForChild("DateText")
 local DashboardGrid = DashboardScreen:WaitForChild("DashboardGrid")
-local LeftSidebar = DashboardGrid:WaitForChild("LeftSidebar")
-local AccountInfoWidget = LeftSidebar:WaitForChild("AccountInfoWidget")
-local OptionPowerValue = AccountInfoWidget:WaitForChild("OptionPowerRow").ValueText
-local NetLiquidityValue = AccountInfoWidget:WaitForChild("NetLiquidityRow").ValueText
-local CashSweepValue = AccountInfoWidget:WaitForChild("CashSweepRow").ValueText
-local AvailableFundsValue = AccountInfoWidget:WaitForChild("AvailableFundsRow").ValueText
 local RightSidebar = DashboardGrid:WaitForChild("RightSidebar")
 local MainWorkspace = DashboardGrid:WaitForChild("MainWorkspace")
 local BottomRow = MainWorkspace:WaitForChild("BottomRow")
@@ -479,18 +473,6 @@ local function updateCountdown()
 	HoursNumber.Text = string.format("%02d", hours)
 	MinutesNumber.Text = string.format("%02d", minutes)
 	SecondsNumber.Text = string.format("%02d", seconds)
-end
-
--- Updates Account Info on Dashboard
-local function updateAccountInfo()
-	local currentBalance = Player:GetAttribute("Balance") or 0
-	local currentNetWorth = Player:GetAttribute("NetWorth") or 0
-	local optionPower = currentBalance or 0 -- wip
-
-	OptionPowerValue.Text = NumberModule.format(optionPower)
-	NetLiquidityValue.Text = NumberModule.format(currentNetWorth)
-	CashSweepValue.Text = NumberModule.format(currentBalance)
-	AvailableFundsValue.Text = NumberModule.format(currentBalance)
 end
 
 local updateSymbolData
@@ -965,6 +947,12 @@ Navigation.TickerRequested:Connect(function()
 	switchTab("Trade")
 end)
 
+Navigation.TabRequested:Connect(function(tabName)
+	if Tabs[tabName] then
+		switchTab(tabName)
+	end
+end)
+
 MainTimeframeButton.MouseButton1Click:Connect(function()
 	isDropdownOpen = not isDropdownOpen
 	TimeDropdownList.Visible = isDropdownOpen
@@ -1398,9 +1386,6 @@ task.spawn(function()
 	end
 end)
 
-Player:GetAttributeChangedSignal("Balance"):Connect(updateAccountInfo)
-Player:GetAttributeChangedSignal("NetWorth"):Connect(updateAccountInfo)
-
 ToggleActiveTraderButton.MouseButton1Click:Connect(toggleActiveTrader)
 ToggleSymbolInfoButton.MouseButton1Click:Connect(toggleSymbolInfo)
 ToggleWatchlistButton.MouseButton1Click:Connect(toggleWatchlist)
@@ -1493,6 +1478,5 @@ updateIndicatorLock()
 setDrawingTool(currentDrawingTool) -- the Studio defaults no longer show which tool is active
 updateTimeframeUI(currentTimeframe)
 updateGreeting()
-updateAccountInfo()
 updateActiveTraderPosition() -- grays out Sell presets until a position exists
 ChartTickerLabel.Text = "—" -- otherwise this shows Studio's literal default "Label" until a ticker loads

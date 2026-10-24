@@ -3,6 +3,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local EVENTS = {
 	"RequestChartEvent",
 	"GetMarketDataEvent",
+	"GetMarketOverviewEvent",
 	"GetOptionsDataEvent",
 	"GetPositionsEvent",
 	"GetPortfolioEvent",

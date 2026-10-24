@@ -20,6 +20,7 @@ local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
 local GetPortfolioEvent = EventsFolder:WaitForChild("GetPortfolioEvent")
 
 local SAMPLE_INTERVAL = 300 -- the history's finest bucket
+local RECENT_FILLS = 8
 
 -- Option contracts priced off the cached chain, so this adds no HTTP calls
 -- after calculateNetWorth has just loaded the same chains.
@@ -47,6 +48,18 @@ local function buildOptionPositions(playerData)
 	end
 
 	return positions
+end
+
+-- The latest fills from the trade log, newest first
+local function getRecentFills(playerData)
+	local log = playerData.TradeLog
+	local fills = {}
+
+	for index = #log, math.max(#log - RECENT_FILLS + 1, 1), -1 do
+		table.insert(fills, log[index])
+	end
+
+	return fills
 end
 
 -- GetPortfolioEvent
@@ -87,6 +100,7 @@ GetPortfolioEvent.OnServerInvoke = function(player)
 		trades = playerData.Stats.Trades,
 		joinedAt = playerData.Stats.JoinedAt,
 		realizedPL = playerData.Stats.RealizedPL,
+		recentFills = getRecentFills(playerData),
 		analytics = analytics,
 		analyticsLockedMessage = analyticsLockedMessage,
 		options = buildOptionPositions(playerData),
