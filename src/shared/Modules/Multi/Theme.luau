@@ -45,6 +45,7 @@ Theme.TextSize = {
 	Body = 13,
 	Title = 15,
 	Display = 24,
+	Hero = 36, -- the Portfolio tab's net worth
 }
 
 Theme.Radius = UDim.new(0, 4)

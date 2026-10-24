@@ -40,7 +40,8 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
 
 - **Client (`src/client/Controllers/`)** — one controller per screen/UI area (`ShellController` for the
   full-screen shell — nav bar, balance pill, status bar; `TerminalController` for tab switching, Dashboard and
-  Charts; `TradeController` for the Trade screen; Quote tabs and Options chain stubs). Controllers `WaitForChild` their way through a large, hand-built UI tree (no UI
+  Charts; `TradeController` for the Trade screen; `PortfolioController` for the Portfolio screen, which it builds
+  entirely in code inside the empty Studio `PortfolioScreen` frame; Quote tabs and Options chain stubs). Controllers `WaitForChild` their way through a large, hand-built UI tree (no UI
   framework/library), wire up `TweenService` animations and `UserInputService` input handling directly, and
   call server `RemoteFunction`s to fetch data. Several controllers (`QuoteTabsController`,
   `OptionsChainController`) are stubs (empty or fully commented out) awaiting their corresponding server
@@ -48,7 +49,7 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
 - **Server (`src/server/Core/`)** — one script per subsystem:
   - `ServerSetup.server.luau` creates the `EventsFolder` in `ReplicatedStorage` and all `RemoteFunction`s the
     client calls (`RequestChartEvent`, `GetMarketDataEvent`, `GetOptionsDataEvent`, `GetPositionsEvent`,
-    `GetNewsFeedEvent`, `PlayerOrderEvent`, `PlayerOptionOrderEvent`). This must run before other server scripts wire up
+    `GetPortfolioEvent`, `GetNewsFeedEvent`, `PlayerOrderEvent`, `PlayerOptionOrderEvent`). This must run before other server scripts wire up
     `OnServerInvoke` handlers.
   - `API_Manager.server.luau` is the sole bridge to the outside world for market data: it polls an external
     HTTP backend (`SERVER_URL`, currently a Render-hosted service) for live quotes, option chains, and
@@ -59,12 +60,18 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     `PlayerOrderEvent` and `GetPositionsEvent` are handled in `TradeSystem.server.luau` (share buy/sell and
     position listing), not here.
   - `Data_Manager.server.luau` owns player persistence (`DataStoreService`, key `PlayerData_v1`): balance,
-    portfolio shares/options, load on `PlayerAdded`, save on `PlayerRemoving`/`BindToClose`.
+    portfolio shares/options, `Stats` (`Trades` count, `JoinedAt`), `NetWorthHistory`, load on `PlayerAdded`,
+    save on `PlayerRemoving`/`BindToClose`.
   - `TradeSystem.server.luau` handles `PlayerOrderEvent` (share buy/sell, long-only) and `GetPositionsEvent`
-    (share position listing). `OptionSystem.server.luau` handles `PlayerOptionOrderEvent` (long-only option
+    (share position listing; per-ticker for the Trade screen, every position with no ticker for the Portfolio tab). `OptionSystem.server.luau` handles `PlayerOptionOrderEvent` (long-only option
     contract buy/sell at ask/bid, NYSE-hours-gated with no crypto exemption), writing
     `playerData.Portfolio.Options[contractSymbol] = { contracts, ticker, expiration, strike, type, avgCost }`.
-  - `Modules/CalculatorModule.luau` computes net worth from portfolio + live market data.
+  - `PortfolioSystem.server.luau` handles `GetPortfolioEvent` (summary, every chart range's history, option
+    positions) and reprices every online player every 5 minutes so the history keeps moving.
+  - `Modules/CalculatorModule.luau` computes net worth from portfolio + live market data, and records it into
+    `NetWorthHistory` only when every holding was priced (a backend outage would otherwise read as a crash).
+  - `Modules/PortfolioHistoryModule.luau` — net-worth history storage: 5-minute points for the last day, hourly
+    after, 30-day retention; slices and downsamples ranges for the chart.
 - **Shared (`src/shared/Modules/`)**:
   - `Multi/` — cross-boundary utilities used by both client and server-side logic conceptually:
     `ChartRenderer` (pure UI-building candlestick/grid/axis renderer, takes a table of UI element refs +

@@ -5,6 +5,7 @@ local EVENTS = {
 	"GetMarketDataEvent",
 	"GetOptionsDataEvent",
 	"GetPositionsEvent",
+	"GetPortfolioEvent",
 	"GetNewsFeedEvent",
 	"PlayerOrderEvent",
 	"PlayerOptionOrderEvent",

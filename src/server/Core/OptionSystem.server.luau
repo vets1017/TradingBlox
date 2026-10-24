@@ -125,6 +125,7 @@ PlayerOptionOrderEvent.OnServerInvoke = function(player, action, contractSymbol,
 		_G.UpdatePlayerStat(player, "Balance", playerData.Balance + totalProceeds)
 	end
 
+	playerData.Stats.Trades += 1
 	CalculatorModule.calculateNetWorth(player)
 
 	return {

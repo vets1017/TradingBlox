@@ -74,6 +74,7 @@ PlayerOrderEvent.OnServerInvoke = function(player, action, ticker, shares)
 		_G.UpdatePortfolio(player, targetTicker, -shares, price)
 	end
 
+	playerData.Stats.Trades += 1
 	CalculatorModule.calculateNetWorth(player)
 
 	return {
@@ -87,7 +88,7 @@ end
 -- Builds the player's current holdings, priced against live market data.
 -- With a ticker, filters to just that ticker's position (the Trade screen's
 -- use case - one active symbol at a time); without one, returns every open
--- position (for a future all-holdings view, e.g. a Portfolio tab).
+-- position (the Portfolio tab's share rows).
 GetPositionsEvent.OnServerInvoke = function(player, ticker)
 	local playerData = _G.PlayerData[player.UserId]
 

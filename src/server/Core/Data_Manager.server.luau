@@ -71,6 +71,11 @@ local function createDefaultData()
 			Options = {},
 		},
 		Watchlist = {},
+		Stats = {
+			Trades = 0, -- filled share and option orders
+			JoinedAt = os.time(),
+		},
+		NetWorthHistory = {}, -- see PortfolioHistoryModule
 	}
 end
 
@@ -92,6 +97,10 @@ local function onPlayerAdded(player)
 
 		_G.PlayerData[player.UserId].Portfolio = saveData.Portfolio or {}
 		_G.PlayerData[player.UserId].Watchlist = saveData.Watchlist or {}
+		-- Saves from before these fields existed start fresh, so their
+		-- JoinedAt is this session rather than the player's real first join
+		_G.PlayerData[player.UserId].Stats = saveData.Stats or createDefaultData().Stats
+		_G.PlayerData[player.UserId].NetWorthHistory = saveData.NetWorthHistory or {}
 
 		for ticker, shares in pairs(_G.PlayerData[player.UserId].Portfolio.Shares) do
 			local shareValue = Instance.new("IntValue")
@@ -104,6 +113,8 @@ local function onPlayerAdded(player)
 
 		_G.PlayerData[player.UserId].Portfolio = createDefaultData().Portfolio
 		_G.PlayerData[player.UserId].Watchlist = createDefaultData().Watchlist
+		_G.PlayerData[player.UserId].Stats = createDefaultData().Stats
+		_G.PlayerData[player.UserId].NetWorthHistory = createDefaultData().NetWorthHistory
 	end
 
 	-- Seed NetWorth so the status bar has a value before the first trade;
