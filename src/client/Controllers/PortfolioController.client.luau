@@ -127,7 +127,8 @@ AvatarInitial.Text = string.upper(string.sub(Player.DisplayName, 1, 1))
 
 local PROFILE_TEXT_X = AVATAR_SIZE + 14
 
-local DisplayNameLabel = makeLabel("DisplayName", ProfileHeader, Theme.Fonts.UIBold, Theme.TextSize.Display, Theme.Colors.Text)
+local DisplayNameLabel =
+	makeLabel("DisplayName", ProfileHeader, Theme.Fonts.UIBold, Theme.TextSize.Display, Theme.Colors.Text)
 DisplayNameLabel.Position = UDim2.fromOffset(PROFILE_TEXT_X, 2)
 DisplayNameLabel.Size = UDim2.new(1, -PROFILE_TEXT_X, 0, 28)
 DisplayNameLabel.Text = Player.DisplayName
@@ -368,7 +369,8 @@ PositionsHeaderLayout.SortOrder = Enum.SortOrder.LayoutOrder
 PositionsHeaderLayout.Padding = UDim.new(0, 8)
 PositionsHeaderLayout.Parent = PositionsHeader
 
-local PositionsTitle = makeLabel("Title", PositionsHeader, Theme.Fonts.UISemibold, Theme.TextSize.Title, Theme.Colors.Text)
+local PositionsTitle =
+	makeLabel("Title", PositionsHeader, Theme.Fonts.UISemibold, Theme.TextSize.Title, Theme.Colors.Text)
 PositionsTitle.LayoutOrder = 1
 PositionsTitle.AutomaticSize = Enum.AutomaticSize.X
 PositionsTitle.Size = UDim2.fromScale(0, 1)
@@ -378,7 +380,8 @@ PositionsTitle.Text = "Open positions"
 local PositionsDot = makeDot("Dot", PositionsHeader, 6, Theme.Colors.Accent)
 PositionsDot.LayoutOrder = 2
 
-local PositionsCount = makeLabel("Count", PositionsHeader, Theme.Fonts.Mono, Theme.TextSize.Body, Theme.Colors.TextMuted)
+local PositionsCount =
+	makeLabel("Count", PositionsHeader, Theme.Fonts.Mono, Theme.TextSize.Body, Theme.Colors.TextMuted)
 PositionsCount.LayoutOrder = 3
 PositionsCount.AutomaticSize = Enum.AutomaticSize.X
 PositionsCount.Size = UDim2.fromScale(0, 1)
@@ -955,7 +958,8 @@ local function createOrderRow(index, order)
 	local detail = makeLabel("Detail", row, Theme.Fonts.Mono, Theme.TextSize.Caption, Theme.Colors.TextMuted)
 	detail.Position = UDim2.fromOffset(0, 18)
 	detail.Size = UDim2.new(1, -80, 0, 16)
-	detail.Text = string.format("limit %s · %s", NumberModule.format(order.limitPrice), formatAge(os.time() - order.createdAt))
+	detail.Text =
+		string.format("limit %s · %s", NumberModule.format(order.limitPrice), formatAge(os.time() - order.createdAt))
 
 	local cancel = Instance.new("TextButton")
 	cancel.Name = "Cancel"
@@ -1194,7 +1198,8 @@ local function layoutScreen()
 		return
 	end
 
-	local sideWidth = math.clamp(math.floor(screenSize.X * SIDE_PANEL_SCALE), SIDE_PANEL_MIN_WIDTH, SIDE_PANEL_MAX_WIDTH)
+	local sideWidth =
+		math.clamp(math.floor(screenSize.X * SIDE_PANEL_SCALE), SIDE_PANEL_MIN_WIDTH, SIDE_PANEL_MAX_WIDTH)
 
 	ChartPanel.Size = UDim2.new(1, -(PADDING * 2 + GAP + sideWidth), 1, -(bodyTop + PADDING))
 	SidePanel.Position = UDim2.new(1, -PADDING, 0, bodyTop)

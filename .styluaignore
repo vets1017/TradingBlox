@@ -1,0 +1,2 @@
+# Vendored code stays byte-for-byte upstream (see src/server/Vendor)
+src/server/Vendor/

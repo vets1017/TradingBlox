@@ -86,7 +86,8 @@ local function makePill(name, parent, layoutOrder, text, font)
 end
 
 local function makeCaption(name, parent, layoutOrder, text)
-	local caption = UIKit.makeLabel(name, parent, Theme.Fonts.UISemibold, Theme.TextSize.Caption, Theme.Colors.TextMuted)
+	local caption =
+		UIKit.makeLabel(name, parent, Theme.Fonts.UISemibold, Theme.TextSize.Caption, Theme.Colors.TextMuted)
 	caption.LayoutOrder = layoutOrder
 	caption.AutomaticSize = Enum.AutomaticSize.X
 	caption.Size = UDim2.fromScale(0, 1)

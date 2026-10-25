@@ -250,17 +250,20 @@ ProfileAvatar.Position = UDim2.fromOffset(PADDING, PADDING)
 
 local PROFILE_TEXT_X = PADDING + PROFILE_AVATAR_SIZE + 12
 
-local ProfileName = makeLabel("DisplayName", ProfileContent, Theme.Fonts.UIBold, Theme.TextSize.Display, Theme.Colors.Text)
+local ProfileName =
+	makeLabel("DisplayName", ProfileContent, Theme.Fonts.UIBold, Theme.TextSize.Display, Theme.Colors.Text)
 ProfileName.Position = UDim2.fromOffset(PROFILE_TEXT_X, PADDING + 2)
 ProfileName.Size = UDim2.new(1, -(PROFILE_TEXT_X + PADDING), 0, 28)
 
-local ProfileSubtitle = makeLabel("Subtitle", ProfileContent, Theme.Fonts.UI, Theme.TextSize.Body, Theme.Colors.TextMuted)
+local ProfileSubtitle =
+	makeLabel("Subtitle", ProfileContent, Theme.Fonts.UI, Theme.TextSize.Body, Theme.Colors.TextMuted)
 ProfileSubtitle.Position = UDim2.fromOffset(PROFILE_TEXT_X, PADDING + 32)
 ProfileSubtitle.Size = UDim2.new(1, -(PROFILE_TEXT_X + PADDING), 0, 18)
 
 local VALUE_Y = PADDING + PROFILE_AVATAR_SIZE + GAP
 
-local ProfileValue = makeLabel("NetWorth", ProfileContent, Theme.Fonts.MonoBold, Theme.TextSize.Display, Theme.Colors.Text)
+local ProfileValue =
+	makeLabel("NetWorth", ProfileContent, Theme.Fonts.MonoBold, Theme.TextSize.Display, Theme.Colors.Text)
 ProfileValue.Position = UDim2.fromOffset(PADDING, VALUE_Y)
 ProfileValue.Size = UDim2.new(1, -PADDING * 2, 0, 30)
 
@@ -305,7 +308,8 @@ for index, stat in ipairs(PROFILE_STATS) do
 	profileStatLabels[stat] = value
 end
 
-local ProfileUpdated = makeLabel("Updated", ProfileContent, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.TextMuted)
+local ProfileUpdated =
+	makeLabel("Updated", ProfileContent, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.TextMuted)
 ProfileUpdated.Position = UDim2.fromOffset(PADDING, STATS_Y + math.ceil(#PROFILE_STATS / 2) * STAT_CELL_HEIGHT + GAP)
 ProfileUpdated.Size = UDim2.new(1, -PADDING * 2, 0, 16)
 
@@ -349,7 +353,8 @@ local function renderProfile(profile)
 
 	UIKit.setAvatarUser(ProfileAvatar, profile.userId)
 	ProfileName.Text = profile.displayName .. (isYou and " (you)" or "")
-	ProfileSubtitle.Text = string.format("@%s  ·  Level %d · %s", profile.username, profile.level, level and level.name or "")
+	ProfileSubtitle.Text =
+		string.format("@%s  ·  Level %d · %s", profile.username, profile.level, level and level.name or "")
 	ProfileValue.Text = NumberModule.format(profile.netWorth)
 	ProfileReturn.Text = string.format(
 		'<font color="#%s">%s</font> since starting  ·  %d-day net worth',
@@ -498,8 +503,13 @@ local function createBoardRow(board, entry)
 	local textX = RANK_WIDTH + ROW_AVATAR_SIZE + 10
 	local textWidth = -(textX + SCORE_WIDTH + 8)
 
-	local name =
-		makeLabel("DisplayName", row, Theme.Fonts.UISemibold, Theme.TextSize.Body, isYou and Theme.Colors.Accent or Theme.Colors.Text)
+	local name = makeLabel(
+		"DisplayName",
+		row,
+		Theme.Fonts.UISemibold,
+		Theme.TextSize.Body,
+		isYou and Theme.Colors.Accent or Theme.Colors.Text
+	)
 	name.Position = UDim2.fromOffset(textX, 5)
 	name.Size = UDim2.new(1, textWidth, 0, 18)
 	name.Text = entry.displayName .. (isYou and " (you)" or "")

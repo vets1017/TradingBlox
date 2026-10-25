@@ -90,8 +90,20 @@ Theme.Roles = {
 
 	-- Controls. Text on an Accent/Up/Down fill is Background: white on those
 	-- fills is 2-3:1, dark is 5.6:1 or better
-	Button = { BackgroundColor3 = "Raised", TextColor3 = "Text", FontFace = "UISemibold", TextSize = "Body", Corner = true },
-	ButtonPrimary = { BackgroundColor3 = "Accent", TextColor3 = "Background", FontFace = "UIBold", TextSize = "Body", Corner = true },
+	Button = {
+		BackgroundColor3 = "Raised",
+		TextColor3 = "Text",
+		FontFace = "UISemibold",
+		TextSize = "Body",
+		Corner = true,
+	},
+	ButtonPrimary = {
+		BackgroundColor3 = "Accent",
+		TextColor3 = "Background",
+		FontFace = "UIBold",
+		TextSize = "Body",
+		Corner = true,
+	},
 
 	-- Controller-colored: font, size and shape only - a controller owns the colors
 	NumberDynamic = { FontFace = "Mono", TextSize = "Body" },
@@ -120,7 +132,10 @@ for roleName, role in pairs(Theme.Roles) do
 		if property ~= "Corner" then
 			local tokens = TOKEN_TABLES[property]
 
-			assert(tokens and tokens[token] ~= nil, string.format("[Theme] Role %s: unknown %s token %q", roleName, property, tostring(token)))
+			assert(
+				tokens and tokens[token] ~= nil,
+				string.format("[Theme] Role %s: unknown %s token %q", roleName, property, tostring(token))
+			)
 		end
 	end
 end

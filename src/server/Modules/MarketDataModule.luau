@@ -379,7 +379,12 @@ function MarketDataModule.getSplits(ticker)
 	end
 
 	local targetTicker = string.upper(ticker)
-	local data = cachedRoute(SplitsCache, targetTicker, SPLITS_CACHE_DURATION, SPLITS_ENDPOINT .. HttpService:UrlEncode(targetTicker))
+	local data = cachedRoute(
+		SplitsCache,
+		targetTicker,
+		SPLITS_CACHE_DURATION,
+		SPLITS_ENDPOINT .. HttpService:UrlEncode(targetTicker)
+	)
 
 	return data and data.splits
 end
@@ -550,7 +555,12 @@ function MarketDataModule.getNews(ticker)
 
 	local targetTicker = string.upper(ticker)
 
-	return cachedRoute(NewsCache, targetTicker, NEWS_CACHE_DURATION, NEWS_ENDPOINT .. HttpService:UrlEncode(targetTicker))
+	return cachedRoute(
+		NewsCache,
+		targetTicker,
+		NEWS_CACHE_DURATION,
+		NEWS_ENDPOINT .. HttpService:UrlEncode(targetTicker)
+	)
 end
 
 -- Today's movers: { gainers, losers, active }, each up to 10

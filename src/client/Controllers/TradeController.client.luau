@@ -573,7 +573,11 @@ local function renderOptionStats(data)
 
 	makeLabel(header, {
 		name = "HeaderLabel",
-		text = string.format("Nearest Expiry: %s   ·   Strike: %.2f", formatValue(data.expiration, "date"), data.strike or 0),
+		text = string.format(
+			"Nearest Expiry: %s   ·   Strike: %.2f",
+			formatValue(data.expiration, "date"),
+			data.strike or 0
+		),
 		sz = UDim2.fromScale(1, 1),
 		color = TEXT_SECONDARY,
 		font = Theme.Fonts.UISemibold,

@@ -114,7 +114,14 @@ function LeaderboardService.submit(player, scores, now: number)
 			if success then
 				lastScores[storeName] = stored
 			else
-				warn("[LeaderboardService] Couldn't save " .. storeName .. " for " .. player.Name .. ": " .. tostring(err))
+				warn(
+					"[LeaderboardService] Couldn't save "
+						.. storeName
+						.. " for "
+						.. player.Name
+						.. ": "
+						.. tostring(err)
+				)
 			end
 		end
 	end

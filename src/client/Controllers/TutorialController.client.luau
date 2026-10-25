@@ -17,7 +17,8 @@ local Progression = require(ReplicatedStorage.Config.Progression)
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
 
-local CompleteTutorialStepEvent = ReplicatedStorage:WaitForChild("EventsFolder"):WaitForChild("CompleteTutorialStepEvent")
+local CompleteTutorialStepEvent = ReplicatedStorage:WaitForChild("EventsFolder")
+	:WaitForChild("CompleteTutorialStepEvent")
 
 local TerminalGui = PlayerGui:WaitForChild("TerminalGui")
 local MainBackground = TerminalGui:WaitForChild("MainBackground")

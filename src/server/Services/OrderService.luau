@@ -46,7 +46,13 @@ local function isTradeable(ticker, now)
 end
 
 local function describeOrder(order)
-	return string.format("%s %d %s @ %s limit", order.side, order.quantity, order.ticker, NumberModule.format(order.limitPrice))
+	return string.format(
+		"%s %d %s @ %s limit",
+		order.side,
+		order.quantity,
+		order.ticker,
+		NumberModule.format(order.limitPrice)
+	)
 end
 
 -- Tells the player's client about something that happened to their orders
@@ -259,7 +265,13 @@ local function settle(player, order, price)
 		notify(
 			player,
 			"filled",
-			string.format("Limit %s filled: %d %s @ %s", string.lower(order.side), order.quantity, order.ticker, NumberModule.format(price))
+			string.format(
+				"Limit %s filled: %d %s @ %s",
+				string.lower(order.side),
+				order.quantity,
+				order.ticker,
+				NumberModule.format(price)
+			)
 		)
 	else
 		notify(player, "cancelled", "Cancelled " .. describeOrder(order) .. ": " .. result.message)

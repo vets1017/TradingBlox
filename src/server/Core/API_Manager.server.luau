@@ -26,7 +26,6 @@ local GetOptionsDataEvent = EventsFolder:WaitForChild("GetOptionsDataEvent")
 -- Config
 local VALID_TIMEFRAMES = { ["1M"] = true, ["5M"] = true, ["30M"] = true, ["H"] = true, ["D"] = true }
 
-
 -- The "no data" shape the research tabs already render, carrying the
 -- unlock message; nil when the player has the feature
 local function getLockedResponse(player, feature)
@@ -90,7 +89,13 @@ RemoteGuard.handle(GetMarketDataEvent, RemoteGuard.LIMITS.Read, function(player,
 	local details, detailsErr = MarketDataModule.getQuoteDetails(ticker)
 
 	if not details then
-		warn(string.format("[API_Manager] Quote details fetch failed for %s: %s", string.upper(ticker), tostring(detailsErr)))
+		warn(
+			string.format(
+				"[API_Manager] Quote details fetch failed for %s: %s",
+				string.upper(ticker),
+				tostring(detailsErr)
+			)
+		)
 	end
 
 	if details then

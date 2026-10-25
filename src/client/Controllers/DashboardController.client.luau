@@ -34,7 +34,8 @@ local OrderUpdateEvent = EventsFolder:WaitForChild("OrderUpdateEvent")
 
 -- References
 local TerminalGui = PlayerGui:WaitForChild("TerminalGui")
-local DashboardScreen = TerminalGui:WaitForChild("MainBackground"):WaitForChild("ScreenContainer"):WaitForChild("DashboardScreen")
+local DashboardScreen =
+	TerminalGui:WaitForChild("MainBackground"):WaitForChild("ScreenContainer"):WaitForChild("DashboardScreen")
 local DashboardGrid = DashboardScreen:WaitForChild("DashboardGrid")
 local LeftSidebar = DashboardGrid:WaitForChild("LeftSidebar")
 local AccountInfoWidget = LeftSidebar:WaitForChild("AccountInfoWidget")
@@ -208,7 +209,8 @@ local OrdersContent = buildWidget(OrderStatusWidget, "Orders")
 local OpenOrdersColumn = makeFrame("OpenOrders", OrdersContent)
 OpenOrdersColumn.Size = UDim2.new(0.5, -PADDING / 2, 1, -LINK_HEIGHT)
 
-local OpenOrdersCaption = makeLabel("Caption", OpenOrdersColumn, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.TextMuted)
+local OpenOrdersCaption =
+	makeLabel("Caption", OpenOrdersColumn, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.TextMuted)
 OpenOrdersCaption.Size = UDim2.new(1, 0, 0, LINE_HEIGHT)
 
 local OpenOrdersList = makeList("List", OpenOrdersColumn)
@@ -242,7 +244,8 @@ local PerformanceValueSize = Instance.new("UITextSizeConstraint")
 PerformanceValueSize.MaxTextSize = Theme.TextSize.Display
 PerformanceValueSize.Parent = PerformanceValue
 
-local PerformanceReturn = makeLabel("Return", PerformanceContent, Theme.Fonts.Mono, Theme.TextSize.Caption, Theme.Colors.TextMuted)
+local PerformanceReturn =
+	makeLabel("Return", PerformanceContent, Theme.Fonts.Mono, Theme.TextSize.Caption, Theme.Colors.TextMuted)
 PerformanceReturn.Position = UDim2.fromOffset(0, 30)
 PerformanceReturn.Size = UDim2.new(1, 0, 0, LINE_HEIGHT)
 PerformanceReturn.RichText = true
@@ -257,7 +260,11 @@ PerformanceStats.Size = UDim2.new(1, 0, 1, -(54 + PERFORMANCE_CHART_HEIGHT + 8))
 
 local performanceStatValues = {}
 
-for index, stat in ipairs({ { "dayPL", "Day P/L" }, { "unrealizedPL", "Unrealized P/L" }, { "realizedPL", "Realized P/L" } }) do
+for index, stat in ipairs({
+	{ "dayPL", "Day P/L" },
+	{ "unrealizedPL", "Unrealized P/L" },
+	{ "realizedPL", "Realized P/L" },
+}) do
 	local row = makeFrame("Stat_" .. stat[1], PerformanceStats)
 	row.LayoutOrder = index
 	row.Size = UDim2.new(1, 0, 0, 22)
@@ -338,7 +345,8 @@ for index, view in ipairs(MARKET_VIEWS) do
 	marketViewPills[view.id] = { button = pill, stroke = UIKit.addStroke(pill) }
 end
 
-local MarketUpdated = makeLabel("Updated", MarketContent, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.TextMuted)
+local MarketUpdated =
+	makeLabel("Updated", MarketContent, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.TextMuted)
 MarketUpdated.AnchorPoint = Vector2.new(0, 1)
 MarketUpdated.Position = UDim2.fromScale(0, 1)
 MarketUpdated.Size = UDim2.new(1, 0, 0, LINE_HEIGHT)
@@ -470,12 +478,23 @@ local function renderOrders(orders, fills)
 		addLine(
 			OpenOrdersList,
 			index,
-			string.format("%s %d %s @ %s", sideText(order.side), order.quantity, order.ticker, NumberModule.format(order.limitPrice))
+			string.format(
+				"%s %d %s @ %s",
+				sideText(order.side),
+				order.quantity,
+				order.ticker,
+				NumberModule.format(order.limitPrice)
+			)
 		)
 	end
 
 	if #orders > MAX_OPEN_ORDER_LINES then
-		addLine(OpenOrdersList, MAX_OPEN_ORDER_LINES + 1, string.format("+%d more", #orders - MAX_OPEN_ORDER_LINES), Theme.Colors.TextMuted)
+		addLine(
+			OpenOrdersList,
+			MAX_OPEN_ORDER_LINES + 1,
+			string.format("+%d more", #orders - MAX_OPEN_ORDER_LINES),
+			Theme.Colors.TextMuted
+		)
 	end
 
 	if #fills == 0 then
@@ -485,7 +504,11 @@ local function renderOrders(orders, fills)
 	for index = 1, math.min(#fills, MAX_FILL_LINES) do
 		local fill = fills[index]
 		local realized = fill.realizedPL
-				and string.format(' <font color="#%s">%s</font>', fill.realizedPL >= 0 and UP_HEX or DOWN_HEX, formatSignedMoney(fill.realizedPL))
+				and string.format(
+					' <font color="#%s">%s</font>',
+					fill.realizedPL >= 0 and UP_HEX or DOWN_HEX,
+					formatSignedMoney(fill.realizedPL)
+				)
 			or ""
 
 		addLine(
@@ -574,7 +597,8 @@ local function renderMarketOverview(overview)
 		local pct = quote.changePct or 0
 		local strength = math.min(math.abs(pct) / HEAT_FULL_MOVE, 1)
 
-		tile.BackgroundColor3 = Theme.Colors.Raised:Lerp(pct >= 0 and Theme.Colors.Up or Theme.Colors.Down, 0.15 + 0.35 * strength)
+		tile.BackgroundColor3 =
+			Theme.Colors.Raised:Lerp(pct >= 0 and Theme.Colors.Up or Theme.Colors.Down, 0.15 + 0.35 * strength)
 
 		local name = makeLabel("Name", tile, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.TextMuted)
 		name.Position = UDim2.fromOffset(10, 8)

@@ -27,7 +27,7 @@ local function isPositiveInteger(value)
 end
 
 -- PlayerOptionOrderEvent
-RemoteGuard.handle(PlayerOptionOrderEvent, RemoteGuard.LIMITS.Order, function(player, action, contractSymbol, ticker, expiration, strike, optionType, contracts)
+local function handleOptionOrder(player, action, contractSymbol, ticker, expiration, strike, optionType, contracts)
 	if type(action) ~= "string" or not VALID_ACTIONS[action] then
 		return { success = false, message = "Invalid order type." }
 	end
@@ -166,4 +166,6 @@ RemoteGuard.handle(PlayerOptionOrderEvent, RemoteGuard.LIMITS.Order, function(pl
 			tostring(expiration)
 		),
 	}
-end, RemoteGuard.TOO_MANY_REQUESTS)
+end
+
+RemoteGuard.handle(PlayerOptionOrderEvent, RemoteGuard.LIMITS.Order, handleOptionOrder, RemoteGuard.TOO_MANY_REQUESTS)

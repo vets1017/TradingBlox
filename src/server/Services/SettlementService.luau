@@ -86,7 +86,11 @@ local function settleExpiredOptions(player, data, now)
 
 			-- No close yet means no settlement yet; the next pass tries again.
 			-- The data is re-read because the candle fetch yields.
-			if close and PlayerDataService.get(player) == data and data.Portfolio.Options[contractSymbol] == position then
+			if
+				close
+				and PlayerDataService.get(player) == data
+				and data.Portfolio.Options[contractSymbol] == position
+			then
 				local intrinsic = position.type == "C" and math.max(close - position.strike, 0)
 					or math.max(position.strike - close, 0)
 				local proceeds = intrinsic * OPTION_MULTIPLIER * position.contracts
@@ -111,7 +115,11 @@ local function settleExpiredOptions(player, data, now)
 					player,
 					"expired",
 					proceeds > 0
-							and string.format("%s expired in the money: paid %s", describeOption(position), NumberModule.format(proceeds))
+							and string.format(
+								"%s expired in the money: paid %s",
+								describeOption(position),
+								NumberModule.format(proceeds)
+							)
 						or describeOption(position) .. " expired worthless"
 				)
 			end
