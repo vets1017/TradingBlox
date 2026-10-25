@@ -2,7 +2,7 @@
 --
 -- Builds and runs the Social tab (GDD §2): the feed of executed trades,
 -- theses and milestones from every player, or only from the players you
--- follow. A row opens its player's profile; the ticker of a trade or thesis
+-- follow, and Trending - the tickers players trade and watch most. A row opens its player's profile; the ticker of a trade or thesis
 -- opens on the Trade tab, where theses show in full. Reaction chips on each
 -- row (one reaction per player per item; read-only on your own posts).
 --
@@ -28,6 +28,7 @@ local PlayerGui = Player:WaitForChild("PlayerGui")
 -- Remotes
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
 local GetFeedEvent = EventsFolder:WaitForChild("GetFeedEvent")
+local GetTrendingEvent = EventsFolder:WaitForChild("GetTrendingEvent")
 local ReactToFeedItemEvent = EventsFolder:WaitForChild("ReactToFeedItemEvent")
 local SetRobloxBlocksEvent = EventsFolder:WaitForChild("SetRobloxBlocksEvent")
 
@@ -61,6 +62,14 @@ local POLL_INTERVAL = 5
 local CORE_RETRIES = 20 -- a second apart, while Roblox's core scripts register
 local RETRY_DELAY = 1.1 -- past the server's per-request cooldown when throttled
 
+-- The feed's views, then Trending, which lists tickers instead of posts
+local VIEWS = table.clone(Social.FEED_VIEWS)
+table.insert(VIEWS, "Trending")
+
+local TRENDING_ROW_HEIGHT = 30
+local TRENDING_NOTE = "From every player's trades and watchlists. Popularity isn't research: "
+	.. "check the fundamentals and news before you trade."
+
 local KIND_LABELS = {
 	Trade = "Executed trade",
 	Thesis = "Thesis",
@@ -68,7 +77,7 @@ local KIND_LABELS = {
 }
 
 -- State
-local selectedView = Social.FEED_VIEWS[1]
+local selectedView = VIEWS[1]
 local requestId = 0
 local renderedSignature = nil -- the view and item ids on screen; an unchanged poll keeps scroll and hover
 local ageLabels = {} -- [label] = item, so ages tick without rebuilding rows
@@ -187,7 +196,7 @@ ViewPillsLayout.Parent = ViewPills
 
 local viewPills = {} -- [view] = { button, stroke }
 
-for index, view in ipairs(Social.FEED_VIEWS) do
+for index, view in ipairs(VIEWS) do
 	local button = Instance.new("TextButton")
 	button.Name = "View_" .. view
 	button.LayoutOrder = index
@@ -514,15 +523,138 @@ end
 
 -- Loading
 local function invoke(view)
-	local success, result = pcall(GetFeedEvent.InvokeServer, GetFeedEvent, view)
+	local remote = if view == "Trending" then GetTrendingEvent else GetFeedEvent
+	local success, result = pcall(remote.InvokeServer, remote, view)
 
 	if not success then
-		warn("[SocialController] GetFeedEvent failed: " .. tostring(result))
+		warn("[SocialController] " .. remote.Name .. " failed: " .. tostring(result))
 
 		return nil
 	end
 
 	return result
+end
+
+-- Trending
+local function addTrendingLabel(order, text, font, color)
+	local label = makeLabel("Label_" .. order, FeedList, font, Theme.TextSize.Caption, color)
+	label.LayoutOrder = order
+	label.Size = UDim2.new(1, -(PADDING - ROW_INSET), 0, 0)
+	label.AutomaticSize = Enum.AutomaticSize.Y
+	label.TextWrapped = true
+	label.TextTruncate = Enum.TextTruncate.None
+	label.Text = text
+
+	local padding = Instance.new("UIPadding")
+	padding.PaddingLeft = UDim.new(0, ROW_INSET)
+	padding.PaddingTop = UDim.new(0, 8)
+	padding.PaddingBottom = UDim.new(0, 4)
+	padding.Parent = label
+end
+
+-- A ranked ticker; clicking it opens the ticker on the Trade tab
+local function addTrendingRow(order, rank, ticker, countText)
+	local row = Instance.new("TextButton")
+	row.Name = "Trending_" .. order
+	row.LayoutOrder = order
+	row.Size = UDim2.new(1, -(PADDING - ROW_INSET), 0, TRENDING_ROW_HEIGHT)
+	row.AutoButtonColor = false
+	row.BorderSizePixel = 0
+	row.BackgroundColor3 = Theme.Colors.Raised
+	row.BackgroundTransparency = 1
+	row.Text = ""
+	row.Parent = FeedList
+	UIKit.addCorner(row)
+
+	local padding = Instance.new("UIPadding")
+	padding.PaddingLeft = UDim.new(0, ROW_INSET)
+	padding.PaddingRight = UDim.new(0, ROW_INSET)
+	padding.Parent = row
+
+	local rankLabel = makeLabel("Rank", row, Theme.Fonts.MonoBold, Theme.TextSize.Body, Theme.Colors.TextMuted)
+	rankLabel.Size = UDim2.new(0, 28, 1, 0)
+	rankLabel.Text = tostring(rank)
+
+	local tickerLabel = makeLabel("Ticker", row, Theme.Fonts.UISemibold, Theme.TextSize.Body, Theme.Colors.Text)
+	tickerLabel.Position = UDim2.fromOffset(28, 0)
+	tickerLabel.Size = UDim2.new(1, -(28 + 140), 1, 0)
+	tickerLabel.Text = ticker
+
+	local count = makeLabel("Count", row, Theme.Fonts.Mono, Theme.TextSize.Body, Theme.Colors.TextMuted)
+	count.AnchorPoint = Vector2.new(1, 0)
+	count.Position = UDim2.fromScale(1, 0)
+	count.Size = UDim2.new(0, 140, 1, 0)
+	count.TextXAlignment = Enum.TextXAlignment.Right
+	count.Text = countText
+
+	row.MouseEnter:Connect(function()
+		row.BackgroundTransparency = 0
+	end)
+
+	row.MouseLeave:Connect(function()
+		row.BackgroundTransparency = 1
+	end)
+
+	row.MouseButton1Click:Connect(function()
+		Navigation.openTicker(ticker)
+	end)
+end
+
+local function plural(count, singular, pluralForm)
+	return NumberModule.formatShares(count) .. " " .. (count == 1 and singular or pluralForm)
+end
+
+local function renderTrending(trending)
+	local parts = { "Trending" }
+
+	for _, entry in ipairs(trending.traded) do
+		table.insert(parts, entry.ticker .. "=" .. entry.trades)
+	end
+
+	table.insert(parts, "|")
+
+	for _, entry in ipairs(trending.watched) do
+		table.insert(parts, entry.ticker .. "=" .. entry.watchers)
+	end
+
+	local signature = table.concat(parts, ",")
+
+	if signature == renderedSignature then
+		return
+	end
+
+	renderedSignature = signature
+	clearRows()
+	FeedMessage.Visible = false
+
+	local order = 0
+	local function nextOrder()
+		order += 1
+
+		return order
+	end
+
+	addTrendingLabel(nextOrder(), "Most traded · today and yesterday (UTC)", Theme.Fonts.UISemibold, Theme.Colors.Text)
+
+	if #trending.traded == 0 then
+		addTrendingLabel(nextOrder(), "No player trades yet today.", Theme.Fonts.UI, Theme.Colors.TextMuted)
+	end
+
+	for rank, entry in ipairs(trending.traded) do
+		addTrendingRow(nextOrder(), rank, entry.ticker, plural(entry.trades, "trade", "trades"))
+	end
+
+	addTrendingLabel(nextOrder(), "Most watched", Theme.Fonts.UISemibold, Theme.Colors.Text)
+
+	if #trending.watched == 0 then
+		addTrendingLabel(nextOrder(), "No tickers on watchlists yet.", Theme.Fonts.UI, Theme.Colors.TextMuted)
+	end
+
+	for rank, entry in ipairs(trending.watched) do
+		addTrendingRow(nextOrder(), rank, entry.ticker, plural(entry.watchers, "watcher", "watchers"))
+	end
+
+	addTrendingLabel(nextOrder(), TRENDING_NOTE, Theme.Fonts.UI, Theme.Colors.TextMuted)
 end
 
 -- The server answers nil when throttled, so one retry after its cooldown.
@@ -548,11 +680,14 @@ local function loadFeed()
 		return
 	end
 
-	if result then
+	if result and view == "Trending" then
+		renderTrending(result)
+	elseif result then
 		renderFeed(result)
 	elseif not renderedSignature then
 		FeedMessage.Visible = true
-		FeedMessage.Text = "Couldn't load the feed. Trying again in a moment."
+		FeedMessage.Text = view == "Trending" and "Couldn't load trending tickers. Trying again in a moment."
+			or "Couldn't load the feed. Trying again in a moment."
 	end
 end
 

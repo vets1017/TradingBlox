@@ -69,6 +69,7 @@ local TEMPLATE = {
 		Reactions = {}, -- [feed item id] = { reaction, at }; see FeedService.react
 		Inbox = {}, -- notifications, oldest first; see NotificationService
 		InboxSeenAt = 0, -- when the player last opened the inbox
+		CountedWatches = {}, -- [ticker] = true once this watch is in the watcher counts; see DiscoveryService
 	},
 }
 

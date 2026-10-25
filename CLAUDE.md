@@ -57,7 +57,7 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
   (account info, watchlist, orders, performance, market overview, top traders), built in code inside the
   Studio widget frames; `TutorialController` for the "Getting started" checklist card; `TradeController` for the Trade screen; `PortfolioController` for the Portfolio screen, which it builds
   entirely in code inside the empty Studio `PortfolioScreen` frame; `SocialController` for the Social tab (the feed,
-  All or Following, polled every 5 s while open, with reaction chips; it also sends the server the player's
+  All or Following, polled every 5 s while open, with reaction chips, plus a Trending view; it also sends the server the player's
   Roblox block list) and `LeaderboardController` for the Leaderboards
   tab (boards beside a public profile with Follow, Mute, Block for players in the server, the trade-sharing
   toggle, recent trades and theses; every profile opens here), whose nav buttons and empty screens `ShellController` creates in code (`CODE_BUILT_TABS`) and
@@ -72,8 +72,8 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     `GetPortfolioEvent`, `GetLeaderboardEvent`, `GetPublicProfileEvent`, `GetNewsFeedEvent`, `GetMarketMoversEvent`,
     `PlayerOrderEvent`, `PlayerOptionOrderEvent`, `FollowPlayerEvent`, `SetShareTradesEvent`, `GetFeedEvent`,
     `PublishThesisEvent`, `DeleteThesisEvent`, `GetTickerThesesEvent`, `MutePlayerEvent`, `SetRobloxBlocksEvent`,
-    `ReportThesisEvent`, `ReactToFeedItemEvent`, `GetInboxEvent`, `MarkInboxSeenEvent`, plus watchlist and
-    research remotes; pushes go through RemoteEvents `OrderUpdateEvent` and `NotificationEvent`). This must run before other server scripts wire up
+    `ReportThesisEvent`, `ReactToFeedItemEvent`, `GetInboxEvent`, `MarkInboxSeenEvent`, `GetTrendingEvent`, plus
+    watchlist and research remotes; pushes go through RemoteEvents `OrderUpdateEvent` and `NotificationEvent`). This must run before other server scripts wire up
     `OnServerInvoke` handlers.
   - `API_Manager.server.luau` wires the market-data remotes. `Modules/MarketDataModule.luau` is the sole
     bridge to the external HTTP backend (`SERVER_URL`, a Render-hosted service): ticker validation, a
@@ -92,7 +92,8 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     localhost). Remove it after testing; live servers always use the deployed backend.
   - `Data_Manager.server.luau` is the bootstrap for the player services: it starts the services that listen
     for players (`ProgressionService`, `LeaderboardService`, `PublicProfileService`, `SocialService`, `FeedService`,
-    `ThesisService`, `NotificationService`, `OrderService`, `SettlementService`) before `PlayerDataService`, so none misses a player who loads straight away.
+    `ThesisService`, `NotificationService`, `DiscoveryService`, `OrderService`, `SettlementService`) before
+    `PlayerDataService`, so none misses a player who loads straight away.
   - `API_Manager`'s option and research remotes check level unlocks; a locked request gets
     `{ available = false, locked = true, message = "Unlocks at Level N · Name" }`, the shape the Trade screen
     already renders as "no data".
@@ -170,6 +171,11 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     sends a ProfileStore message (the inbox entry) and a MessagingService broadcast on `Notifications_v1` (the live
     toast); `notifyOnce` limits a sender to once a session per key. Notifications carry fields, not text — the
     client words them with `Social.describeNotification`. Pure rules: `Modules/InboxModule.luau`.
+  - `DiscoveryService` — asset discovery: watchers per ticker (OrderedDataStore `Watchers_v1`, synced from
+    watchlists with `playerData.Social.CountedWatches` so nothing counts twice) and daily trade counts
+    (`TickerTrades_<UTC day>`, batched and written once a minute per server). `getTickerStats` (cached 60 s) and
+    `getTrending` (most traded today+yesterday and most watched; cached 120 s because ranked reads have a budget of
+    only 5 + 2 per player a minute, shared with the leaderboards). Pure rules: `Modules/DiscoveryModule.luau`.
   - `Core/LeaderboardSystem.server.luau` wires `GetLeaderboardEvent` / `GetPublicProfileEvent` (which adds the
     follower count, whether the caller follows, and the player's latest theses); `Core/SocialSystem.server.luau`
     wires `FollowPlayerEvent`, `SetShareTradesEvent`, `GetFeedEvent` and the thesis remotes.
@@ -192,8 +198,8 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     tab — the only link between controllers, which otherwise can't reach each other's locals).
   - `Terminal/` and `Trade/` subfolders hold per-screen logic pulled out of the client controllers as they
     grow. `Trade/OrderTicketModule` is the Trade screen's Market/Limit preset ticket (one-click presets, the
-    house style for order entry); `Trade/ThesisPanelModule` is its theses section (the ticker's theses and a
-    composer), after the news. The other files there are still empty placeholders.
+    house style for order entry); `Trade/ThesisPanelModule` is its Community section (the ticker's watchers,
+    trades and theses, and a thesis composer), after the news. The other files there are still empty placeholders.
 
 ### Cross-script state sharing
 

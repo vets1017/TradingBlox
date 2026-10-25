@@ -574,8 +574,11 @@ Taken at the start of Phase 2 (2026-10-25), following the recommendations above:
    theses taken down, delivered as ProfileStore messages so they reach any server or the next login; a
    MessagingService broadcast toasts them live. The recipient's mutes and blocks drop them, and a sender
    notifies a given player or post at most once a session. A bell with an unread badge in the nav bar.
-7. Asset discovery: per-ticker counts of watchers, traders and theses; "Trending in TradingBlox" on the
-   Social tab and in Market overview, and the counts on the Trade screen beside the fundamentals.
+7. ✅ Asset discovery: watchers per ticker (OrderedDataStore `Watchers_v1`, kept in line with watchlists and
+   backfilled at login) and daily trade counts (`TickerTrades_<UTC day>`, batched per server every minute). A
+   Trending view on the Social tab and in Market overview lists the most traded (today and yesterday) and
+   most watched tickers; the Trade screen's section, now "Community", shows the ticker's watchers and trades
+   beside its theses. Ranked reads are cached two minutes because their budget is small.
 8. Dashboard Social module: activity from followed players and trending theses.
 
 ## Sources

@@ -1,7 +1,7 @@
 -- SocialSystem.server.luau
 --
 -- Social remotes: following players, the trade-sharing setting, the feed,
--- theses, and muting, blocking and reporting. The follower counts themselves come with GetPublicProfileEvent
+-- theses, muting, blocking and reporting, notifications and trending tickers. The follower counts themselves come with GetPublicProfileEvent
 -- (LeaderboardSystem).
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -13,6 +13,7 @@ local FeedService = require(ServerScriptService.Services.FeedService)
 local ThesisService = require(ServerScriptService.Services.ThesisService)
 local MuteService = require(ServerScriptService.Services.MuteService)
 local NotificationService = require(ServerScriptService.Services.NotificationService)
+local DiscoveryService = require(ServerScriptService.Services.DiscoveryService)
 local PlayerDataService = require(ServerScriptService.Services.PlayerDataService)
 local SocialModule = require(ServerScriptService.Modules.SocialModule)
 local MarketDataModule = require(ServerScriptService.Modules.MarketDataModule)
@@ -31,6 +32,7 @@ local ReportThesisEvent = EventsFolder:WaitForChild("ReportThesisEvent")
 local ReactToFeedItemEvent = EventsFolder:WaitForChild("ReactToFeedItemEvent")
 local GetInboxEvent = EventsFolder:WaitForChild("GetInboxEvent")
 local MarkInboxSeenEvent = EventsFolder:WaitForChild("MarkInboxSeenEvent")
+local GetTrendingEvent = EventsFolder:WaitForChild("GetTrendingEvent")
 
 local MAX_THESIS_ID_LENGTH = 40
 local MAX_FEED_ITEM_ID_LENGTH = 64
@@ -102,13 +104,20 @@ RemoteGuard.handle(DeleteThesisEvent, RemoteGuard.LIMITS.Rare, function(player, 
 end, RemoteGuard.TOO_MANY_REQUESTS)
 
 -- GetTickerThesesEvent(ticker)
--- Returns ThesisService.getForTicker's table, or nil
+-- Returns ThesisService.getForTicker's table plus `stats` = { watchers,
+-- trades } (DiscoveryService.getTickerStats), or nil
 RemoteGuard.handle(GetTickerThesesEvent, RemoteGuard.LIMITS.Research, function(player, ticker)
 	if not MarketDataModule.isValidTicker(ticker) then
 		return nil
 	end
 
-	return ThesisService.getForTicker(player, ticker)
+	local result = ThesisService.getForTicker(player, ticker)
+
+	if result then
+		result.stats = DiscoveryService.getTickerStats(result.ticker)
+	end
+
+	return result
 end)
 
 -- MutePlayerEvent(userId, shouldMute)
@@ -169,3 +178,9 @@ RemoteGuard.handle(MarkInboxSeenEvent, RemoteGuard.LIMITS.Research, function(pla
 
 	return true
 end, false)
+
+-- GetTrendingEvent()
+-- Returns DiscoveryService.getTrending's { traded, watched }, or nil
+RemoteGuard.handle(GetTrendingEvent, RemoteGuard.LIMITS.Research, function()
+	return DiscoveryService.getTrending()
+end)

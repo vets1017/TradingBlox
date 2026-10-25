@@ -29,6 +29,7 @@ local GetOrdersEvent = EventsFolder:WaitForChild("GetOrdersEvent")
 local GetWatchlistEvent = EventsFolder:WaitForChild("GetWatchlistEvent")
 local GetMarketOverviewEvent = EventsFolder:WaitForChild("GetMarketOverviewEvent")
 local GetMarketMoversEvent = EventsFolder:WaitForChild("GetMarketMoversEvent")
+local GetTrendingEvent = EventsFolder:WaitForChild("GetTrendingEvent")
 local GetLeaderboardEvent = EventsFolder:WaitForChild("GetLeaderboardEvent")
 local OrderUpdateEvent = EventsFolder:WaitForChild("OrderUpdateEvent")
 
@@ -79,7 +80,8 @@ local isRefreshing = false
 local isRefreshQueued = false
 local performanceHistory = nil
 local lastOrders = {} -- from the last refresh, so Available Funds stays right between refreshes
-local marketView = "Overview" -- or a movers list: "gainers", "losers", "active"
+local marketView = "Overview" -- or a movers list: "gainers", "losers", "active"; or "trending"
+local lastTrending = nil -- GetTrendingEvent's { traded, watched }
 local lastOverview = nil
 local lastMovers = nil
 
@@ -305,6 +307,7 @@ local MARKET_VIEWS = {
 	{ id = "gainers", label = "Gainers" },
 	{ id = "losers", label = "Losers" },
 	{ id = "active", label = "Active" },
+	{ id = "trending", label = "Trending" }, -- most traded by TradingBlox players
 }
 
 -- Pills on the right of the widget's title row
@@ -690,6 +693,59 @@ local function renderMovers(quotes)
 end
 
 -- Draws whichever view is picked from the data already fetched
+-- The tickers TradingBlox players traded most today and yesterday (UTC)
+local function renderTrending(trending)
+	clearList(MoversList)
+
+	local traded = trending and trending.traded
+
+	if not traded then
+		addLine(MoversList, 1, "Trending unavailable right now", Theme.Colors.TextMuted)
+
+		return
+	elseif #traded == 0 then
+		addLine(MoversList, 1, "No player trades yet today", Theme.Colors.TextMuted)
+
+		return
+	end
+
+	for index, entry in ipairs(traded) do
+		local row = Instance.new("TextButton")
+		row.Name = "Trending_" .. entry.ticker
+		row.LayoutOrder = index
+		row.Size = UDim2.new(1, 0, 0, 24)
+		row.AutoButtonColor = false
+		row.BorderSizePixel = 0
+		row.BackgroundColor3 = Theme.Colors.Raised
+		row.BackgroundTransparency = 1
+		row.Text = ""
+		row.Parent = MoversList
+
+		local symbol = makeLabel("Symbol", row, Theme.Fonts.UISemibold, Theme.TextSize.Body, Theme.Colors.Text)
+		symbol.Size = UDim2.fromScale(0.6, 1)
+		symbol.Text = string.format("%d  %s", index, entry.ticker)
+
+		local trades = makeLabel("Trades", row, Theme.Fonts.Mono, Theme.TextSize.Body, Theme.Colors.TextMuted)
+		trades.AnchorPoint = Vector2.new(1, 0)
+		trades.Position = UDim2.fromScale(1, 0)
+		trades.Size = UDim2.fromScale(0.4, 1)
+		trades.TextXAlignment = Enum.TextXAlignment.Right
+		trades.Text = NumberModule.formatShares(entry.trades) .. (entry.trades == 1 and " trade" or " trades")
+
+		row.MouseEnter:Connect(function()
+			row.BackgroundTransparency = 0
+		end)
+
+		row.MouseLeave:Connect(function()
+			row.BackgroundTransparency = 1
+		end)
+
+		row.MouseButton1Click:Connect(function()
+			Navigation.openTicker(entry.ticker)
+		end)
+	end
+end
+
 local function renderMarket()
 	local isOverview = marketView == "Overview"
 
@@ -706,6 +762,8 @@ local function renderMarket()
 
 	if isOverview and lastOverview then
 		renderMarketOverview(lastOverview)
+	elseif marketView == "trending" then
+		renderTrending(lastTrending)
 	elseif not isOverview then
 		if lastMovers then
 			renderMovers(lastMovers[marketView] or {})
@@ -793,6 +851,7 @@ local function refresh()
 		watchlist = { GetWatchlistEvent },
 		overview = { GetMarketOverviewEvent },
 		movers = { GetMarketMoversEvent },
+		trending = { GetTrendingEvent },
 		traders = { GetLeaderboardEvent, "NetWorth" },
 	}
 	local pending = 0
@@ -830,6 +889,10 @@ local function refresh()
 
 	if results.movers then
 		lastMovers = results.movers
+	end
+
+	if results.trending then
+		lastTrending = results.trending
 	end
 
 	renderMarket()

@@ -34,6 +34,7 @@ local EVENTS = {
 	"ReactToFeedItemEvent",
 	"GetInboxEvent",
 	"MarkInboxSeenEvent",
+	"GetTrendingEvent",
 }
 
 -- Server-to-client pushes (RemoteEvents rather than RemoteFunctions)

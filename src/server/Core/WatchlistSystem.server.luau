@@ -1,13 +1,15 @@
 -- WatchlistSystem.server.luau
 --
 -- Per-player watchlist: add/remove tickers, report them back priced against
--- live market data.
+-- live market data. Every change also updates the tickers' watcher counts
+-- (DiscoveryService).
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local MarketDataModule = require(ServerScriptService.Modules.MarketDataModule)
 local PlayerDataService = require(ServerScriptService.Services.PlayerDataService)
+local DiscoveryService = require(ServerScriptService.Services.DiscoveryService)
 local RemoteGuard = require(ServerScriptService.Modules.RemoteGuard)
 
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
@@ -72,6 +74,7 @@ RemoteGuard.handle(ToggleWatchlistEvent, RemoteGuard.LIMITS.Research, function(p
 
 	if existingIndex then
 		table.remove(playerData.Watchlist, existingIndex)
+		task.spawn(DiscoveryService.syncWatches, player)
 
 		return { success = true, added = false, ticker = targetTicker, watchlist = playerData.Watchlist }
 	end
@@ -81,6 +84,7 @@ RemoteGuard.handle(ToggleWatchlistEvent, RemoteGuard.LIMITS.Research, function(p
 	end
 
 	table.insert(playerData.Watchlist, targetTicker)
+	task.spawn(DiscoveryService.syncWatches, player)
 
 	return { success = true, added = true, ticker = targetTicker, watchlist = playerData.Watchlist }
 end, RemoteGuard.TOO_MANY_REQUESTS)

@@ -1,8 +1,9 @@
 -- ThesisPanelModule.luau
 --
--- The Trade screen's theses section (GDD §2): players' structured views on
--- the loaded ticker - bullish or bearish, a time horizon, an optional target
--- and text - and a composer to publish your own. They're opinions, so the
+-- The Trade screen's community section (GDD §2): how many players watch and
+-- trade the loaded ticker, and their theses on it - bullish or bearish, a
+-- time horizon, an optional target and text - with a composer to publish
+-- your own. They're opinions, so the
 -- section says "Simulated, not financial advice". An author's name opens
 -- their profile; other players' theses can be reported.
 --
@@ -238,7 +239,7 @@ function ThesisPanelModule.new(options)
 
 	local title = UIKit.makeLabel("Title", header, Theme.Fonts.UIBold, Theme.TextSize.Title, Theme.Colors.Text)
 	title.Size = UDim2.new(1, -160, 1, 0)
-	title.Text = "Theses"
+	title.Text = "Community"
 	self.title = title
 
 	local writeButton = makeButton("Write", header, 0, "Write a thesis", true)
@@ -621,9 +622,25 @@ function ThesisPanelModule:render()
 
 	local now = os.time()
 
-	self.title.Text = "Theses · " .. data.ticker
+	local stats = data.stats or {}
+	local activity = ""
+
+	if stats.watchers then
+		activity ..= string.format("%s watching · ", NumberModule.formatShares(stats.watchers))
+	end
+
+	if stats.trades then
+		activity ..= string.format(
+			"%s %s in 2 days · ",
+			NumberModule.formatShares(stats.trades),
+			stats.trades == 1 and "trade" or "trades"
+		)
+	end
+
+	self.title.Text = "Community · " .. data.ticker
 	self.summary.Text = string.format(
-		'<font color="#%s">%d bullish</font> · <font color="#%s">%d bearish</font> open · %s',
+		'%s<font color="#%s">%d bullish</font> · <font color="#%s">%d bearish</font> theses · %s',
+		activity,
 		UP_HEX,
 		data.counts.Bullish,
 		DOWN_HEX,
@@ -647,7 +664,7 @@ function ThesisPanelModule:load(ticker: string)
 		self:setComposerOpen(false)
 		self:clearList()
 		self:updateWriteButton()
-		self.title.Text = "Theses · " .. ticker
+		self.title.Text = "Community · " .. ticker
 		self.message.Visible = true
 		self.message.Text = "Loading…"
 	end
