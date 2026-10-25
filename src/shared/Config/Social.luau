@@ -81,6 +81,46 @@ Social.MAX_HIDDEN_THESES = 200 -- theses a player reported, hidden from them
 Social.REPORTS_TO_TAKE_DOWN = 3
 Social.MIN_REPORTER_ACCOUNT_AGE_DAYS = 30
 
+-- Notifications: the inbox keeps the latest INBOX_SIZE
+Social.INBOX_SIZE = 50
+
+local ITEM_WORDS = {
+	Trade = "trade",
+	Thesis = "thesis",
+	Milestone = "milestone",
+}
+
+-- A notification's title and body, composed from its fields (none of them
+-- typed by players): Follow { fromName }, Reaction { fromName, reaction,
+-- itemKind, ticker? }, ThesisRemoved { ticker }
+function Social.describeNotification(notification)
+	local kind = notification.kind
+
+	if kind == "Follow" then
+		return "New follower", notification.fromName .. " followed you."
+	elseif kind == "Reaction" then
+		local reaction = Social.getReaction(notification.reaction)
+		local item = ITEM_WORDS[notification.itemKind] or "post"
+
+		if notification.ticker and notification.itemKind ~= "Milestone" then
+			item ..= " on " .. notification.ticker
+		end
+
+		return "New reaction",
+			string.format(
+				"%s reacted %sto your %s.",
+				notification.fromName,
+				reaction and (reaction.emoji .. " ") or "",
+				item
+			)
+	elseif kind == "ThesisRemoved" then
+		return "Thesis taken down",
+			string.format("Your thesis on %s was taken down after reports.", notification.ticker)
+	end
+
+	return "Notification", ""
+end
+
 function Social.getHorizon(horizonId)
 	for _, horizon in ipairs(Social.THESIS_HORIZONS) do
 		if horizon.id == horizonId then

@@ -12,6 +12,7 @@ local SocialService = require(ServerScriptService.Services.SocialService)
 local FeedService = require(ServerScriptService.Services.FeedService)
 local ThesisService = require(ServerScriptService.Services.ThesisService)
 local MuteService = require(ServerScriptService.Services.MuteService)
+local NotificationService = require(ServerScriptService.Services.NotificationService)
 local PlayerDataService = require(ServerScriptService.Services.PlayerDataService)
 local SocialModule = require(ServerScriptService.Modules.SocialModule)
 local MarketDataModule = require(ServerScriptService.Modules.MarketDataModule)
@@ -28,6 +29,8 @@ local MutePlayerEvent = EventsFolder:WaitForChild("MutePlayerEvent")
 local SetRobloxBlocksEvent = EventsFolder:WaitForChild("SetRobloxBlocksEvent")
 local ReportThesisEvent = EventsFolder:WaitForChild("ReportThesisEvent")
 local ReactToFeedItemEvent = EventsFolder:WaitForChild("ReactToFeedItemEvent")
+local GetInboxEvent = EventsFolder:WaitForChild("GetInboxEvent")
+local MarkInboxSeenEvent = EventsFolder:WaitForChild("MarkInboxSeenEvent")
 
 local MAX_THESIS_ID_LENGTH = 40
 local MAX_FEED_ITEM_ID_LENGTH = 64
@@ -152,3 +155,17 @@ RemoteGuard.handle(ReactToFeedItemEvent, RemoteGuard.LIMITS.Research, function(p
 
 	return FeedService.react(player, itemId, reactionId)
 end, RemoteGuard.TOO_MANY_REQUESTS)
+
+-- GetInboxEvent()
+-- Returns { items (newest first), unread }, or nil before the profile loads
+RemoteGuard.handle(GetInboxEvent, RemoteGuard.LIMITS.Read, function(player)
+	return NotificationService.getInbox(player)
+end)
+
+-- MarkInboxSeenEvent()
+-- The player opened the inbox: everything in it now counts as read
+RemoteGuard.handle(MarkInboxSeenEvent, RemoteGuard.LIMITS.Research, function(player)
+	NotificationService.markSeen(player)
+
+	return true
+end, false)

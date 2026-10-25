@@ -14,6 +14,7 @@ local Social = require(ReplicatedStorage.Config.Social)
 local PlayerDataService = require(ServerScriptService.Services.PlayerDataService)
 local PublicProfileService = require(ServerScriptService.Services.PublicProfileService)
 local FeedService = require(ServerScriptService.Services.FeedService)
+local NotificationService = require(ServerScriptService.Services.NotificationService)
 local SocialModule = require(ServerScriptService.Modules.SocialModule)
 
 local FollowerStore = DataStoreService:GetDataStore("Followers_v1")
@@ -98,6 +99,16 @@ local function changeFollow(player, targetUserId: number, shouldFollow: boolean)
 	end
 
 	SocialModule.setFollowing(data.Social, targetUserId, shouldFollow, os.time())
+
+	if shouldFollow then
+		task.spawn(
+			NotificationService.notifyOnce,
+			player,
+			"Follow:" .. targetUserId,
+			targetUserId,
+			NotificationService.new("Follow", { fromUserId = player.UserId, fromName = player.DisplayName })
+		)
+	end
 
 	return describeFollow(data, targetUserId, followers)
 end

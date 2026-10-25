@@ -26,6 +26,7 @@ local PlayerDataService = require(ServerScriptService.Services.PlayerDataService
 local PublicProfileService = require(ServerScriptService.Services.PublicProfileService)
 local FeedService = require(ServerScriptService.Services.FeedService)
 local MuteService = require(ServerScriptService.Services.MuteService)
+local NotificationService = require(ServerScriptService.Services.NotificationService)
 local MarketDataModule = require(ServerScriptService.Modules.MarketDataModule)
 local ThesisModule = require(ServerScriptService.Modules.ThesisModule)
 
@@ -368,7 +369,10 @@ end
 local function takeDown(thesis)
 	removeFromTicker(thesis)
 	FeedService.removeThesis(thesis.id)
-	PlayerDataService.sendMessage(thesis.userId, { kind = "ThesisRemoved", thesisId = thesis.id })
+	PlayerDataService.sendMessage(
+		thesis.userId,
+		{ kind = "ThesisRemoved", thesisId = thesis.id, ticker = thesis.ticker }
+	)
 end
 
 -- Reports someone else's thesis on `ticker`. Once recorded it's hidden from
@@ -417,10 +421,17 @@ function ThesisService.report(player, thesisId: string, ticker: string)
 end
 
 function ThesisService.start()
-	-- A thesis taken down after reports leaves its author's own list too
+	-- A thesis taken down after reports leaves its author's own list too, and
+	-- they're told why it's gone
 	PlayerDataService.onMessage("ThesisRemoved", function(player, data, message)
 		if type(message.thesisId) == "string" and ThesisModule.removeFromList(data.Social.Theses, message.thesisId) then
 			PublicProfileService.publishNow(player)
+			NotificationService.deliver(
+				player,
+				data,
+				NotificationService.new("ThesisRemoved", { ticker = message.ticker }),
+				true
+			)
 		end
 	end)
 

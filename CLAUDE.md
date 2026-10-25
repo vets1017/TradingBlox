@@ -51,7 +51,8 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
 ### Client/server split
 
 - **Client (`src/client/Controllers/`)** — one controller per screen/UI area (`ShellController` for the
-  full-screen shell — nav bar, balance and level pills, status bar, toasts; `TerminalController` for tab
+  full-screen shell — nav bar, inbox bell, balance and level pills, status bar, toasts; `InboxController` for the
+  bell's unread badge and the notification list it opens; `TerminalController` for tab
   switching, the Dashboard greeting and countdown, and Charts; `DashboardController` for the Dashboard's widgets
   (account info, watchlist, orders, performance, market overview, top traders), built in code inside the
   Studio widget frames; `TutorialController` for the "Getting started" checklist card; `TradeController` for the Trade screen; `PortfolioController` for the Portfolio screen, which it builds
@@ -71,7 +72,8 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     `GetPortfolioEvent`, `GetLeaderboardEvent`, `GetPublicProfileEvent`, `GetNewsFeedEvent`, `GetMarketMoversEvent`,
     `PlayerOrderEvent`, `PlayerOptionOrderEvent`, `FollowPlayerEvent`, `SetShareTradesEvent`, `GetFeedEvent`,
     `PublishThesisEvent`, `DeleteThesisEvent`, `GetTickerThesesEvent`, `MutePlayerEvent`, `SetRobloxBlocksEvent`,
-    `ReportThesisEvent`, `ReactToFeedItemEvent`, plus watchlist and research remotes). This must run before other server scripts wire up
+    `ReportThesisEvent`, `ReactToFeedItemEvent`, `GetInboxEvent`, `MarkInboxSeenEvent`, plus watchlist and
+    research remotes; pushes go through RemoteEvents `OrderUpdateEvent` and `NotificationEvent`). This must run before other server scripts wire up
     `OnServerInvoke` handlers.
   - `API_Manager.server.luau` wires the market-data remotes. `Modules/MarketDataModule.luau` is the sole
     bridge to the external HTTP backend (`SERVER_URL`, a Render-hosted service): ticker validation, a
@@ -90,7 +92,7 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     localhost). Remove it after testing; live servers always use the deployed backend.
   - `Data_Manager.server.luau` is the bootstrap for the player services: it starts the services that listen
     for players (`ProgressionService`, `LeaderboardService`, `PublicProfileService`, `SocialService`, `FeedService`,
-    `ThesisService`, `OrderService`, `SettlementService`) before `PlayerDataService`, so none misses a player who loads straight away.
+    `ThesisService`, `NotificationService`, `OrderService`, `SettlementService`) before `PlayerDataService`, so none misses a player who loads straight away.
   - `API_Manager`'s option and research remotes check level unlocks; a locked request gets
     `{ available = false, locked = true, message = "Unlocks at Level N · Name" }`, the shape the Trade screen
     already renders as "no data".
@@ -163,7 +165,11 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
   - `MuteService` — what a viewer has hidden: mutes (`playerData.Social.Muted`), their Roblox blocks (the client
     sends `StarterGui:GetCore("GetBlockedUserIds")` each session; servers can't read it) and theses they
     reported. **Any list of other players' content shown to a player goes through `MuteService.getFilter(viewer)`**
-    (the feed, ticker theses and public profiles do).
+    (the feed, ticker theses, public profiles and notifications do).
+  - `NotificationService` — the inbox (`playerData.Social.Inbox`, latest 50, `InboxSeenAt`): `notify(userId, n)`
+    sends a ProfileStore message (the inbox entry) and a MessagingService broadcast on `Notifications_v1` (the live
+    toast); `notifyOnce` limits a sender to once a session per key. Notifications carry fields, not text — the
+    client words them with `Social.describeNotification`. Pure rules: `Modules/InboxModule.luau`.
   - `Core/LeaderboardSystem.server.luau` wires `GetLeaderboardEvent` / `GetPublicProfileEvent` (which adds the
     follower count, whether the caller follows, and the player's latest theses); `Core/SocialSystem.server.luau`
     wires `FollowPlayerEvent`, `SetShareTradesEvent`, `GetFeedEvent` and the thesis remotes.

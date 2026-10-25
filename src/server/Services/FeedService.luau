@@ -22,6 +22,7 @@ local PlayerDataService = require(ServerScriptService.Services.PlayerDataService
 local ProgressionService = require(ServerScriptService.Services.ProgressionService)
 local OrderEvents = require(ServerScriptService.Services.OrderEvents)
 local MuteService = require(ServerScriptService.Services.MuteService)
+local NotificationService = require(ServerScriptService.Services.NotificationService)
 local FeedModule = require(ServerScriptService.Modules.FeedModule)
 local SocialModule = require(ServerScriptService.Modules.SocialModule)
 
@@ -222,6 +223,23 @@ local function saveReaction(player, cached, previous: string?, reaction: string?
 
 	-- This server shows the new counts straight away; others at their next refresh
 	cached.reactions = updated.reactions
+
+	-- A first reaction notifies the author; switching or taking it off doesn't
+	if reaction and not previous then
+		task.spawn(
+			NotificationService.notifyOnce,
+			player,
+			"Reaction:" .. cached.id,
+			cached.userId,
+			NotificationService.new("Reaction", {
+				fromUserId = player.UserId,
+				fromName = player.DisplayName,
+				reaction = reaction,
+				itemKind = cached.kind,
+				ticker = cached.ticker,
+			})
+		)
+	end
 
 	return { success = true, reactions = updated.reactions, yourReaction = reaction }
 end

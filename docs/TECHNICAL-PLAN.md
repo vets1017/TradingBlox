@@ -570,8 +570,10 @@ Taken at the start of Phase 2 (2026-10-25), following the recommendations above:
 5. ✅ Reactions on feed items (🔥 Fire, 👀 Watching, 🤔 Skeptical; one per player per item). Counts live
    on the MemoryStore item (`UpdateAsync`, keeping its expiry), so they cost no extra reads and expire with
    it; each reactor's profile records their reaction, which is what prevents double counting.
-6. Notifications: an inbox in the profile (ProfileStore messages for new followers and reactions), live
-   delivery through MessagingService, a toast and a nav badge.
+6. ✅ Notifications: an inbox in the profile (latest 50) for new followers, first reactions on a post and
+   theses taken down, delivered as ProfileStore messages so they reach any server or the next login; a
+   MessagingService broadcast toasts them live. The recipient's mutes and blocks drop them, and a sender
+   notifies a given player or post at most once a session. A bell with an unread badge in the nav bar.
 7. Asset discovery: per-ticker counts of watchers, traders and theses; "Trending in TradingBlox" on the
    Social tab and in Market overview, and the counts on the Trade screen beside the fundamentals.
 8. Dashboard Social module: activity from followed players and trending theses.

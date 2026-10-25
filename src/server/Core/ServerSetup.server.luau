@@ -32,11 +32,14 @@ local EVENTS = {
 	"SetRobloxBlocksEvent",
 	"ReportThesisEvent",
 	"ReactToFeedItemEvent",
+	"GetInboxEvent",
+	"MarkInboxSeenEvent",
 }
 
 -- Server-to-client pushes (RemoteEvents rather than RemoteFunctions)
 local PUSH_EVENTS = {
 	"OrderUpdateEvent", -- a limit order filled or was cancelled while the player wasn't waiting on it
+	"NotificationEvent", -- a new notification or unread count; see NotificationService
 }
 
 local function getOrCreateFolder(parent, name)

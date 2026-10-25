@@ -2,9 +2,10 @@
 --
 -- Owns the full-screen terminal shell around the screens: sizes the window
 -- to the whole viewport, lays the nav bar out around Roblox's own top-bar
--- buttons, adds the wordmark, balance pill and bottom status bar, and stamps
--- the theme onto all of TerminalGui once at startup. Switching tabs stays in
--- TerminalController.
+-- buttons, adds the wordmark, inbox bell, level and balance pills and bottom
+-- status bar, shows toasts, and stamps the theme onto all of TerminalGui
+-- once at startup. Switching tabs stays in TerminalController; the inbox
+-- itself (badge and list) is InboxController's.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -16,6 +17,7 @@ local Theme = require(ReplicatedStorage.Modules.Multi.Theme)
 local NumberModule = require(ReplicatedStorage.Modules.Multi.NumberModule)
 local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursModule)
 local Progression = require(ReplicatedStorage.Config.Progression)
+local Social = require(ReplicatedStorage.Config.Social)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -40,6 +42,8 @@ local BALANCE_PILL_PADDING = 12 -- each side of the balance text
 local TAB_TEXT_PADDING = 10
 local NET_WORTH_VALUE_WIDTH = 140
 local PILL_GAP = 8 -- between the level and balance pills
+local INBOX_BUTTON_WIDTH = 34
+local INBOX_BADGE_SIZE = 16
 local TOAST_WIDTH = 420
 local TOAST_HEIGHT = 56
 local TOAST_SECONDS = 6
@@ -104,6 +108,38 @@ LevelPill.Parent = TopBar
 local LevelValue = makeTextLabel("LevelValue", "TextStrong", LevelPill)
 LevelValue.Size = UDim2.fromScale(1, 1)
 LevelValue.TextXAlignment = Enum.TextXAlignment.Center
+
+-- The inbox bell; InboxController owns its badge and the list it opens
+local InboxButton = Instance.new("TextButton")
+InboxButton.Name = "InboxButton"
+InboxButton.AnchorPoint = Vector2.new(1, 0.5)
+InboxButton.Size = UDim2.fromOffset(INBOX_BUTTON_WIDTH, BALANCE_PILL_HEIGHT)
+InboxButton.BorderSizePixel = 0
+InboxButton.AutoButtonColor = false
+InboxButton.FontFace = Theme.Fonts.UI
+InboxButton.TextSize = Theme.TextSize.Body
+InboxButton.Text = "🔔"
+InboxButton:SetAttribute("ThemeRole", "Pill")
+InboxButton.Parent = TopBar
+
+-- Untagged on purpose: InboxController shows and fills it
+local InboxBadge = Instance.new("TextLabel")
+InboxBadge.Name = "Badge"
+InboxBadge.AnchorPoint = Vector2.new(0.5, 0.5)
+InboxBadge.Position = UDim2.new(1, -2, 0, 2)
+InboxBadge.Size = UDim2.fromOffset(INBOX_BADGE_SIZE, INBOX_BADGE_SIZE)
+InboxBadge.BackgroundColor3 = Theme.Colors.Accent
+InboxBadge.BorderSizePixel = 0
+InboxBadge.FontFace = Theme.Fonts.UIBold
+InboxBadge.TextSize = Theme.TextSize.Caption - 2
+InboxBadge.TextColor3 = Theme.Colors.Background
+InboxBadge.Text = ""
+InboxBadge.Visible = false
+InboxBadge.Parent = InboxButton
+
+local InboxBadgeCorner = Instance.new("UICorner")
+InboxBadgeCorner.CornerRadius = UDim.new(0.5, 0)
+InboxBadgeCorner.Parent = InboxBadge
 
 -- Announcements under the nav bar (level-ups, limit-order fills);
 -- positioned by layoutShell
@@ -240,7 +276,8 @@ local function layoutShell()
 	local pillWidth = math.max(BalanceValue.TextBounds.X + BALANCE_PILL_PADDING * 2, BALANCE_PILL_MIN_WIDTH)
 	local levelPillWidth = LevelValue.TextBounds.X + BALANCE_PILL_PADDING * 2
 	local levelPillRight = rightEdge - pillWidth - PILL_GAP
-	local tabsRight = levelPillRight - levelPillWidth - SECTION_GAP
+	local inboxRight = levelPillRight - levelPillWidth - PILL_GAP
+	local tabsRight = inboxRight - INBOX_BUTTON_WIDTH - SECTION_GAP
 
 	-- On a narrow window the wordmark gives up its space before the tabs do
 	local tabsLeftWithWordmark = leftEdge + WORDMARK_WIDTH + SECTION_GAP
@@ -256,6 +293,7 @@ local function layoutShell()
 	BalancePill.Position = UDim2.new(0, rightEdge, 0.5, 0)
 	LevelPill.Size = UDim2.fromOffset(levelPillWidth, BALANCE_PILL_HEIGHT)
 	LevelPill.Position = UDim2.new(0, levelPillRight, 0.5, 0)
+	InboxButton.Position = UDim2.new(0, inboxRight, 0.5, 0)
 	Toast.Position = UDim2.new(0.5, 0, 0, navHeight + 12)
 
 	ScreenContainer.Position = UDim2.fromOffset(0, navHeight)
@@ -369,5 +407,17 @@ task.spawn(function()
 
 	OrderUpdateEvent.OnClientEvent:Connect(function(update)
 		showToast(TITLES[update.kind] or "Update", update.message)
+	end)
+end)
+
+-- New followers, reactions and the like, as they arrive (see
+-- NotificationService); only live ones come with a toast
+task.spawn(function()
+	local NotificationEvent = ReplicatedStorage:WaitForChild("EventsFolder"):WaitForChild("NotificationEvent")
+
+	NotificationEvent.OnClientEvent:Connect(function(update)
+		if update.toast and update.notification then
+			showToast(Social.describeNotification(update.notification))
+		end
 	end)
 end)
