@@ -5,12 +5,15 @@
 -- items and serves them.
 --
 -- Every item names its author and its kind, so the feed can tell executed
--- trades (copied from the trade log, so they're real) from milestones and,
--- later, opinions:
+-- trades (copied from the trade log, so they're real) from milestones and
+-- opinions:
 --   { kind = "Trade", userId, displayName, username, time,
 --     ticker, contract?, side, quantity, price, realizedPL? }
 --   { kind = "Milestone", userId, displayName, username, time,
 --     milestone? (a Progression milestone), level? (a level reached) }
+--   { kind = "Thesis", userId, displayName, username, time, thesisId,
+--     ticker, direction, horizon, targetPrice? } - no text: the feed points
+--     to the ticker, where the thesis shows in full
 -- Stored items carry no id; FeedService adds `id` (the item's key) when it
 -- reads them.
 
@@ -53,6 +56,21 @@ function FeedModule.makeMilestoneItem(author, milestone: string?, level: number?
 	}
 end
 
+function FeedModule.makeThesisItem(author, thesis)
+	return {
+		kind = "Thesis",
+		userId = author.userId,
+		displayName = author.displayName,
+		username = author.username,
+		time = thesis.createdAt,
+		thesisId = thesis.id,
+		ticker = thesis.ticker,
+		direction = thesis.direction,
+		horizon = thesis.horizon,
+		targetPrice = thesis.targetPrice,
+	}
+end
+
 -- A player's trades reach the feed at most once every `minGap` seconds, so
 -- a burst of one-click fills doesn't bury everyone else. The skipped fills
 -- still show on their profile.
@@ -82,6 +100,12 @@ end
 -- they stop sharing trades
 function FeedModule.isTradeBy(item, userId: number): boolean
 	return item.kind == "Trade" and item.userId == userId
+end
+
+-- Whether an item announces the thesis `thesisId`, which leaves the feed
+-- when it's deleted
+function FeedModule.isThesis(item, thesisId: string): boolean
+	return item.kind == "Thesis" and item.thesisId == thesisId
 end
 
 return FeedModule

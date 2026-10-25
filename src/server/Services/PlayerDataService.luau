@@ -60,6 +60,10 @@ local TEMPLATE = {
 	Social = { -- see SocialService
 		Following = {}, -- [tostring(userId)] = time followed; string keys keep it a dictionary when saved
 		ShareTrades = true, -- recent trades on the public profile; TECHNICAL-PLAN "Phase 2 decisions"
+		Theses = {}, -- the player's latest theses, oldest first; see ThesisService
+		ThesisSequence = 0, -- numbers the next thesis id
+		ThesisDay = "", -- UTC date of the last thesis, for the daily limit
+		ThesesToday = 0,
 	},
 }
 

@@ -8,7 +8,9 @@
 -- to the leaderboards, so any server can show any player.
 --
 -- The latest trades are included only while the player shares them (see
--- SocialService); holdings stay private.
+-- SocialService); holdings stay private. The latest theses are always
+-- included; GetPublicProfileEvent takes their text out for viewers who
+-- can't see it.
 
 local DataStoreService = game:GetService("DataStoreService")
 local Players = game:GetService("Players")
@@ -66,6 +68,14 @@ local function buildSnapshot(player, data, netWorth: number, now: number)
 		recentTrades = if data.Social.ShareTrades
 			then SocialModule.getRecentTrades(data.TradeLog, Social.RECENT_TRADES)
 			else nil,
+		-- The latest few, oldest first like the profile's own list
+		theses = table.move(
+			data.Social.Theses,
+			math.max(#data.Social.Theses - Social.PROFILE_THESES + 1, 1),
+			#data.Social.Theses,
+			1,
+			{}
+		),
 		updatedAt = now,
 	}
 end

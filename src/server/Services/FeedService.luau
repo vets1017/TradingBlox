@@ -1,7 +1,7 @@
 -- FeedService.luau
 --
--- The social feed (GDD §2): executed trades and milestones from every
--- player, newest first. Items live in one MemoryStore sorted map that every
+-- The social feed (GDD §2): executed trades, milestones and theses from
+-- every player, newest first. Items live in one MemoryStore sorted map that every
 -- server shares, capped by count and expiring after two days, because
 -- MemoryStore memory is small (64 KB + 1.2 KB per concurrent user, for the
 -- whole experience). Each server caches the latest items for a few seconds,
@@ -162,13 +162,13 @@ function FeedService.getFeed(player, view: string)
 	end)
 end
 
--- Takes a player's trades out of the feed, for when they stop sharing them.
--- Other servers drop them at their next refresh.
-function FeedService.removeTrades(userId: number)
+-- Takes the items `matches` accepts out of the feed. Other servers drop
+-- them at their next refresh.
+local function removeWhere(matches: (any) -> boolean)
 	local kept = {}
 
 	for _, item in ipairs(cachedItems) do
-		if not FeedModule.isTradeBy(item, userId) then
+		if not matches(item) then
 			table.insert(kept, item)
 		end
 	end
@@ -179,16 +179,34 @@ function FeedService.removeTrades(userId: number)
 	local success, entries = pcall(FeedMap.GetRangeAsync, FeedMap, Enum.SortDirection.Descending, 200)
 
 	if not success then
-		warn("[FeedService] Couldn't read the feed to remove trades: " .. tostring(entries))
+		warn("[FeedService] Couldn't read the feed to remove items: " .. tostring(entries))
 
 		return
 	end
 
 	for _, entry in ipairs(entries) do
-		if FeedModule.isTradeBy(entry.value, userId) then
+		if matches(entry.value) then
 			pcall(FeedMap.RemoveAsync, FeedMap, entry.key)
 		end
 	end
+end
+
+-- For when a player stops sharing their trades
+function FeedService.removeTrades(userId: number)
+	removeWhere(function(item)
+		return FeedModule.isTradeBy(item, userId)
+	end)
+end
+
+function FeedService.postThesis(player, thesis)
+	post(FeedModule.makeThesisItem(getAuthor(player), thesis))
+end
+
+-- For when a thesis is deleted
+function FeedService.removeThesis(thesisId: string)
+	removeWhere(function(item)
+		return FeedModule.isThesis(item, thesisId)
+	end)
 end
 
 function FeedService.start()

@@ -86,3 +86,24 @@ test("isTradeBy matches only that player's trades", function()
 	equal(FeedModule.isTradeBy(items[2], 2), false, "milestones stay")
 	equal(FeedModule.isTradeBy(items[1], 2), false, "someone else's trade")
 end)
+
+test("a thesis item points at the thesis, without its text", function()
+	local thesis = {
+		id = "100-3",
+		ticker = "AAPL",
+		direction = "Bullish",
+		horizon = "3M",
+		targetPrice = 210,
+		text = "Services margin keeps expanding",
+		createdAt = NOW,
+	}
+	local item = FeedModule.makeThesisItem(AUTHOR, thesis)
+
+	equal(item.kind, "Thesis")
+	equal(item.thesisId, "100-3")
+	equal(item.time, NOW)
+	equal(item.text, nil)
+	equal(FeedModule.isThesis(item, "100-3"), true)
+	equal(FeedModule.isThesis(item, "100-4"), false)
+	equal(FeedModule.isThesis({ kind = "Trade", thesisId = "100-3" }, "100-3"), false)
+end)

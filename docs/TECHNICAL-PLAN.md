@@ -242,7 +242,7 @@ all using the same catch-up step.
 | Older trade-log pages                                                                                                                        | DataStore `TradeLog`                                             | userId + page  | Only if a full trade history view is wanted                                                                           |
 | Public profile snapshot                                                                                                                      | DataStore `PublicProfile`                                        | userId         | Small. Written on save. Lets other servers read a profile without the private data                                    |
 | Followers                                                                                                                                    | DataStore `Followers`                                            | userId         | `UpdateAsync`, because the writes come from other servers (rare)                                                      |
-| Theses and posts                                                                                                                             | DataStore `Posts`, plus index keys by author and by ticker       | postId         | Raw text stored, filtered when displayed                                                                              |
+| Theses                                                                                                                                       | The author's profile, plus DataStore `TickerTheses_v1`           | ticker         | Text filtered for broadcast at publish; only the filtered text is stored (§6, Phase 2 decisions)                      |
 | Leaderboards                                                                                                                                 | OrderedDataStore, one per metric and period                      | userId         | Integers only (cents, basis points). Cached per server because the read budget is small                               |
 | Live feed, trending counters, locks                                                                                                          | MemoryStore sorted maps and hash maps                            | —              | Small hot data with expiry. Never the source of truth (memory quota below)                                            |
 | Live notifications                                                                                                                           | MessagingService                                                 | topic per kind | 1 KB messages. Offline players get an inbox stored in their profile                                                   |
@@ -263,8 +263,8 @@ trades and opinions (line 48): an "idea" without a trade is a thesis.
   carries their last ~10 activity items.
 - **Text:**
   - Filter with `TextService` when a post is published.
-  - Filter again when stored text is displayed, as the docs require for stored text.
-  - Cache filtered results briefly, since filtering on every view is expensive.
+  - Filtering again on display isn't possible once the author has left the server (see "Phase 2
+  decisions" in §6), so only the filtered text is stored.
 - **Sharing executed trades is a per-player setting.**
 - **Comments and direct messages are deferred** until a policy review (§3). Social Phase 1 uses
 reactions only.
@@ -545,8 +545,11 @@ Taken at the start of Phase 2 (2026-10-25), following the recommendations above:
   MemoryStore memory is only 64 KB + 1.2 KB × concurrent users. Servers read it incrementally every few
   seconds and cache it; the Following view filters that cache.
 - **Thesis text needs chat permission.** Only players `TextChatService:CanUserChatAsync` allows can add
-  text; anyone can publish the structured part (ticker, direction, target, horizon). Text is filtered
-  for broadcast when shown and cached per server.
+  text; anyone can publish the structured part (ticker, direction, target, horizon). *Revised in step 3:*
+  `TextService:FilterStringAsync` refuses a sender who isn't connected to the server ("The sender must be
+  connected to the current server", checked in Studio on 2026-10-25), so stored text can't be filtered
+  again when shown once its author has left. Text is filtered for broadcast when it's published, and only
+  the filtered result is stored or sent. Players who can't chat don't see other players' text either.
 
 ### Phase 2 build order
 
@@ -555,8 +558,10 @@ Taken at the start of Phase 2 (2026-10-25), following the recommendations above:
 2. ✅ The feed: executed trades and milestones in MemoryStore, a code-built Social tab with All and
    Following views, and `Navigation.openProfile`. The Following view only filters the shared feed for
    now; adding followed players' snapshots (§2) waits until the 120-item cap proves too short.
-3. Theses: structured posts in DataStore `Posts`, indexed by author and ticker; shown in the feed, on
-   profiles and on the Trade screen, labeled "Simulated, not financial advice".
+3. ✅ Theses: structured posts shown in the feed (without text), on profiles and in a section on the Trade
+   screen, labeled "Simulated, not financial advice". Stored in the author's profile (latest 20) and in
+   DataStore `TickerTheses_v1`, one key per ticker (latest 30), rather than a `Posts` store; reactions
+   (step 5) will add a per-post store if they need one. One open thesis per ticker per player, five a day.
 4. Safety: blocking and muting (hidden from your feed and profile views), and reporting theses.
 5. Reactions on feed items.
 6. Notifications: an inbox in the profile (ProfileStore messages for new followers and reactions), live

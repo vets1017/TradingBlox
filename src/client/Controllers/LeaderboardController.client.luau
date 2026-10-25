@@ -3,8 +3,8 @@
 -- Builds and runs the Leaderboards screen (GDD §9): the top players on each
 -- board beside the public profile of whoever is selected - the player
 -- themselves to start with. The profile has a Follow button for other
--- players, the trade-sharing toggle on the player's own, and recent trades
--- when they're shared (GDD §2). Built in code inside the empty screen
+-- players, the trade-sharing toggle on the player's own, recent trades when
+-- they're shared, and recent theses (GDD §2). Built in code inside the empty screen
 -- ShellController adds; TerminalController switches to it.
 
 local Players = game:GetService("Players")
@@ -17,6 +17,7 @@ local LineChart = require(ReplicatedStorage.UI.LineChart)
 local UIKit = require(ReplicatedStorage.UI.UIKit)
 local Leaderboards = require(ReplicatedStorage.Config.Leaderboards)
 local Progression = require(ReplicatedStorage.Config.Progression)
+local Social = require(ReplicatedStorage.Config.Social)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -116,6 +117,21 @@ end
 
 local function sideText(side)
 	return string.format('<font color="#%s">%s</font>', side == "Buy" and UP_HEX or DOWN_HEX, side)
+end
+
+-- "Bullish AAPL · target $210.00 · 1 month", and "· ended" once it has
+local function describeThesis(thesis)
+	local horizon = Social.getHorizon(thesis.horizon)
+
+	return string.format(
+		'<font color="#%s"><b>%s</b></font> %s%s · %s%s',
+		thesis.direction == "Bullish" and UP_HEX or DOWN_HEX,
+		thesis.direction,
+		thesis.ticker,
+		thesis.targetPrice and (" · target " .. NumberModule.format(thesis.targetPrice)) or "",
+		horizon and horizon.label or thesis.horizon,
+		thesis.endsAt <= os.time() and " · ended" or ""
+	)
 end
 
 -- "Buy 5 AAPL @ $182.10", with the realized P/L after a sale
@@ -401,9 +417,24 @@ local TradesListLayout = Instance.new("UIListLayout")
 TradesListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 TradesListLayout.Parent = TradesList
 
+local ThesesTitle =
+	makeLabel("ThesesTitle", ProfileLower, Theme.Fonts.UISemibold, Theme.TextSize.Body, Theme.Colors.Text)
+ThesesTitle.LayoutOrder = 3
+ThesesTitle.Size = UDim2.new(1, 0, 0, 18)
+ThesesTitle.Text = "Theses"
+
+local ThesesList = makeFrame("ThesesList", ProfileLower)
+ThesesList.LayoutOrder = 4
+ThesesList.Size = UDim2.fromScale(1, 0)
+ThesesList.AutomaticSize = Enum.AutomaticSize.Y
+
+local ThesesListLayout = Instance.new("UIListLayout")
+ThesesListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+ThesesListLayout.Parent = ThesesList
+
 local ProfileUpdated =
 	makeLabel("Updated", ProfileLower, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.TextMuted)
-ProfileUpdated.LayoutOrder = 3
+ProfileUpdated.LayoutOrder = 5
 ProfileUpdated.Size = UDim2.new(1, 0, 0, 16)
 
 local ProfileMessage = makeLabel("Message", ProfilePanel, Theme.Fonts.UI, Theme.TextSize.Body, Theme.Colors.TextMuted)
@@ -458,10 +489,18 @@ local function renderAction()
 	ProfileActionNote.Text = ""
 end
 
-local function addTradesMessage(text)
-	local message = makeLabel("Message", TradesList, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.TextMuted)
+local function addListMessage(list, text)
+	local message = makeLabel("Message", list, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.TextMuted)
 	message.Size = UDim2.new(1, 0, 0, TRADE_ROW_HEIGHT)
 	message.Text = text
+end
+
+local function clearList(list)
+	for _, child in ipairs(list:GetChildren()) do
+		if child:IsA("GuiObject") then
+			child:Destroy()
+		end
+	end
 end
 
 -- A trade row opens its ticker on the Trade tab
@@ -509,23 +548,100 @@ local function createTradeRow(index, trade)
 end
 
 local function renderRecentTrades(profile, isYou)
-	for _, child in ipairs(TradesList:GetChildren()) do
-		if child:IsA("GuiObject") then
-			child:Destroy()
-		end
-	end
+	clearList(TradesList)
 
 	-- nil (not false) on snapshots saved before trades could be shared
 	if profile.sharesTrades == false then
-		addTradesMessage(
+		addListMessage(
+			TradesList,
 			isYou and "Hidden from other players." or ("@" .. profile.username .. " keeps trades private.")
 		)
 	elseif not profile.recentTrades or #profile.recentTrades == 0 then
-		addTradesMessage("No trades to show yet.")
+		addListMessage(TradesList, "No trades to show yet.")
 	else
 		for index, trade in ipairs(profile.recentTrades) do
 			createTradeRow(index, trade)
 		end
+	end
+end
+
+-- A thesis row opens its ticker on the Trade tab, where the thesis shows
+-- in full. The server leaves text out for viewers who can't chat.
+local function createThesisRow(index, thesis)
+	local row = Instance.new("TextButton")
+	row.Name = "Thesis_" .. index
+	row.LayoutOrder = index
+	row.Size = UDim2.fromScale(1, 0)
+	row.AutomaticSize = Enum.AutomaticSize.Y
+	row.AutoButtonColor = false
+	row.BorderSizePixel = 0
+	row.BackgroundColor3 = Theme.Colors.Raised
+	row.BackgroundTransparency = 1
+	row.Text = ""
+	row.Parent = ThesesList
+	UIKit.addCorner(row)
+
+	local padding = Instance.new("UIPadding")
+	padding.PaddingLeft = UDim.new(0, TRADE_ROW_PADDING)
+	padding.PaddingRight = UDim.new(0, TRADE_ROW_PADDING)
+	padding.PaddingBottom = UDim.new(0, 2)
+	padding.Parent = row
+
+	local layout = Instance.new("UIListLayout")
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Parent = row
+
+	local line = makeFrame("Line", row)
+	line.LayoutOrder = 1
+	line.Size = UDim2.new(1, 0, 0, TRADE_ROW_HEIGHT)
+
+	local call = makeLabel("Call", line, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.Text)
+	call.Size = UDim2.new(1, -TRADE_AGE_WIDTH, 1, 0)
+	call.RichText = true
+	call.Text = describeThesis(thesis)
+
+	local age = makeLabel("Age", line, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.TextMuted)
+	age.AnchorPoint = Vector2.new(1, 0)
+	age.Position = UDim2.fromScale(1, 0)
+	age.Size = UDim2.new(0, TRADE_AGE_WIDTH, 1, 0)
+	age.TextXAlignment = Enum.TextXAlignment.Right
+	age.Text = formatAge(os.time() - thesis.createdAt)
+
+	if thesis.text then
+		-- Filtered by the server; plain text, never rich text
+		local body = makeLabel("Text", row, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.TextMuted)
+		body.LayoutOrder = 2
+		body.Size = UDim2.fromScale(1, 0)
+		body.AutomaticSize = Enum.AutomaticSize.Y
+		body.TextWrapped = true
+		body.TextTruncate = Enum.TextTruncate.None
+		body.Text = thesis.text
+	end
+
+	row.MouseEnter:Connect(function()
+		row.BackgroundTransparency = 0
+	end)
+
+	row.MouseLeave:Connect(function()
+		row.BackgroundTransparency = 1
+	end)
+
+	row.MouseButton1Click:Connect(function()
+		Navigation.openTicker(thesis.ticker)
+	end)
+end
+
+local function renderTheses(profile, isYou)
+	clearList(ThesesList)
+
+	if not profile.theses or #profile.theses == 0 then
+		addListMessage(ThesesList, isYou and "Publish one from a ticker on the Trade tab." or "No theses yet.")
+
+		return
+	end
+
+	for index, thesis in ipairs(profile.theses) do
+		createThesisRow(index, thesis)
 	end
 end
 
@@ -608,6 +724,7 @@ local function renderProfile(profile)
 	ProfileUpdated.Text = "Updated " .. formatAge(os.time() - profile.updatedAt)
 	renderAction()
 	renderRecentTrades(profile, isYou)
+	renderTheses(profile, isYou)
 	renderProfileChart()
 end
 

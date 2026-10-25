@@ -71,6 +71,33 @@ function UIKit.makePanel(name, parent)
 	return panel
 end
 
+-- A Raised, outlined button sized to its text, for presets and toggles. Its
+-- height comes from the parent (scale 1). Returns the button and its stroke;
+-- the caller owns the colors from then on.
+function UIKit.makePill(name, parent, text)
+	local pill = Instance.new("TextButton")
+
+	pill.Name = name
+	pill.AutomaticSize = Enum.AutomaticSize.X
+	pill.Size = UDim2.fromScale(0, 1)
+	pill.AutoButtonColor = false
+	pill.BorderSizePixel = 0
+	pill.BackgroundColor3 = Theme.Colors.Raised
+	pill.FontFace = Theme.Fonts.UISemibold
+	pill.TextSize = Theme.TextSize.Caption
+	pill.TextColor3 = Theme.Colors.Text
+	pill.Text = text
+	pill.Parent = parent
+	UIKit.addCorner(pill)
+
+	local padding = Instance.new("UIPadding")
+	padding.PaddingLeft = UDim.new(0, 12)
+	padding.PaddingRight = UDim.new(0, 12)
+	padding.Parent = pill
+
+	return pill, UIKit.addStroke(pill)
+end
+
 -- A filled circle centered on its Position
 function UIKit.makeDot(name, parent, size, color)
 	local dot = UIKit.makeFrame(name, parent)

@@ -11,6 +11,7 @@ local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursMod
 local Theme = require(ReplicatedStorage.Modules.Multi.Theme)
 local Navigation = require(ReplicatedStorage.Modules.Multi.Navigation)
 local OrderTicketModule = require(ReplicatedStorage.Modules.Trade.OrderTicketModule)
+local ThesisPanelModule = require(ReplicatedStorage.Modules.Trade.ThesisPanelModule)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -161,6 +162,7 @@ local chainExpanded = true
 local orderQuantity = 1
 local currentPositionQuantity = 0 -- shares held of currentTicker, for the order ticket's sell presets
 local orderTicket = nil -- created once the functions it calls exist
+local thesisPanel = nil -- created with the order ticket
 
 local selectedContract = nil
 
@@ -1310,6 +1312,9 @@ local function loadTicker(rawTicker)
 	renderQuoteDetails(marketData)
 	switchTab("QuoteDetails")
 
+	-- Spawned so a slow theses read never holds up the rest of the screen
+	task.spawn(thesisPanel.load, thesisPanel, ticker)
+
 	-- MiniChart
 	local miniData = RequestChartEvent:InvokeServer(ticker, "5M")
 	if miniData then
@@ -1479,6 +1484,15 @@ orderTicket = OrderTicketModule.new({
 		return currentPositionQuantity
 	end,
 	onOrderPlaced = refreshPositions,
+})
+
+-- Theses go after the news, at the end of the research sections
+thesisPanel = ThesisPanelModule.new({
+	parent = TradeScreen,
+	layoutOrder = NewsFeed.LayoutOrder + 1,
+	getPrice = function()
+		return currentPrice
+	end,
 })
 
 switchTab("QuoteDetails")

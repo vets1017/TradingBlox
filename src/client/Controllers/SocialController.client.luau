@@ -1,8 +1,9 @@
 -- SocialController.client.luau
 --
--- Builds and runs the Social tab (GDD §2): the feed of executed trades and
--- milestones from every player, or only from the players you follow. A row
--- opens its player's profile; a trade's ticker opens on the Trade tab.
+-- Builds and runs the Social tab (GDD §2): the feed of executed trades,
+-- theses and milestones from every player, or only from the players you
+-- follow. A row opens its player's profile; the ticker of a trade or thesis
+-- opens on the Trade tab, where theses show in full.
 -- Built in code inside the empty screen ShellController adds;
 -- TerminalController switches to it.
 
@@ -50,6 +51,7 @@ local RETRY_DELAY = 1.1 -- past the server's per-request cooldown when throttled
 
 local KIND_LABELS = {
 	Trade = "Executed trade",
+	Thesis = "Thesis",
 	Milestone = "Milestone",
 }
 
@@ -94,8 +96,9 @@ local function describeKind(item)
 	return string.format("%s · %s", KIND_LABELS[item.kind] or item.kind, formatAge(os.time() - item.time))
 end
 
--- "Bought 5 AAPL @ $182.10", with the realized P/L after a sale;
--- "Reached Level 2 · Investor" for a milestone
+-- "Bought 5 AAPL @ $182.10", with the realized P/L after a sale; "Bullish
+-- on AAPL · target $210.00 · 1 month" for a thesis; "Reached Level 2 ·
+-- Investor" for a milestone
 local function describeItem(item)
 	if item.kind == "Trade" then
 		local isBuy = item.side == "Buy"
@@ -121,6 +124,19 @@ local function describeItem(item)
 		)
 	end
 
+	if item.kind == "Thesis" then
+		local horizon = Social.getHorizon(item.horizon)
+
+		return string.format(
+			'<font color="#%s">%s</font> on %s%s · %s',
+			item.direction == "Bullish" and UP_HEX or DOWN_HEX,
+			item.direction,
+			item.ticker,
+			item.targetPrice and (" · target " .. NumberModule.format(item.targetPrice)) or "",
+			horizon and horizon.label or item.horizon
+		)
+	end
+
 	local levelInfo = item.level and Progression.LEVELS[item.level]
 
 	if levelInfo then
@@ -141,7 +157,7 @@ FeedTitle.Text = "Feed"
 local FeedSubtitle = makeLabel("Subtitle", FeedPanel, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.TextMuted)
 FeedSubtitle.Position = UDim2.fromOffset(PADDING, PADDING + TITLE_HEIGHT)
 FeedSubtitle.Size = UDim2.new(1, -PADDING * 2, 0, SUBTITLE_HEIGHT)
-FeedSubtitle.Text = "Trades and milestones from TradingBlox players. Simulated trading, not financial advice."
+FeedSubtitle.Text = "Trades, theses and milestones from TradingBlox players. Simulated trading, not financial advice."
 
 local ViewPills = makeFrame("ViewPills", FeedPanel)
 ViewPills.AnchorPoint = Vector2.new(1, 0)
@@ -220,11 +236,12 @@ local function clearRows()
 	table.clear(ageLabels)
 end
 
--- A whole row opens the player's profile; a trade's ticker pill opens the
--- ticker instead (the pill sits on top, so it takes the click)
+-- A whole row opens the player's profile; the ticker pill of a trade or
+-- thesis opens the ticker instead (the pill sits on top, so it takes the click)
 local function createRow(index, item)
-	local isTrade = item.kind == "Trade" and item.ticker ~= nil
-	local rightWidth = isTrade and TICKER_PILL_WIDTH + 8 or 0
+	local isTrade = item.kind == "Trade"
+	local hasTicker = item.ticker ~= nil
+	local rightWidth = hasTicker and TICKER_PILL_WIDTH + 8 or 0
 
 	local row = Instance.new("TextButton")
 	row.Name = "Item_" .. index
@@ -281,7 +298,7 @@ local function createRow(index, item)
 	detail.RichText = true
 	detail.Text = describeItem(item)
 
-	if isTrade then
+	if hasTicker then
 		local tickerPill = Instance.new("TextButton")
 		tickerPill.Name = "Ticker"
 		tickerPill.AnchorPoint = Vector2.new(1, 0.5)
@@ -328,7 +345,7 @@ end
 
 local function describeEmptyFeed(result)
 	if selectedView ~= "Following" then
-		return "No activity yet. Trades and milestones from every player show up here."
+		return "No activity yet. Trades, theses and milestones from every player show up here."
 	elseif result.following == 0 then
 		return "You're not following anyone yet. Open a player's profile from this feed or the Leaderboards tab and press Follow."
 	end

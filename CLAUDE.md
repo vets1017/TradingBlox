@@ -68,8 +68,8 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
   - `ServerSetup.server.luau` creates the `EventsFolder` in `ReplicatedStorage` and all `RemoteFunction`s the
     client calls (`RequestChartEvent`, `GetMarketDataEvent`, `GetOptionsDataEvent`, `GetPositionsEvent`,
     `GetPortfolioEvent`, `GetLeaderboardEvent`, `GetPublicProfileEvent`, `GetNewsFeedEvent`, `GetMarketMoversEvent`,
-    `PlayerOrderEvent`, `PlayerOptionOrderEvent`, `FollowPlayerEvent`, `SetShareTradesEvent`, `GetFeedEvent`, plus
-    watchlist and research remotes). This must run before other server scripts wire up
+    `PlayerOrderEvent`, `PlayerOptionOrderEvent`, `FollowPlayerEvent`, `SetShareTradesEvent`, `GetFeedEvent`,
+    `PublishThesisEvent`, `DeleteThesisEvent`, `GetTickerThesesEvent`, plus watchlist and research remotes). This must run before other server scripts wire up
     `OnServerInvoke` handlers.
   - `API_Manager.server.luau` wires the market-data remotes. `Modules/MarketDataModule.luau` is the sole
     bridge to the external HTTP backend (`SERVER_URL`, a Render-hosted service): ticker validation, a
@@ -88,7 +88,7 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     localhost). Remove it after testing; live servers always use the deployed backend.
   - `Data_Manager.server.luau` is the bootstrap for the player services: it starts the services that listen
     for players (`ProgressionService`, `LeaderboardService`, `PublicProfileService`, `SocialService`, `FeedService`,
-    `OrderService`, `SettlementService`) before `PlayerDataService`, so none misses a player who loads straight away.
+    `ThesisService`, `OrderService`, `SettlementService`) before `PlayerDataService`, so none misses a player who loads straight away.
   - `API_Manager`'s option and research remotes check level unlocks; a locked request gets
     `{ available = false, locked = true, message = "Unlocks at Level N · Name" }`, the shape the Trade screen
     already renders as "no data".
@@ -147,16 +147,23 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     MemoryStore sorted map `Feed_v1` shared by every server, capped at 120 items with a two-day expiry (the
     memory quota is tiny), cached 5 s per server. Turning sharing off removes the player's trades from it.
     Item shapes and pure rules are in `Modules/FeedModule.luau`.
+  - `ThesisService` — theses: a structured call on one ticker (bullish/bearish, horizon, optional target and
+    text), kept in the author's `playerData.Social.Theses` and DataStore `TickerTheses_v1` (one key per
+    ticker, `UpdateAsync`, cached 60 s), and announced in the feed. **User-typed text is filtered for broadcast
+    when it's published and only the filtered result is stored** — `TextService` refuses to filter for a sender
+    who isn't in the server, so stored text can't be re-filtered later. Only players `canUseText` allows
+    (`TextChatService:CanUserChatAsync`) can write text or see others'. Pure rules: `Modules/ThesisModule.luau`.
   - `Core/LeaderboardSystem.server.luau` wires `GetLeaderboardEvent` / `GetPublicProfileEvent` (which adds the
-    follower count and whether the caller follows); `Core/SocialSystem.server.luau` wires `FollowPlayerEvent`,
-    `SetShareTradesEvent` and `GetFeedEvent`.
+    follower count, whether the caller follows, and the player's latest theses); `Core/SocialSystem.server.luau`
+    wires `FollowPlayerEvent`, `SetShareTradesEvent`, `GetFeedEvent` and the thesis remotes.
 - **Vendored (`src/server/Vendor/`)** — `ProfileStore.luau`, unmodified below a provenance header (pinned
   commit, Apache-2.0; license in `THIRD_PARTY_LICENSES/`). Don't edit it in place.
 - **Shared config (`src/shared/Config/`)** — read by both sides: the server enforces it, the client explains it.
   `Progression` (levels, unlocks, XP rules), `Leaderboards` (boards, periods, eligibility, score encoding),
-  `Economy` (starting cash), `Social` (follow cap, recent trades per profile, feed views and milestone wording).
-- **Shared UI (`src/shared/UI/`)** — the in-house kit for UI built in code: `UIKit` (frame/label/panel/dot/
-  avatar builders on Theme tokens) and `LineChart` (the gradient line + fill used by the Portfolio chart and
+  `Economy` (starting cash), `Social` (follow cap, recent trades per profile, feed views and milestone wording,
+  thesis directions, horizons and limits).
+- **Shared UI (`src/shared/UI/`)** — the in-house kit for UI built in code: `UIKit` (frame/label/panel/pill/
+  dot/avatar builders on Theme tokens) and `LineChart` (the gradient line + fill used by the Portfolio chart and
   profile panel). New code-built screens should use these instead of copying builders.
 - **Shared (`src/shared/Modules/`)**:
   - `Multi/` — cross-boundary utilities used by both client and server-side logic conceptually:
@@ -168,7 +175,8 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     tab — the only link between controllers, which otherwise can't reach each other's locals).
   - `Terminal/` and `Trade/` subfolders hold per-screen logic pulled out of the client controllers as they
     grow. `Trade/OrderTicketModule` is the Trade screen's Market/Limit preset ticket (one-click presets, the
-    house style for order entry); the other files there are still empty placeholders.
+    house style for order entry); `Trade/ThesisPanelModule` is its theses section (the ticker's theses and a
+    composer), after the news. The other files there are still empty placeholders.
 
 ### Cross-script state sharing
 
