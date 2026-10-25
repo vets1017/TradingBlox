@@ -10,6 +10,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local MarketDataModule = require(ServerScriptService.Modules.MarketDataModule)
 local OrderService = require(ServerScriptService.Services.OrderService)
 local PlayerDataService = require(ServerScriptService.Services.PlayerDataService)
+local RemoteGuard = require(ServerScriptService.Modules.RemoteGuard)
 local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursModule)
 
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
@@ -27,7 +28,7 @@ end
 
 -- PlayerOrderEvent
 -- Market order: fills now at the live price
-PlayerOrderEvent.OnServerInvoke = function(player, action, ticker, shares)
+RemoteGuard.handle(PlayerOrderEvent, RemoteGuard.LIMITS.Order, function(player, action, ticker, shares)
 	if type(action) ~= "string" or not VALID_ACTIONS[action] then
 		return { success = false, message = "Invalid order type." }
 	end
@@ -57,32 +58,32 @@ PlayerOrderEvent.OnServerInvoke = function(player, action, ticker, shares)
 	end
 
 	return OrderService.fillShares(player, action, targetTicker, shares, price)
-end
+end, RemoteGuard.TOO_MANY_REQUESTS)
 
 -- PlaceLimitOrderEvent
 -- Can be placed while the market is closed; it fills once the market opens
 -- and the price crosses the limit
-PlaceLimitOrderEvent.OnServerInvoke = function(player, action, ticker, shares, limitPrice)
+RemoteGuard.handle(PlaceLimitOrderEvent, RemoteGuard.LIMITS.Order, function(player, action, ticker, shares, limitPrice)
 	return OrderService.placeLimit(player, action, ticker, shares, limitPrice)
-end
+end, RemoteGuard.TOO_MANY_REQUESTS)
 
 -- CancelOrderEvent
-CancelOrderEvent.OnServerInvoke = function(player, orderId)
+RemoteGuard.handle(CancelOrderEvent, RemoteGuard.LIMITS.Order, function(player, orderId)
 	return OrderService.cancel(player, orderId)
-end
+end, RemoteGuard.TOO_MANY_REQUESTS)
 
 -- GetOrdersEvent
 -- Open limit orders, oldest first
-GetOrdersEvent.OnServerInvoke = function(player)
+RemoteGuard.handle(GetOrdersEvent, RemoteGuard.LIMITS.Read, function(player)
 	return OrderService.getOrders(player)
-end
+end)
 
 -- GetPositionsEvent
 -- Builds the player's current holdings, priced against live market data.
 -- With a ticker, filters to just that ticker's position (the Trade screen's
 -- use case - one active symbol at a time); without one, returns every open
 -- position (the Portfolio tab's share rows).
-GetPositionsEvent.OnServerInvoke = function(player, ticker)
+RemoteGuard.handle(GetPositionsEvent, RemoteGuard.LIMITS.Read, function(player, ticker)
 	local playerData = PlayerDataService.get(player)
 
 	if not playerData then
@@ -132,4 +133,4 @@ GetPositionsEvent.OnServerInvoke = function(player, ticker)
 	end
 
 	return positions
-end
+end)

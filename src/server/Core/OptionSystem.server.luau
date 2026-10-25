@@ -11,6 +11,7 @@ local CalculatorModule = require(ServerScriptService.Modules.CalculatorModule)
 local TradeLogModule = require(ServerScriptService.Modules.TradeLogModule)
 local ProgressionService = require(ServerScriptService.Services.ProgressionService)
 local OrderEvents = require(ServerScriptService.Services.OrderEvents)
+local RemoteGuard = require(ServerScriptService.Modules.RemoteGuard)
 local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursModule)
 local Progression = require(ReplicatedStorage.Config.Progression)
 
@@ -25,7 +26,7 @@ local function isPositiveInteger(value)
 end
 
 -- PlayerOptionOrderEvent
-PlayerOptionOrderEvent.OnServerInvoke = function(player, action, contractSymbol, ticker, expiration, strike, optionType, contracts)
+RemoteGuard.handle(PlayerOptionOrderEvent, RemoteGuard.LIMITS.Order, function(player, action, contractSymbol, ticker, expiration, strike, optionType, contracts)
 	if type(action) ~= "string" or not VALID_ACTIONS[action] then
 		return { success = false, message = "Invalid order type." }
 	end
@@ -164,4 +165,4 @@ PlayerOptionOrderEvent.OnServerInvoke = function(player, action, contractSymbol,
 			tostring(expiration)
 		),
 	}
-end
+end, RemoteGuard.TOO_MANY_REQUESTS)

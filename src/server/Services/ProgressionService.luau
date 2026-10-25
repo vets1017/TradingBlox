@@ -11,6 +11,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local Progression = require(ReplicatedStorage.Config.Progression)
 local PlayerDataService = require(ServerScriptService.Services.PlayerDataService)
 local OrderEvents = require(ServerScriptService.Services.OrderEvents)
+local RemoteGuard = require(ServerScriptService.Modules.RemoteGuard)
 
 local ProgressionService = {}
 
@@ -168,7 +169,11 @@ function ProgressionService.start()
 	OrderEvents.Filled:Connect(onFill)
 
 	-- Small enough not to need its own Core script
-	ReplicatedStorage:WaitForChild("EventsFolder"):WaitForChild("CompleteTutorialStepEvent").OnServerInvoke = completeTutorialStep
+	RemoteGuard.handle(
+		ReplicatedStorage:WaitForChild("EventsFolder"):WaitForChild("CompleteTutorialStepEvent"),
+		RemoteGuard.LIMITS.Rare,
+		completeTutorialStep
+	)
 end
 
 return ProgressionService

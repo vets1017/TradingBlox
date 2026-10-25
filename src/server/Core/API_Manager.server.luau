@@ -4,11 +4,11 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
-local Players = game:GetService("Players")
 local TextService = game:GetService("TextService")
 
 local MarketDataModule = require(ServerScriptService.Modules.MarketDataModule)
 local ProgressionService = require(ServerScriptService.Services.ProgressionService)
+local RemoteGuard = require(ServerScriptService.Modules.RemoteGuard)
 local Progression = require(ReplicatedStorage.Config.Progression)
 
 -- Remotes
@@ -24,31 +24,8 @@ local GetOptionStatsEvent = EventsFolder:WaitForChild("GetOptionStatsEvent")
 local GetOptionsDataEvent = EventsFolder:WaitForChild("GetOptionsDataEvent")
 
 -- Config
-local PLAYER_COOLDOWN = 1
 local VALID_TIMEFRAMES = { ["1M"] = true, ["5M"] = true, ["30M"] = true, ["H"] = true, ["D"] = true }
 
--- State
-local PlayerLastRequest = {} -- [UserId] = { [remoteName] = os.time() }
-
--- Per-remote: switching tabs hits a different remote each time, so one tab's
--- fetch must not throttle the next tab's first fetch.
-local function isThrottled(player, remoteName)
-	local now = os.time()
-	local perRemote = PlayerLastRequest[player.UserId]
-
-	if not perRemote then
-		perRemote = {}
-		PlayerLastRequest[player.UserId] = perRemote
-	end
-
-	if (now - (perRemote[remoteName] or 0)) < PLAYER_COOLDOWN then
-		return true
-	end
-
-	perRemote[remoteName] = now
-
-	return false
-end
 
 -- The "no data" shape the research tabs already render, carrying the
 -- unlock message; nil when the player has the feature
@@ -63,11 +40,7 @@ end
 --
 
 -- RequestChartEvent
-RequestChartEvent.OnServerInvoke = function(player, ticker, timeframe, mode)
-	if isThrottled(player, "RequestChartEvent") then
-		return nil
-	end
-
+RemoteGuard.handle(RequestChartEvent, RemoteGuard.LIMITS.Poll, function(player, ticker, timeframe, mode)
 	if not MarketDataModule.isValidTicker(ticker) then
 		warn(string.format("[API_Manager] Invalid ticker from %s: %s", player.Name, tostring(ticker)))
 
@@ -90,12 +63,12 @@ RequestChartEvent.OnServerInvoke = function(player, ticker, timeframe, mode)
 	end
 
 	return data
-end
+end)
 
 -- GetMarketDataEvent
 -- Returns a quote ({ ticker, price, prevClose }) for the given ticker, merged
 -- with quote-details fields (bid/ask, volume, market cap, etc.) when available.
-GetMarketDataEvent.OnServerInvoke = function(player, ticker)
+RemoteGuard.handle(GetMarketDataEvent, RemoteGuard.LIMITS.Read, function(player, ticker)
 	if not ticker then
 		return nil
 	end
@@ -127,14 +100,10 @@ GetMarketDataEvent.OnServerInvoke = function(player, ticker)
 	end
 
 	return quote
-end
+end)
 
 -- GetOptionsDataEvent
-GetOptionsDataEvent.OnServerInvoke = function(player, ticker)
-	if isThrottled(player, "GetOptionsDataEvent") then
-		return nil
-	end
-
+RemoteGuard.handle(GetOptionsDataEvent, RemoteGuard.LIMITS.Research, function(player, ticker)
 	local locked = getLockedResponse(player, "Options")
 
 	if locked then
@@ -154,14 +123,10 @@ GetOptionsDataEvent.OnServerInvoke = function(player, ticker)
 	end
 
 	return chain
-end
+end)
 
 -- GetAnalystReportEvent
-GetAnalystReportEvent.OnServerInvoke = function(player, ticker)
-	if isThrottled(player, "GetAnalystReportEvent") then
-		return nil
-	end
-
+RemoteGuard.handle(GetAnalystReportEvent, RemoteGuard.LIMITS.Research, function(player, ticker)
 	local locked = getLockedResponse(player, "Fundamentals")
 
 	if locked then
@@ -181,14 +146,10 @@ GetAnalystReportEvent.OnServerInvoke = function(player, ticker)
 	end
 
 	return report
-end
+end)
 
 -- GetFundamentalsEvent
-GetFundamentalsEvent.OnServerInvoke = function(player, ticker)
-	if isThrottled(player, "GetFundamentalsEvent") then
-		return nil
-	end
-
+RemoteGuard.handle(GetFundamentalsEvent, RemoteGuard.LIMITS.Research, function(player, ticker)
 	local locked = getLockedResponse(player, "Fundamentals")
 
 	if locked then
@@ -208,14 +169,10 @@ GetFundamentalsEvent.OnServerInvoke = function(player, ticker)
 	end
 
 	return fundamentals
-end
+end)
 
 -- GetOptionStatsEvent
-GetOptionStatsEvent.OnServerInvoke = function(player, ticker)
-	if isThrottled(player, "GetOptionStatsEvent") then
-		return nil
-	end
-
+RemoteGuard.handle(GetOptionStatsEvent, RemoteGuard.LIMITS.Research, function(player, ticker)
 	local locked = getLockedResponse(player, "Options")
 
 	if locked then
@@ -235,7 +192,7 @@ GetOptionStatsEvent.OnServerInvoke = function(player, ticker)
 	end
 
 	return stats
-end
+end)
 
 -- Text from outside Roblox (headlines, company names) has to pass Roblox's
 -- filter before a player sees it. It reads the same for everyone, so each
@@ -280,11 +237,7 @@ end
 -- GetNewsFeedEvent
 -- Up to 10 recent headlines for a ticker: { { title, publisher, publishedAt } }.
 -- Links are dropped: players can't open outside links from a game.
-GetNewsFeedEvent.OnServerInvoke = function(player, ticker)
-	if isThrottled(player, "GetNewsFeedEvent") then
-		return nil
-	end
-
+RemoteGuard.handle(GetNewsFeedEvent, RemoteGuard.LIMITS.Research, function(player, ticker)
 	if not MarketDataModule.isValidTicker(ticker) then
 		return nil
 	end
@@ -312,17 +265,13 @@ GetNewsFeedEvent.OnServerInvoke = function(player, ticker)
 	end
 
 	return items
-end
+end)
 
 -- GetMarketMoversEvent
 -- Today's top gainers, losers and most active stocks, 10 each:
 -- { gainers, losers, active } of { symbol, name, price, changePercent }.
 -- Cached a few minutes by MarketDataModule, so players share one fetch.
-GetMarketMoversEvent.OnServerInvoke = function(player)
-	if isThrottled(player, "GetMarketMoversEvent") then
-		return nil
-	end
-
+RemoteGuard.handle(GetMarketMoversEvent, RemoteGuard.LIMITS.Research, function(player)
 	local movers, err = MarketDataModule.getMovers()
 
 	if not movers then
@@ -350,7 +299,7 @@ GetMarketMoversEvent.OnServerInvoke = function(player)
 	end
 
 	return result
-end
+end)
 
 -- GetMarketOverviewEvent
 -- The Dashboard's market overview: a fixed set of benchmarks, fetched once a
@@ -395,7 +344,7 @@ local function fetchMarketOverview()
 	return { quotes = quotes, updatedAt = os.time(), fetchedAt = os.clock() }
 end
 
-GetMarketOverviewEvent.OnServerInvoke = function()
+RemoteGuard.handle(GetMarketOverviewEvent, RemoteGuard.LIMITS.Research, function()
 	while isFetchingMarketOverview do
 		task.wait()
 	end
@@ -407,9 +356,4 @@ GetMarketOverviewEvent.OnServerInvoke = function()
 	end
 
 	return { quotes = marketOverview.quotes, updatedAt = marketOverview.updatedAt }
-end
-
--- Clean up
-Players.PlayerRemoving:Connect(function(player)
-	PlayerLastRequest[player.UserId] = nil
 end)

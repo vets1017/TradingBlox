@@ -14,6 +14,7 @@ local CalculatorModule = require(ServerScriptService.Modules.CalculatorModule)
 local PortfolioHistoryModule = require(ServerScriptService.Modules.PortfolioHistoryModule)
 local TradeLogModule = require(ServerScriptService.Modules.TradeLogModule)
 local ProgressionService = require(ServerScriptService.Services.ProgressionService)
+local RemoteGuard = require(ServerScriptService.Modules.RemoteGuard)
 local Progression = require(ReplicatedStorage.Config.Progression)
 
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
@@ -119,7 +120,7 @@ end
 -- Reprices the account (which also records a history point) and returns
 -- everything the Portfolio tab shows except share positions. Every range's
 -- chart comes back at once so switching ranges needs no round trip.
-GetPortfolioEvent.OnServerInvoke = function(player)
+RemoteGuard.handle(GetPortfolioEvent, RemoteGuard.LIMITS.Research, function(player)
 	local playerData = _G.PlayerData[player.UserId]
 
 	-- Portfolio is set once the DataStore load finishes
@@ -159,7 +160,7 @@ GetPortfolioEvent.OnServerInvoke = function(player)
 		analyticsLockedMessage = analyticsLockedMessage,
 		options = buildOptionPositions(playerData),
 	}
-end
+end)
 
 task.spawn(function()
 	while true do

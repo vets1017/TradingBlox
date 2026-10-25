@@ -7,6 +7,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local MarketDataModule = require(ServerScriptService.Modules.MarketDataModule)
+local RemoteGuard = require(ServerScriptService.Modules.RemoteGuard)
 
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
 local GetWatchlistEvent = EventsFolder:WaitForChild("GetWatchlistEvent")
@@ -16,7 +17,7 @@ local WATCHLIST_CAP = 20
 
 -- GetWatchlistEvent
 -- Returns the player's watchlist tickers priced against live market data.
-GetWatchlistEvent.OnServerInvoke = function(player)
+RemoteGuard.handle(GetWatchlistEvent, RemoteGuard.LIMITS.Read, function(player)
 	local playerData = _G.PlayerData[player.UserId]
 
 	if not playerData or not playerData.Watchlist then
@@ -43,11 +44,11 @@ GetWatchlistEvent.OnServerInvoke = function(player)
 	end
 
 	return rows
-end
+end)
 
 -- ToggleWatchlistEvent
 -- Adds the ticker if it isn't already on the watchlist, removes it if it is.
-ToggleWatchlistEvent.OnServerInvoke = function(player, ticker)
+RemoteGuard.handle(ToggleWatchlistEvent, RemoteGuard.LIMITS.Research, function(player, ticker)
 	if type(ticker) ~= "string" then
 		return { success = false, message = "Invalid ticker." }
 	end
@@ -81,4 +82,4 @@ ToggleWatchlistEvent.OnServerInvoke = function(player, ticker)
 	table.insert(playerData.Watchlist, targetTicker)
 
 	return { success = true, added = true, ticker = targetTicker, watchlist = playerData.Watchlist }
-end
+end, RemoteGuard.TOO_MANY_REQUESTS)
