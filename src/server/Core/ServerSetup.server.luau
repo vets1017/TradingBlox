@@ -4,6 +4,7 @@ local EVENTS = {
 	"RequestChartEvent",
 	"GetMarketDataEvent",
 	"GetMarketOverviewEvent",
+	"GetMarketMoversEvent",
 	"GetOptionsDataEvent",
 	"GetPositionsEvent",
 	"GetPortfolioEvent",

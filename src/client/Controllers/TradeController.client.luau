@@ -917,6 +917,21 @@ local function createPositionRow(parent, index, pos)
 end
 
 -- item = { headline, timestamp, source? }
+-- "just now", "12m ago", "3h ago", "2d ago"
+local function formatNewsAge(seconds)
+	if seconds < 60 then
+		return "just now"
+	elseif seconds < 3600 then
+		return math.floor(seconds / 60) .. "m ago"
+	elseif seconds < 86400 then
+		return math.floor(seconds / 3600) .. "h ago"
+	end
+
+	return math.floor(seconds / 86400) .. "d ago"
+end
+
+-- item = { title, publisher, publishedAt } from GetNewsFeedEvent (headlines
+-- arrive already through Roblox's text filter)
 local function createNewsItem(parent, index, item)
 	local row = Instance.new("Frame")
 
@@ -932,7 +947,7 @@ local function createNewsItem(parent, index, item)
 	local headline = Instance.new("TextLabel")
 
 	headline.Name = "Headline"
-	headline.Text = item.headline or ""
+	headline.Text = item.title or ""
 	headline.Size = UDim2.new(1, -90, 1, -2)
 	headline.Position = UDim2.fromOffset(8, 1)
 	headline.BackgroundTransparency = 1
@@ -947,7 +962,7 @@ local function createNewsItem(parent, index, item)
 
 	makeLabel(row, {
 		name = "Timestamp",
-		text = item.timestamp or "",
+		text = item.publishedAt and formatNewsAge(os.time() - item.publishedAt) or "",
 		sz = UDim2.new(0, 78, 0, 16),
 		pos = UDim2.new(1, -82, 0, 4),
 		color = TEXT_SECONDARY,
@@ -955,10 +970,10 @@ local function createNewsItem(parent, index, item)
 		align = Enum.TextXAlignment.Right,
 	})
 
-	if item.source then
+	if item.publisher then
 		makeLabel(row, {
 			name = "Source",
-			text = item.source,
+			text = item.publisher,
 			sz = UDim2.new(0, 78, 0, 13),
 			pos = UDim2.new(1, -82, 1, -16),
 			color = TEXT_SECONDARY,
@@ -1311,11 +1326,7 @@ local function loadTicker(rawTicker)
 	refreshPositions()
 
 	-- ── News feed ──────────────────────────────────────────────────────────────
-	-- Uncomment when GetNewsFeedEvent is live on the server.
-	-- local news = GetNewsFeedEvent:InvokeServer(ticker)
-	-- if news then
-	--     renderNewsFeed(news)
-	-- end
+	renderNewsFeed(GetNewsFeedEvent:InvokeServer(ticker))
 
 	isFetchingData = false
 	orderTicket:update() -- the new ticker and price

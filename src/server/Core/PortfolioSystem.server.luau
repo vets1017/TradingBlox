@@ -22,6 +22,29 @@ local GetPortfolioEvent = EventsFolder:WaitForChild("GetPortfolioEvent")
 local SAMPLE_INTERVAL = 300 -- the history's finest bucket
 local RECENT_FILLS = 8
 
+-- Yahoo's stock sectors. Only these are passed through, so sector names
+-- never put unfiltered outside text in front of players.
+local KNOWN_SECTORS = {
+	["Basic Materials"] = true,
+	["Communication Services"] = true,
+	["Consumer Cyclical"] = true,
+	["Consumer Defensive"] = true,
+	["Energy"] = true,
+	["Financial Services"] = true,
+	["Healthcare"] = true,
+	["Industrials"] = true,
+	["Real Estate"] = true,
+	["Technology"] = true,
+	["Utilities"] = true,
+}
+
+-- What isn't a stock is grouped by its kind
+local QUOTE_TYPE_GROUPS = {
+	ETF = "ETFs",
+	CRYPTOCURRENCY = "Crypto",
+	MUTUALFUND = "Funds",
+}
+
 -- Option contracts priced off the cached chain, so this adds no HTTP calls
 -- after calculateNetWorth has just loaded the same chains.
 local function buildOptionPositions(playerData)
@@ -48,6 +71,36 @@ local function buildOptionPositions(playerData)
 	end
 
 	return positions
+end
+
+-- The allocation group a ticker counts toward: a stock's sector, or the
+-- kind of security for anything else. Profiles are cached for a day.
+local function getAllocationGroup(ticker)
+	local profile = MarketDataModule.getProfile(ticker)
+
+	if not profile then
+		return "Other"
+	elseif profile.quoteType == "EQUITY" then
+		return KNOWN_SECTORS[profile.sector] and profile.sector or "Other stocks"
+	end
+
+	return QUOTE_TYPE_GROUPS[profile.quoteType] or "Other"
+end
+
+-- [ticker] = allocation group, for every held share ticker and option
+-- underlying (an option counts toward its underlying's group)
+local function getAllocationGroups(playerData)
+	local groups = {}
+
+	for ticker in pairs(playerData.Portfolio.Shares) do
+		groups[ticker] = groups[ticker] or getAllocationGroup(ticker)
+	end
+
+	for _, position in pairs(playerData.Portfolio.Options) do
+		groups[position.ticker] = groups[position.ticker] or getAllocationGroup(position.ticker)
+	end
+
+	return groups
 end
 
 -- The latest fills from the trade log, newest first
@@ -89,6 +142,7 @@ GetPortfolioEvent.OnServerInvoke = function(player)
 	if ProgressionService.hasFeature(player, "Analytics") then
 		analytics = TradeLogModule.getSummary(playerData.Stats)
 		analytics.maxDrawdown = PortfolioHistoryModule.getMaxDrawdown(playerData.NetWorthHistory)
+		analytics.allocationGroups = getAllocationGroups(playerData)
 	else
 		analyticsLockedMessage = Progression.getLockedMessage("Analytics")
 	end

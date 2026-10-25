@@ -5,6 +5,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local Players = game:GetService("Players")
+local TextService = game:GetService("TextService")
 
 local MarketDataModule = require(ServerScriptService.Modules.MarketDataModule)
 local ProgressionService = require(ServerScriptService.Services.ProgressionService)
@@ -15,6 +16,8 @@ local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
 local RequestChartEvent = EventsFolder:WaitForChild("RequestChartEvent")
 local GetMarketDataEvent = EventsFolder:WaitForChild("GetMarketDataEvent")
 local GetMarketOverviewEvent = EventsFolder:WaitForChild("GetMarketOverviewEvent")
+local GetMarketMoversEvent = EventsFolder:WaitForChild("GetMarketMoversEvent")
+local GetNewsFeedEvent = EventsFolder:WaitForChild("GetNewsFeedEvent")
 local GetAnalystReportEvent = EventsFolder:WaitForChild("GetAnalystReportEvent")
 local GetFundamentalsEvent = EventsFolder:WaitForChild("GetFundamentalsEvent")
 local GetOptionStatsEvent = EventsFolder:WaitForChild("GetOptionStatsEvent")
@@ -232,6 +235,121 @@ GetOptionStatsEvent.OnServerInvoke = function(player, ticker)
 	end
 
 	return stats
+end
+
+-- Text from outside Roblox (headlines, company names) has to pass Roblox's
+-- filter before a player sees it. It reads the same for everyone, so each
+-- string is filtered once per server and the result reused.
+local FILTER_CACHE_LIMIT = 2000
+
+local filteredText = {} -- [original] = filtered
+local filteredTextCount = 0
+
+-- The filtered string, or nil if it can't be filtered: unfiltered external
+-- text is never shown
+local function filterExternalText(text, player)
+	if type(text) ~= "string" or text == "" then
+		return nil
+	end
+
+	if filteredText[text] then
+		return filteredText[text]
+	end
+
+	local success, result = pcall(function()
+		return TextService:FilterStringAsync(text, player.UserId):GetNonChatStringForBroadcastAsync()
+	end)
+
+	if not success then
+		warn("[API_Manager] Couldn't filter external text: " .. tostring(result))
+
+		return nil
+	end
+
+	if filteredTextCount >= FILTER_CACHE_LIMIT then
+		table.clear(filteredText)
+		filteredTextCount = 0
+	end
+
+	filteredText[text] = result
+	filteredTextCount += 1
+
+	return result
+end
+
+-- GetNewsFeedEvent
+-- Up to 10 recent headlines for a ticker: { { title, publisher, publishedAt } }.
+-- Links are dropped: players can't open outside links from a game.
+GetNewsFeedEvent.OnServerInvoke = function(player, ticker)
+	if isThrottled(player, "GetNewsFeedEvent") then
+		return nil
+	end
+
+	if not MarketDataModule.isValidTicker(ticker) then
+		return nil
+	end
+
+	local news, err = MarketDataModule.getNews(ticker)
+
+	if not news then
+		warn(string.format("[API_Manager] News fetch failed for %s: %s", string.upper(ticker), tostring(err)))
+
+		return nil
+	end
+
+	local items = {}
+
+	for _, item in ipairs(news.items or {}) do
+		local title = filterExternalText(item.title, player)
+
+		if title then
+			table.insert(items, {
+				title = title,
+				publisher = filterExternalText(item.publisher, player),
+				publishedAt = item.publishedAt,
+			})
+		end
+	end
+
+	return items
+end
+
+-- GetMarketMoversEvent
+-- Today's top gainers, losers and most active stocks, 10 each:
+-- { gainers, losers, active } of { symbol, name, price, changePercent }.
+-- Cached a few minutes by MarketDataModule, so players share one fetch.
+GetMarketMoversEvent.OnServerInvoke = function(player)
+	if isThrottled(player, "GetMarketMoversEvent") then
+		return nil
+	end
+
+	local movers, err = MarketDataModule.getMovers()
+
+	if not movers then
+		warn("[API_Manager] Movers fetch failed: " .. tostring(err))
+
+		return nil
+	end
+
+	local result = {}
+
+	for _, list in ipairs({ "gainers", "losers", "active" }) do
+		result[list] = {}
+
+		for _, quote in ipairs(movers[list] or {}) do
+			-- Tickers are checked like any other; company names are outside text
+			if MarketDataModule.isValidTicker(quote.symbol) then
+				table.insert(result[list], {
+					symbol = quote.symbol,
+					name = filterExternalText(quote.name, player) or quote.symbol,
+					price = quote.price,
+					changePercent = quote.changePercent,
+				})
+			end
+		end
+	end
+
+	return result
 end
 
 -- GetMarketOverviewEvent

@@ -58,6 +58,21 @@ local ROW_ICON_SIZE = 40
 local ROW_VALUE_WIDTH = 120
 local ORDER_ROW_HEIGHT = 36
 local MAX_ORDER_ROWS = 5 -- more than this collapses into "+N more"
+local ALLOCATION_BAR_HEIGHT = 10
+local MAX_ALLOCATION_LEGEND = 4 -- more groups than this fold into "+N more"
+
+-- Allocation segment colors, largest group first (a chart data series, so
+-- literals are allowed); cash is always TextDisabled gray
+local ALLOCATION_COLORS = {
+	Theme.Colors.Accent,
+	Color3.fromRGB(0, 170, 255),
+	Color3.fromRGB(255, 170, 0),
+	Color3.fromRGB(255, 90, 205),
+	Color3.fromRGB(120, 220, 200),
+	Color3.fromRGB(255, 214, 102),
+	Color3.fromRGB(180, 140, 255),
+	Color3.fromRGB(130, 150, 180),
+}
 
 -- Chart Constants
 local END_DOT_SIZE = 8
@@ -287,8 +302,46 @@ Divider.Size = UDim2.new(1, -PADDING * 2, 0, 1)
 
 local SECTIONS_TOP = DIVIDER_Y + 1 + GAP
 
--- Open orders sit above the positions and only show when there are some;
--- layoutPositionsArea moves the positions down to make room
+-- Allocation (level 2), then open orders, then positions. The first two
+-- only show when they have something to show, and layoutSidePanel stacks
+-- whatever is showing.
+local AllocationSection = makeFrame("AllocationSection", SidePanel)
+AllocationSection.Size = UDim2.new(1, -PADDING * 2, 0, 0)
+AllocationSection.AutomaticSize = Enum.AutomaticSize.Y
+AllocationSection.Visible = false
+
+local AllocationLayout = Instance.new("UIListLayout")
+AllocationLayout.SortOrder = Enum.SortOrder.LayoutOrder
+AllocationLayout.Padding = UDim.new(0, 6)
+AllocationLayout.Parent = AllocationSection
+
+local AllocationHeader =
+	makeLabel("Header", AllocationSection, Theme.Fonts.UISemibold, Theme.TextSize.Title, Theme.Colors.Text)
+AllocationHeader.LayoutOrder = 0
+AllocationHeader.Size = UDim2.new(1, 0, 0, SECTION_HEADER_HEIGHT)
+AllocationHeader.Text = "Allocation"
+
+local AllocationBar = makeFrame("Bar", AllocationSection)
+AllocationBar.LayoutOrder = 1
+AllocationBar.Size = UDim2.new(1, 0, 0, ALLOCATION_BAR_HEIGHT)
+AllocationBar.ClipsDescendants = true
+addCorner(AllocationBar)
+
+local AllocationBarLayout = Instance.new("UIListLayout")
+AllocationBarLayout.FillDirection = Enum.FillDirection.Horizontal
+AllocationBarLayout.SortOrder = Enum.SortOrder.LayoutOrder
+AllocationBarLayout.Parent = AllocationBar
+
+local AllocationLegend = makeFrame("Legend", AllocationSection)
+AllocationLegend.LayoutOrder = 2
+AllocationLegend.Size = UDim2.fromScale(1, 0)
+AllocationLegend.AutomaticSize = Enum.AutomaticSize.Y
+
+local AllocationLegendLayout = Instance.new("UIListLayout")
+AllocationLegendLayout.SortOrder = Enum.SortOrder.LayoutOrder
+AllocationLegendLayout.Padding = UDim.new(0, 2)
+AllocationLegendLayout.Parent = AllocationLegend
+
 local OrdersSection = makeFrame("OrdersSection", SidePanel)
 OrdersSection.Position = UDim2.fromOffset(PADDING, SECTIONS_TOP)
 OrdersSection.Size = UDim2.new(1, -PADDING * 2, 0, 0)
@@ -861,9 +914,18 @@ local function formatAge(seconds)
 	return math.floor(seconds / 86400) .. "d"
 end
 
--- The positions header and list sit under the orders when there are any
-local function layoutPositionsArea()
-	local top = SECTIONS_TOP + (OrdersSection.Visible and OrdersSection.AbsoluteSize.Y + GAP or 0)
+-- Stacks allocation and open orders (when showing) above the positions
+local function layoutSidePanel()
+	local top = SECTIONS_TOP
+
+	for _, section in ipairs({ AllocationSection, OrdersSection }) do
+		section.Position = UDim2.fromOffset(PADDING, top)
+
+		if section.Visible then
+			top += section.AbsoluteSize.Y + GAP
+		end
+	end
+
 	local listTop = top + SECTION_HEADER_HEIGHT + 8
 
 	PositionsHeader.Position = UDim2.fromOffset(PADDING, top)
@@ -918,6 +980,108 @@ local function createOrderRow(index, order)
 	end)
 end
 
+-- Level 2 analytics: how net worth splits across stock sectors, other kinds
+-- of security (ETFs, crypto...) and cash. `rows` are the position rows,
+-- whose values are already priced.
+local function renderAllocation(summary, rows)
+	local groupsByTicker = summary.analytics and summary.analytics.allocationGroups
+
+	for _, container in ipairs({ AllocationBar, AllocationLegend }) do
+		for _, child in ipairs(container:GetChildren()) do
+			if child:IsA("GuiObject") then
+				child:Destroy()
+			end
+		end
+	end
+
+	AllocationSection.Visible = groupsByTicker ~= nil
+
+	if not groupsByTicker then
+		layoutSidePanel()
+
+		return
+	end
+
+	local totals = {}
+
+	for _, row in ipairs(rows) do
+		if row.value and row.value > 0 then
+			local group = groupsByTicker[row.ticker] or "Other"
+
+			totals[group] = (totals[group] or 0) + row.value
+		end
+	end
+
+	local cash = Player:GetAttribute("Balance") or summary.balance or 0
+	local groups = {}
+	local total = 0
+
+	for name, value in pairs(totals) do
+		table.insert(groups, { name = name, value = value })
+	end
+
+	if cash > 0 then
+		table.insert(groups, { name = "Cash", value = cash, isCash = true })
+	end
+
+	table.sort(groups, function(a, b)
+		return a.value > b.value
+	end)
+
+	local colorIndex = 0
+
+	for _, group in ipairs(groups) do
+		total += group.value
+
+		if group.isCash then
+			group.color = Theme.Colors.TextDisabled
+		else
+			colorIndex += 1
+			group.color = ALLOCATION_COLORS[(colorIndex - 1) % #ALLOCATION_COLORS + 1]
+		end
+	end
+
+	for index, group in ipairs(groups) do
+		local segment = makeFrame("Segment_" .. index, AllocationBar)
+		segment.LayoutOrder = index
+		segment.BackgroundTransparency = 0
+		segment.BackgroundColor3 = group.color
+		segment.Size = UDim2.fromScale(group.value / total, 1)
+	end
+
+	for index = 1, math.min(#groups, MAX_ALLOCATION_LEGEND) do
+		local group = groups[index]
+
+		local line = makeFrame("Line_" .. index, AllocationLegend)
+		line.LayoutOrder = index
+		line.Size = UDim2.new(1, 0, 0, 16)
+
+		local dot = makeDot("Dot", line, 8, group.color)
+		dot.Position = UDim2.new(0, 4, 0.5, 0)
+
+		local name = makeLabel("Name", line, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.Text)
+		name.Position = UDim2.fromOffset(14, 0)
+		name.Size = UDim2.new(1, -74, 1, 0)
+		name.Text = group.name
+
+		local share = makeLabel("Share", line, Theme.Fonts.Mono, Theme.TextSize.Caption, Theme.Colors.TextMuted)
+		share.AnchorPoint = Vector2.new(1, 0)
+		share.Position = UDim2.fromScale(1, 0)
+		share.Size = UDim2.new(0, 60, 1, 0)
+		share.TextXAlignment = Enum.TextXAlignment.Right
+		share.Text = string.format("%.1f%%", group.value / total * 100)
+	end
+
+	if #groups > MAX_ALLOCATION_LEGEND then
+		local more = makeLabel("More", AllocationLegend, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.TextMuted)
+		more.LayoutOrder = MAX_ALLOCATION_LEGEND + 1
+		more.Size = UDim2.new(1, 0, 0, 16)
+		more.Text = string.format("+%d more", #groups - MAX_ALLOCATION_LEGEND)
+	end
+
+	layoutSidePanel()
+end
+
 local function renderOrders(orders)
 	for _, child in ipairs(OrdersSection:GetChildren()) do
 		if child:IsA("GuiObject") and child ~= OrdersHeader then
@@ -939,7 +1103,7 @@ local function renderOrders(orders)
 		more.Text = string.format("+%d more", #orders - MAX_ORDER_ROWS)
 	end
 
-	layoutPositionsArea()
+	layoutSidePanel()
 end
 
 -- Calls made while one is in flight collapse into a single follow-up.
@@ -992,7 +1156,10 @@ function refresh()
 		-- Shares and options only render together: a list missing one kind
 		-- would read as those positions having been closed
 		if sharePositions then
-			renderPositions(buildRows(sharePositions, summary.options or {}, summary.netWorth))
+			local rows = buildRows(sharePositions, summary.options or {}, summary.netWorth)
+
+			renderPositions(rows)
+			renderAllocation(summary, rows)
 			renderStats(summary, sharePositions)
 		end
 	elseif next(histories) == nil then
@@ -1056,7 +1223,8 @@ PortfolioScreen:GetPropertyChangedSignal("Visible"):Connect(function()
 end)
 
 -- Balance only moves on a trade, so positions changed too
-OrdersSection:GetPropertyChangedSignal("AbsoluteSize"):Connect(layoutPositionsArea)
+OrdersSection:GetPropertyChangedSignal("AbsoluteSize"):Connect(layoutSidePanel)
+AllocationSection:GetPropertyChangedSignal("AbsoluteSize"):Connect(layoutSidePanel)
 
 -- A limit order filled, was cancelled or expired on the server
 OrderUpdateEvent.OnClientEvent:Connect(function()

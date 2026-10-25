@@ -57,18 +57,23 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
 - **Server (`src/server/Core/`)** — one script per subsystem:
   - `ServerSetup.server.luau` creates the `EventsFolder` in `ReplicatedStorage` and all `RemoteFunction`s the
     client calls (`RequestChartEvent`, `GetMarketDataEvent`, `GetOptionsDataEvent`, `GetPositionsEvent`,
-    `GetPortfolioEvent`, `GetLeaderboardEvent`, `GetPublicProfileEvent`, `GetNewsFeedEvent`, `PlayerOrderEvent`,
-    `PlayerOptionOrderEvent`, plus watchlist and research remotes). This must run before other server scripts wire up
+    `GetPortfolioEvent`, `GetLeaderboardEvent`, `GetPublicProfileEvent`, `GetNewsFeedEvent`, `GetMarketMoversEvent`,
+    `PlayerOrderEvent`, `PlayerOptionOrderEvent`, plus watchlist and research remotes). This must run before other server scripts wire up
     `OnServerInvoke` handlers.
   - `API_Manager.server.luau` is the sole bridge to the outside world for market data: it polls an external
     HTTP backend (`SERVER_URL`, currently a Render-hosted service) for live quotes, option chains, and
     candle/chart data, with its own ticker validation, per-player request-cooldown throttling, and
     time-based caches (`ChartCache`, `OptionChainCache`, etc., swept periodically). It handles
-    `GetOptionsDataEvent` (multi-strike option chain, via `MarketDataModule.getOptionChain`) and
-    `GetMarketOverviewEvent` (the Dashboard's benchmark quotes, cached 60 s per server).
-    `GetNewsFeedEvent` is declared but has no server-side handler yet — client calls to it will hang.
-    `PlayerOrderEvent` and `GetPositionsEvent` are handled in `TradeSystem.server.luau` (share buy/sell and
-    position listing), not here.
+    `GetOptionsDataEvent` (multi-strike option chain, via `MarketDataModule.getOptionChain`),
+    `GetMarketOverviewEvent` (the Dashboard's benchmark quotes, cached 60 s per server), `GetNewsFeedEvent`
+    (a ticker's headlines for the Trade screen) and `GetMarketMoversEvent` (the Dashboard's gainers/losers/most
+    active). **Text from outside Roblox (headlines, publishers, company names) goes through
+    `filterExternalText` (TextService, cached per server) before any player sees it; links are never sent.**
+    The backend's news, movers and profile routes cache on their side too. `PlayerOrderEvent` and
+    `GetPositionsEvent` are handled in `TradeSystem.server.luau` (share buy/sell and position listing), not here.
+  - In Studio only, a `BackendUrl` attribute on ServerScriptService points `MarketDataModule` at another
+    backend (e.g. `http://localhost:3000` while developing `~/Documents/VS/StockDataFetcher`; Studio can reach
+    localhost). Remove it after testing; live servers always use the deployed backend.
   - `Data_Manager.server.luau` is the bootstrap for the player services: it starts `ProgressionService` then
     `PlayerDataService`, and keeps the `_G` names (below) pointing at them.
   - `API_Manager`'s option and research remotes check level unlocks; a locked request gets
@@ -79,7 +84,8 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     contract buy/sell at ask/bid, NYSE-hours-gated with no crypto exemption), writing
     `playerData.Portfolio.Options[contractSymbol] = { contracts, ticker, expiration, strike, type, avgCost }`.
   - `PortfolioSystem.server.luau` handles `GetPortfolioEvent` (summary, every chart range's history, option
-    positions) and reprices every online player every 5 minutes so the history keeps moving.
+    positions, recent fills, and at level 2 each holding's allocation group: its sector for stocks — from an
+    allowlist of Yahoo's sectors — or ETFs/Crypto/Funds) and reprices every online player every 5 minutes so the history keeps moving.
   - `Modules/CalculatorModule.luau` computes net worth from portfolio + live market data, and records it into
     `NetWorthHistory` only when every holding was priced (a backend outage would otherwise read as a crash).
   - `Modules/PortfolioHistoryModule.luau` — net-worth history storage: 5-minute points for the last day, hourly

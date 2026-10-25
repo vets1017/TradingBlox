@@ -1,23 +1,33 @@
 -- MarketDataModule.luau
 --
 -- Shared market-data access: ticker validation, candle fetching/caching, and
--- price/quote derivation on top of the backend's five endpoints (candles,
--- quote-details, analyst, fundamentals, options). Used by API_Manager
+-- price/quote derivation on top of the backend's routes (candles,
+-- quote-details, analyst, fundamentals, options, option chain, news, movers,
+-- profile). Used by API_Manager
 -- (chart/quote remotes) and TradeSystem (trade pricing + positions) so
 -- neither duplicates the HTTP fetch/cache logic.
 
 local HttpService = game:GetService("HttpService")
+local RunService = game:GetService("RunService")
+local ServerScriptService = game:GetService("ServerScriptService")
 
 local MarketDataModule = {}
 
 -- Config
-local SERVER_URL = "https://tradingblox-terminal-backend.onrender.com" -- temp
+-- In Studio only, a "BackendUrl" attribute on ServerScriptService points the
+-- game at another backend (e.g. http://localhost:3000 while developing one);
+-- live servers always use the deployed backend.
+local DEPLOYED_SERVER_URL = "https://tradingblox-terminal-backend.onrender.com"
+local SERVER_URL = RunService:IsStudio() and ServerScriptService:GetAttribute("BackendUrl") or DEPLOYED_SERVER_URL
 local CANDLES_ENDPOINT = SERVER_URL .. "/api/candles/"
 local QUOTE_DETAILS_ENDPOINT = SERVER_URL .. "/api/quote-details/"
 local ANALYST_ENDPOINT = SERVER_URL .. "/api/analyst/"
 local FUNDAMENTALS_ENDPOINT = SERVER_URL .. "/api/fundamentals/"
 local OPTIONS_ENDPOINT = SERVER_URL .. "/api/options/"
 local OPTIONS_CHAIN_ENDPOINT = SERVER_URL .. "/api/option-chain/"
+local NEWS_ENDPOINT = SERVER_URL .. "/api/news/"
+local MOVERS_ENDPOINT = SERVER_URL .. "/api/movers"
+local PROFILE_ENDPOINT = SERVER_URL .. "/api/profile/"
 
 local CHART_CACHE_DURATION = 300
 local QUOTE_DETAILS_CACHE_DURATION = 60
@@ -25,6 +35,9 @@ local ANALYST_CACHE_DURATION = 21600 -- 6 hours
 local FUNDAMENTALS_CACHE_DURATION = 21600 -- 6 hours
 local OPTION_STATS_CACHE_DURATION = 300
 local OPTION_CHAIN_CACHE_DURATION = 300
+local NEWS_CACHE_DURATION = 600
+local MOVERS_CACHE_DURATION = 120
+local PROFILE_CACHE_DURATION = 86400 -- a company's sector doesn't change
 local CACHE_SWEEP_INTERVAL = 600
 local MAX_TICKER_LENGTH = 10
 local VALID_TIMEFRAMES = { ["1M"] = true, ["5M"] = true, ["30M"] = true, ["H"] = true, ["D"] = true }
@@ -36,6 +49,9 @@ local AnalystCache = {}
 local FundamentalsCache = {}
 local OptionStatsCache = {}
 local OptionChainCache = {}
+local NewsCache = {}
+local MoversCache = {}
+local ProfileCache = {}
 
 --
 
@@ -390,6 +406,54 @@ function MarketDataModule.getOptionQuote(ticker, contractSymbol)
 	return nil, "Contract not found"
 end
 
+-- Fetches a backend route through a cache, treating an `error` field in the
+-- response as a failure
+local function cachedRoute(cache, key, ttl, url)
+	return cachedFetch(cache, key, ttl, function()
+		local data, err = fetchJSON(url)
+
+		if data and data.error then
+			return nil, tostring(data.error)
+		end
+
+		return data, err
+	end)
+end
+
+-- Recent headlines mentioning a ticker:
+-- { available, items = { { title, publisher, link, publishedAt, relatedTickers } } }
+function MarketDataModule.getNews(ticker)
+	if not MarketDataModule.isValidTicker(ticker) then
+		return nil, "Invalid ticker"
+	end
+
+	local targetTicker = string.upper(ticker)
+
+	return cachedRoute(NewsCache, targetTicker, NEWS_CACHE_DURATION, NEWS_ENDPOINT .. HttpService:UrlEncode(targetTicker))
+end
+
+-- Today's movers: { gainers, losers, active }, each up to 10
+-- { symbol, name, price, change, changePercent, volume }
+function MarketDataModule.getMovers()
+	return cachedRoute(MoversCache, "movers", MOVERS_CACHE_DURATION, MOVERS_ENDPOINT)
+end
+
+-- { quoteType, sector, industry }; sector and industry are only set for stocks
+function MarketDataModule.getProfile(ticker)
+	if not MarketDataModule.isValidTicker(ticker) then
+		return nil, "Invalid ticker"
+	end
+
+	local targetTicker = string.upper(ticker)
+
+	return cachedRoute(
+		ProfileCache,
+		targetTicker,
+		PROFILE_CACHE_DURATION,
+		PROFILE_ENDPOINT .. HttpService:UrlEncode(targetTicker)
+	)
+end
+
 -- Cache sweep
 local ALL_CACHES = {
 	{ cache = ChartCache, ttl = CHART_CACHE_DURATION },
@@ -398,6 +462,9 @@ local ALL_CACHES = {
 	{ cache = FundamentalsCache, ttl = FUNDAMENTALS_CACHE_DURATION },
 	{ cache = OptionStatsCache, ttl = OPTION_STATS_CACHE_DURATION },
 	{ cache = OptionChainCache, ttl = OPTION_CHAIN_CACHE_DURATION },
+	{ cache = NewsCache, ttl = NEWS_CACHE_DURATION },
+	{ cache = MoversCache, ttl = MOVERS_CACHE_DURATION },
+	{ cache = ProfileCache, ttl = PROFILE_CACHE_DURATION },
 }
 
 task.spawn(function()

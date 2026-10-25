@@ -28,6 +28,7 @@ local GetPositionsEvent = EventsFolder:WaitForChild("GetPositionsEvent")
 local GetOrdersEvent = EventsFolder:WaitForChild("GetOrdersEvent")
 local GetWatchlistEvent = EventsFolder:WaitForChild("GetWatchlistEvent")
 local GetMarketOverviewEvent = EventsFolder:WaitForChild("GetMarketOverviewEvent")
+local GetMarketMoversEvent = EventsFolder:WaitForChild("GetMarketMoversEvent")
 local GetLeaderboardEvent = EventsFolder:WaitForChild("GetLeaderboardEvent")
 local OrderUpdateEvent = EventsFolder:WaitForChild("OrderUpdateEvent")
 
@@ -77,6 +78,9 @@ local isRefreshing = false
 local isRefreshQueued = false
 local performanceHistory = nil
 local lastOrders = {} -- from the last refresh, so Available Funds stays right between refreshes
+local marketView = "Overview" -- or a movers list: "gainers", "losers", "active"
+local lastOverview = nil
+local lastMovers = nil
 
 local makeFrame = UIKit.makeFrame
 local makeLabel = UIKit.makeLabel
@@ -283,6 +287,56 @@ MarketGridLayout.CellSize = UDim2.new(1 / 3, -6, 0.5, -4)
 MarketGridLayout.CellPadding = UDim2.fromOffset(8, 8)
 MarketGridLayout.SortOrder = Enum.SortOrder.LayoutOrder
 MarketGridLayout.Parent = MarketGrid
+
+-- Today's movers, in place of the tiles when a movers pill is picked
+local MoversList = makeList("Movers", MarketContent)
+MoversList.Size = UDim2.new(1, 0, 1, -LINE_HEIGHT)
+MoversList.Visible = false
+
+local MARKET_VIEWS = {
+	{ id = "Overview", label = "Overview" },
+	{ id = "gainers", label = "Gainers" },
+	{ id = "losers", label = "Losers" },
+	{ id = "active", label = "Active" },
+}
+
+-- Pills on the right of the widget's title row
+local MarketViewPills = makeFrame("Views", HeatmapWidget)
+MarketViewPills.AnchorPoint = Vector2.new(1, 0)
+MarketViewPills.Position = UDim2.new(1, -PADDING, 0, PADDING)
+MarketViewPills.Size = UDim2.new(0.7, 0, 0, TITLE_HEIGHT)
+
+local MarketViewPillsLayout = Instance.new("UIListLayout")
+MarketViewPillsLayout.FillDirection = Enum.FillDirection.Horizontal
+MarketViewPillsLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+MarketViewPillsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+MarketViewPillsLayout.Padding = UDim.new(0, 4)
+MarketViewPillsLayout.Parent = MarketViewPills
+
+local marketViewPills = {} -- [view id] = { button, stroke }
+
+for index, view in ipairs(MARKET_VIEWS) do
+	local pill = Instance.new("TextButton")
+	pill.Name = view.id
+	pill.LayoutOrder = index
+	pill.AutomaticSize = Enum.AutomaticSize.X
+	pill.Size = UDim2.fromScale(0, 1)
+	pill.AutoButtonColor = false
+	pill.BorderSizePixel = 0
+	pill.BackgroundColor3 = Theme.Colors.Raised
+	pill.FontFace = Theme.Fonts.UISemibold
+	pill.TextSize = Theme.TextSize.Caption
+	pill.Text = view.label
+	pill.Parent = MarketViewPills
+	UIKit.addCorner(pill)
+
+	local pillPadding = Instance.new("UIPadding")
+	pillPadding.PaddingLeft = UDim.new(0, 8)
+	pillPadding.PaddingRight = UDim.new(0, 8)
+	pillPadding.Parent = pill
+
+	marketViewPills[view.id] = { button = pill, stroke = UIKit.addStroke(pill) }
+end
 
 local MarketUpdated = makeLabel("Updated", MarketContent, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.TextMuted)
 MarketUpdated.AnchorPoint = Vector2.new(0, 1)
@@ -552,6 +606,92 @@ local function renderMarketOverview(overview)
 	MarketUpdated.Text = "Updated " .. os.date("%I:%M %p", overview.updatedAt):gsub("^0", "")
 end
 
+local function renderMovers(quotes)
+	clearList(MoversList)
+
+	if #quotes == 0 then
+		addLine(MoversList, 1, "No movers right now", Theme.Colors.TextMuted)
+
+		return
+	end
+
+	for index, quote in ipairs(quotes) do
+		local row = Instance.new("TextButton")
+		row.Name = "Mover_" .. quote.symbol
+		row.LayoutOrder = index
+		row.Size = UDim2.new(1, 0, 0, 24)
+		row.AutoButtonColor = false
+		row.BorderSizePixel = 0
+		row.BackgroundColor3 = Theme.Colors.Raised
+		row.BackgroundTransparency = 1
+		row.Text = ""
+		row.Parent = MoversList
+
+		local symbol = makeLabel("Symbol", row, Theme.Fonts.UISemibold, Theme.TextSize.Body, Theme.Colors.Text)
+		symbol.Size = UDim2.new(0, 70, 1, 0)
+		symbol.Text = quote.symbol
+
+		local name = makeLabel("Name", row, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.TextMuted)
+		name.Position = UDim2.fromOffset(74, 0)
+		name.Size = UDim2.new(1, -(74 + 170), 1, 0)
+		name.Text = quote.name
+
+		local price = makeLabel("Price", row, Theme.Fonts.Mono, Theme.TextSize.Body, Theme.Colors.Text)
+		price.AnchorPoint = Vector2.new(1, 0)
+		price.Position = UDim2.new(1, -74, 0, 0)
+		price.Size = UDim2.new(0, 90, 1, 0)
+		price.TextXAlignment = Enum.TextXAlignment.Right
+		price.Text = NumberModule.format(quote.price)
+
+		local change = makeLabel("Change", row, Theme.Fonts.MonoBold, Theme.TextSize.Body, Theme.Colors.Text)
+		change.AnchorPoint = Vector2.new(1, 0)
+		change.Position = UDim2.fromScale(1, 0)
+		change.Size = UDim2.new(0, 70, 1, 0)
+		change.TextXAlignment = Enum.TextXAlignment.Right
+		change.Text = quote.changePercent and string.format("%+.2f%%", quote.changePercent) or "—"
+		change.TextColor3 = quote.changePercent and getChangeColor(quote.changePercent) or Theme.Colors.TextMuted
+
+		row.MouseEnter:Connect(function()
+			row.BackgroundTransparency = 0
+		end)
+
+		row.MouseLeave:Connect(function()
+			row.BackgroundTransparency = 1
+		end)
+
+		row.MouseButton1Click:Connect(function()
+			Navigation.openTicker(quote.symbol)
+		end)
+	end
+end
+
+-- Draws whichever view is picked from the data already fetched
+local function renderMarket()
+	local isOverview = marketView == "Overview"
+
+	for viewId, pill in pairs(marketViewPills) do
+		local isActive = viewId == marketView
+
+		pill.button.BackgroundTransparency = isActive and 0 or 1
+		pill.button.TextColor3 = isActive and Theme.Colors.Text or Theme.Colors.TextMuted
+		pill.stroke.Enabled = isActive
+	end
+
+	MarketGrid.Visible = isOverview
+	MoversList.Visible = not isOverview
+
+	if isOverview and lastOverview then
+		renderMarketOverview(lastOverview)
+	elseif not isOverview then
+		if lastMovers then
+			renderMovers(lastMovers[marketView] or {})
+		else
+			clearList(MoversList)
+			addLine(MoversList, 1, "Movers unavailable right now", Theme.Colors.TextMuted)
+		end
+	end
+end
+
 local function renderTopTraders(page)
 	clearList(TradersList)
 
@@ -628,6 +768,7 @@ local function refresh()
 		orders = { GetOrdersEvent },
 		watchlist = { GetWatchlistEvent },
 		overview = { GetMarketOverviewEvent },
+		movers = { GetMarketMoversEvent },
 		traders = { GetLeaderboardEvent, "NetWorth" },
 	}
 	local pending = 0
@@ -660,8 +801,14 @@ local function refresh()
 	end
 
 	if results.overview then
-		renderMarketOverview(results.overview)
+		lastOverview = results.overview
 	end
+
+	if results.movers then
+		lastMovers = results.movers
+	end
+
+	renderMarket()
 
 	if results.traders then
 		renderTopTraders(results.traders)
@@ -676,6 +823,13 @@ local function refresh()
 end
 
 -- Connections
+for viewId, pill in pairs(marketViewPills) do
+	pill.button.MouseButton1Click:Connect(function()
+		marketView = viewId
+		renderMarket()
+	end)
+end
+
 DashboardScreen:GetPropertyChangedSignal("Visible"):Connect(function()
 	if DashboardScreen.Visible then
 		refresh()
