@@ -14,18 +14,22 @@ or test it outside Studio.
 
 ## Commands
 
-Tooling is managed by [Aftman](https://github.com/LPGhatguy/aftman) (`aftman.toml` pins `rojo`).
+Tooling is pinned in `aftman.toml` (Rojo, selene, StyLua, Lune) and installed with
+[Aftman](https://github.com/LPGhatguy/aftman) (`aftman install`); Rokit reads the same file (`rokit install`).
 
-- `aftman install` — install the pinned Rojo version.
 - `rojo serve` — start the Rojo dev server; connect to it from the Rojo plugin inside Roblox Studio to sync
   `src/` live into a place for playtesting. This is the primary "run" loop for this project.
 - `rojo build -o RobloxProjects.rbxlx` — build a standalone `.rbxlx` place file from `default.project.json`
   (git-ignored, along with `.lock` files).
-- `selene src` — lint against `selene.toml` (`std = "roblox"`). Selene is not currently pinned in
-  `aftman.toml`, so it must be installed separately (e.g. via cargo or a system package manager) if not
-  already on `PATH`.
+- `selene src tests` — lint against `selene.toml` (`std = "roblox"`; vendored code excluded).
+- `stylua src tests` — format with `stylua.toml` (Luau, 120 columns, tabs); `.styluaignore` skips vendored code.
+- `lune run tests/run.luau` — unit tests: every `tests/*.spec.luau`, with the asserts in `tests/TestKit.luau`.
+  Specs `require` game modules by relative path, so only modules that don't touch Roblox services can be
+  tested; keep logic worth testing in such a module (`FillPriceModule` was split out of `MarketDataModule`
+  for this). Everything else is checked in Studio through the MCP tools.
 
-There is no test suite, no `stylua` config, and no package manager (no Wally) in this repo.
+CI (`.github/workflows/ci.yml`) runs selene, `stylua --check`, the tests and `rojo build` on pushes to `main`
+and on pull requests. There's no package manager (no Wally).
 
 ## Architecture
 
@@ -36,6 +40,10 @@ Source folders map directly to the Roblox DataModel:
 - `src/server` → `ServerScriptService`
 - `src/client` → `StarterPlayer.StarterPlayerScripts`
 - `src/shared` → `ReplicatedStorage`
+- `src/gui` → `StarterGui` — `TerminalGui.rbxmx` is the hand-built Studio UI (371 instances)
+
+Rojo syncs files → Studio only. After changing `TerminalGui` in Studio, right-click it → **Save to File…**
+over `src/gui/TerminalGui.rbxmx`; Studio-only edits are lost the next time Rojo syncs that file.
 
 Server scripts (`*.server.luau`) and client scripts (`*.client.luau`) run automatically when Rojo syncs them
 into their respective services; plain `.luau` files under `Modules/` are `require`d libraries.
@@ -60,10 +68,11 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     `GetPortfolioEvent`, `GetLeaderboardEvent`, `GetPublicProfileEvent`, `GetNewsFeedEvent`, `GetMarketMoversEvent`,
     `PlayerOrderEvent`, `PlayerOptionOrderEvent`, plus watchlist and research remotes). This must run before other server scripts wire up
     `OnServerInvoke` handlers.
-  - `API_Manager.server.luau` is the sole bridge to the outside world for market data: it polls an external
-    HTTP backend (`SERVER_URL`, currently a Render-hosted service) for live quotes, option chains, and
-    candle/chart data, with its own ticker validation, per-player request-cooldown throttling, and
-    time-based caches (`ChartCache`, `OptionChainCache`, etc., swept periodically). It handles
+  - `API_Manager.server.luau` wires the market-data remotes. `Modules/MarketDataModule.luau` is the sole
+    bridge to the external HTTP backend (`SERVER_URL`, a Render-hosted service): ticker validation, a
+    per-server quote table (`getQuotes` batches up to 50 symbols, 10 s cache; `getLiveQuote`,
+    `getCurrentPrice`, falling back to candles if the quotes route fails), splits, and time-based caches
+    (`ChartCache`, `OptionChainCache`, etc., swept periodically). `API_Manager` handles
     `GetOptionsDataEvent` (multi-strike option chain, via `MarketDataModule.getOptionChain`),
     `GetMarketOverviewEvent` (the Dashboard's benchmark quotes, cached 60 s per server), `GetNewsFeedEvent`
     (a ticker's headlines for the Trade screen) and `GetMarketMoversEvent` (the Dashboard's gainers/losers/most
@@ -74,8 +83,9 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
   - In Studio only, a `BackendUrl` attribute on ServerScriptService points `MarketDataModule` at another
     backend (e.g. `http://localhost:3000` while developing `~/Documents/VS/StockDataFetcher`; Studio can reach
     localhost). Remove it after testing; live servers always use the deployed backend.
-  - `Data_Manager.server.luau` is the bootstrap for the player services: it starts `ProgressionService` then
-    `PlayerDataService`, and keeps the `_G` names (below) pointing at them.
+  - `Data_Manager.server.luau` is the bootstrap for the player services: it starts the services that listen
+    for players (`ProgressionService`, `LeaderboardService`, `PublicProfileService`, `OrderService`,
+    `SettlementService`) before `PlayerDataService`, so none misses a player who loads straight away.
   - `API_Manager`'s option and research remotes check level unlocks; a locked request gets
     `{ available = false, locked = true, message = "Unlocks at Level N · Name" }`, the shape the Trade screen
     already renders as "no data".
@@ -92,8 +102,14 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     after, 30-day retention; slices and downsamples ranges for the chart; max drawdown.
   - `Modules/TradeLogModule.luau` — records every fill (last 500 in `TradeLog`) and running realized-P/L stats
     (`RealizedPL`, `Wins`, `Losses`, `GrossGain`, `GrossLoss`) used for win rate and average gain/loss.
-- **Server services (`src/server/Services/`)** — ModuleScripts that own a subsystem; new server code should
-  `require` these rather than reach for `_G`:
+  - `Modules/RemoteGuard.luau` — per-player token-bucket rate limits. **Every remote handler is registered
+    through `RemoteGuard.handle(remote, RemoteGuard.LIMITS.<Tier>, handler[, limitedResult])`** (tiers `Poll`,
+    `Read`, `Order`, `Research`, `Rare`); remotes that report success pass `RemoteGuard.TOO_MANY_REQUESTS`.
+  - `Modules/FillPriceModule.luau` — pure fill-price rules: ask for buys and bid for sells in the regular
+    session when the spread is ≤ 2%, otherwise the last price (crypto, after hours); a regular-session stock
+    quote over 15 minutes old is refused.
+- **Server services (`src/server/Services/`)** — ModuleScripts that own a subsystem; server code `require`s
+  these:
   - `PlayerDataService` — every player's saved data: one session-locked ProfileStore profile per player
     (store `PlayerData_v2`, key `Player_<userId>`, $50,000 start), autosaved every 60 s. A failed load kicks the
     player rather than handing them default data. `get(player)`, `setStat`, `updateShares`, `PlayerLoaded`
@@ -105,8 +121,13 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     `CompleteTutorialStepEvent` itself.
   - `OrderService` — share execution: `fillShares` (market orders and limit fills share it) and level 2 limit
     orders kept in `playerData.Orders`: checked every 15 s while the player is online, caught up at login
-    against candles since placement, expired after 30 days. Pushes fills/cancellations through the
-    `OrderUpdateEvent` RemoteEvent (ShellController shows them as a toast).
+    against candles since placement, expired after 30 days. `getFillPrice(ticker, side)` prices every share
+    fill (live quote through `FillPriceModule`). `notify(player, kind, message)` pushes fills, cancellations,
+    expiries and splits through the `OrderUpdateEvent` RemoteEvent (ShellController shows them as a toast).
+  - `SettlementService` — at login and every 10 minutes: settles expired options at intrinsic value from the
+    underlying's close (logged with `settlement = "Expired"`, which counts in realized P/L but not trades),
+    and applies stock splits to shares, average cost and open orders (cash in lieu for fractions), using
+    `Portfolio.SplitCheckedAt` so a split is never applied twice or retroactively.
   - `OrderEvents` — `Filled` fires after every share or option fill; progression, leaderboards and profiles
     subscribe rather than the order scripts calling each of them. Fire it from any new order path.
   - `LeaderboardService` — scores players on the boards in `Config/Leaderboards`; each board+period is its own
@@ -114,8 +135,7 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
   - `PublicProfileService` — the public profile snapshot in DataStore `PublicProfile_v1` (written ≤ 1/min
     after trades, every 5 min, and on leave via `PlayerDataService.onPlayerLeaving`); also submits leaderboard
     scores.
-  - `Core/LeaderboardSystem.server.luau` wires `GetLeaderboardEvent` / `GetPublicProfileEvent` (1 req/s per
-    board or profile per player).
+  - `Core/LeaderboardSystem.server.luau` wires `GetLeaderboardEvent` / `GetPublicProfileEvent`.
 - **Vendored (`src/server/Vendor/`)** — `ProfileStore.luau`, unmodified below a provenance header (pinned
   commit, Apache-2.0; license in `THIRD_PARTY_LICENSES/`). Don't edit it in place.
 - **Shared config (`src/shared/Config/`)** — read by both sides: the server enforces it, the client explains it.
@@ -138,12 +158,9 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
 
 ### Cross-script state sharing
 
-Older server scripts still use `_G.PlayerData[userId]`, `_G.UpdatePlayerStat` and `_G.UpdatePortfolio`. These
-are now a shim set up by `Data_Manager.server.luau`: `_G.PlayerData` is a proxy whose reads resolve to
-`PlayerDataService.get(player)` (nil before the profile loads and after the session ends), and the two
-functions are `PlayerDataService.setStat` / `updateShares`. Scripts are moving onto services one at a time
-(`docs/TECHNICAL-PLAN.md`, Phase 0); don't add new `_G` uses. Note that `execute_luau` from the Studio MCP runs
-with its own isolated `_G` — inject a real `Script` to inspect it.
+Server scripts share state only through the services: `PlayerDataService.get(player)` for a player's data
+(nil before the profile loads and after the session ends), `setStat` / `updateShares` to change it. The old
+`_G` shim is gone; don't add `_G` state.
 
 ### Theme system (Axiom-style look)
 

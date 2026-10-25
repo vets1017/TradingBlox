@@ -33,15 +33,15 @@ shelved, and Phase 1 has started (build order in §6).
 ### Repository and tooling
 
 
-| Item            | State                                                                                                                                                                                  |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Build           | Rojo 7.7.0-rc.1 through Aftman. `src/server` → ServerScriptService, `src/client` → StarterPlayerScripts, `src/shared` → ReplicatedStorage. **StarterGui isn't mapped.**                |
-| Dependencies    | None: no Wally and no packages                                                                                                                                                         |
-| Lint and format | `selene.toml` exists, but selene isn't installed or pinned. No StyLua                                                                                                                  |
-| Tests and CI    | None. Verification is manual, through Studio and the Studio MCP tools                                                                                                                  |
-| Place file      | Git-ignored. `TerminalGui` (371 instances; Dashboard, Charts and Trade screens) exists only in the place file                                                                          |
-| Backend         | `StockDataFetcher`: Node, Express and `yahoo-finance2` v3 on Render. Seven routes (candles, quote-details, analyst, fundamentals, options, option-chain). No cache, no auth, open CORS |
-| Player data     | One `PlayerData_v1` DataStore key per player. Saved only on leave and on shutdown                                                                                                      |
+| Item            | State                                                                                                                                                                                                                                            |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Build           | Rojo 7.7.0-rc.1 through Aftman. `src/server` → ServerScriptService, `src/client` → StarterPlayerScripts, `src/shared` → ReplicatedStorage, `src/gui` → StarterGui                                                                                |
+| Dependencies    | None: no Wally and no packages                                                                                                                                                                                                                   |
+| Lint and format | selene, StyLua and Lune pinned in `aftman.toml`; `stylua.toml`; selene and StyLua both clean                                                                                                                                                     |
+| Tests and CI    | Lune unit tests for the pure modules (`tests/`). GitHub Actions runs selene, StyLua, the tests and a Rojo build. Studio checks through the MCP tools for the rest                                                                                |
+| Place file      | Git-ignored. `TerminalGui` (371 instances; Dashboard, Charts and Trade screens) is tracked as `src/gui/TerminalGui.rbxmx`                                                                                                                        |
+| Backend         | `StockDataFetcher`: Node, Express and `yahoo-finance2` v3 on Render. Candles, quote details, analyst, fundamentals, options, option chain, news, movers, profile, batch quotes and splits; every Yahoo call cached in memory. No auth, open CORS |
+| Player data     | ProfileStore: one session-locked `PlayerData_v2` profile per player, autosaved every 60 s                                                                                                                                                        |
 
 
 ### What the GDD needs vs. what exists
@@ -72,6 +72,8 @@ shelved, and Phase 1 has started (build order in §6).
 
 
 ### Defects and risks in the current code, worst first
+
+Status after Phase 0: 1–3 and 5–9 are fixed. 4 is half done (cache and batching; no auth). 10 is open.
 
 1. **Player data loss.**
   - Saves happen only on leave and on shutdown, so a server crash loses the whole session.
@@ -399,23 +401,25 @@ and plan.
 **Do this week, separately:** fix market hours for daylight saving before 2026-11-01. This is a
 `MarketCalendar` change, size S.
 
-1. **Merge and decide:** merge `portfolio-tab` and settle the questions in §6.
-2. **Data safety:**
+1. ✅ **Merge and decide:** merge `portfolio-tab` and settle the questions in §6.
+2. ✅ **Data safety:**
   - Session-locked profiles (vendored ProfileStore), autosave, and refusing to load (kick and retry)
    instead of saving defaults.
   - `PlayerData_v2` with a schema version and migrations; $50,000 starting cash.
-3. **Services bootstrap:** `Main.server.luau` plus `PlayerDataService` first, keeping `_G` shims until
-  each script has moved.
-4. **Remotes layer:** one registry, argument checks, per-player rate limits, and RemoteEvents for
-  server pushes.
-5. **Market data:**
-  - Backend cache, batch quotes, shared-secret auth, health route.
-  - Server quote table and price pump; fills at bid/ask; stale-quote check.
-6. **Trading correctness:** trade log and realized P/L, option settlement at expiry, stock splits, and
+3. ✅ **Services bootstrap:** `Main.server.luau` plus `PlayerDataService` first, keeping `_G` shims until
+  each script has moved. (Done as `Data_Manager.server.luau`; every script has moved and the shims are gone.)
+4. ✅ **Remotes layer:** one registry, argument checks, per-player rate limits, and RemoteEvents for
+  server pushes. (`ServerSetup` registry; `RemoteGuard` token buckets on every remote.)
+5. ◐ **Market data:**
+  - Backend cache, batch quotes, shared-secret auth, health route. (Cache and batch quotes done;
+  auth and the health route are not.)
+  - Server quote table and price pump; fills at bid/ask; stale-quote check. (All but the price pump:
+  prices are fetched in batches on demand, not pushed.)
+6. ✅ **Trading correctness:** trade log and realized P/L, option settlement at expiry, stock splits, and
   the offline catch-up step at login.
-7. **UI in git:** export `TerminalGui` to a Rojo-tracked `.rbxmx` model and map StarterGui.
-8. **Tooling:** pin selene and StyLua, add Lune unit tests for `Domain/` and `PortfolioHistoryModule`,
-  and run both in CI.
+7. ✅ **UI in git:** export `TerminalGui` to a Rojo-tracked `.rbxmx` model and map StarterGui.
+8. ✅ **Tooling:** pin selene and StyLua, add Lune unit tests for `Domain/` and `PortfolioHistoryModule`,
+  and run both in CI. (There's no `Domain/` folder; the tests cover every pure module instead.)
 
 **Done when:** no code path can lose or overwrite a profile; every remote is rate-limited; Yahoo calls
 grow with distinct symbols, not players; market hours are right in both summer and winter time; expired
@@ -516,7 +520,8 @@ Phase 1 starts with the Phase 0 pieces it can't ship without: safe player data a
 rest of Phase 0 (backend cache, rate limits, UI export, CI) runs alongside.
 
 1. ✅ Market hours: daylight saving, observed holidays, early closes and the 30-minute-early open.
-2. ✅ Player data v2: ProfileStore, $50,000 start, autosave and session lock, `_G` kept as a shim.
+2. ✅ Player data v2: ProfileStore, $50,000 start, autosave and session lock, `_G` kept as a shim (removed
+   later in Phase 0).
 3. ✅ Trade log and realized P/L.
 4. ✅ Progression, levels 1–3 gating.
 5. ✅ Portfolio analytics, including sector allocation.
