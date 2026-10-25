@@ -57,6 +57,10 @@ local TEMPLATE = {
 		MonthStart = 0,
 		MonthTrades = 0,
 	},
+	Social = { -- see SocialService
+		Following = {}, -- [tostring(userId)] = time followed; string keys keep it a dictionary when saved
+		ShareTrades = true, -- recent trades on the public profile; TECHNICAL-PLAN "Phase 2 decisions"
+	},
 }
 
 ProfileStore.SetConstant("AUTO_SAVE_PERIOD", AUTO_SAVE_PERIOD)

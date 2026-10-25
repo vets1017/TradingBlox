@@ -10,6 +10,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local LeaderboardService = require(ServerScriptService.Services.LeaderboardService)
 local PlayerDataService = require(ServerScriptService.Services.PlayerDataService)
 local PublicProfileService = require(ServerScriptService.Services.PublicProfileService)
+local SocialService = require(ServerScriptService.Services.SocialService)
 local RemoteGuard = require(ServerScriptService.Modules.RemoteGuard)
 local Leaderboards = require(ReplicatedStorage.Config.Leaderboards)
 
@@ -50,10 +51,25 @@ RemoteGuard.handle(GetLeaderboardEvent, RemoteGuard.LIMITS.Research, function(pl
 end)
 
 -- GetPublicProfileEvent
-RemoteGuard.handle(GetPublicProfileEvent, RemoteGuard.LIMITS.Research, function(_player, userId)
+-- Returns the player's public snapshot (see PublicProfileService) plus
+-- `followers` (nil if unknown) and `isFollowing` (whether the caller follows
+-- them), or nil if they have no public profile.
+RemoteGuard.handle(GetPublicProfileEvent, RemoteGuard.LIMITS.Research, function(player, userId)
 	if type(userId) ~= "number" or userId ~= math.floor(userId) or userId <= 0 then
 		return nil
 	end
 
-	return PublicProfileService.get(userId)
+	local snapshot = PublicProfileService.get(userId)
+
+	if not snapshot then
+		return nil
+	end
+
+	-- Cached snapshots are shared by every caller, so the caller's part goes on a copy
+	local profile = table.clone(snapshot)
+
+	profile.followers = SocialService.getFollowerCount(userId)
+	profile.isFollowing = SocialService.isFollowing(player, userId)
+
+	return profile
 end)

@@ -22,6 +22,8 @@ local EVENTS = {
 	"GetWatchlistEvent",
 	"ToggleWatchlistEvent",
 	"CompleteTutorialStepEvent",
+	"FollowPlayerEvent",
+	"SetShareTradesEvent",
 }
 
 -- Server-to-client pushes (RemoteEvents rather than RemoteFunctions)

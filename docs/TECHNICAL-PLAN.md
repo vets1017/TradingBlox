@@ -26,7 +26,7 @@ Roblox storage for the MVP.
 of progression, limit orders, portfolio analytics, public profiles, two leaderboards and a working
 Dashboard. Social trading comes next because it is the GDD's headline feature, then the Roblox market.
 - **Decisions were made on 2026-10-24** (§6): every recommendation was accepted, the memecoins plan is
-shelved, and Phase 1 has started (build order in §6).
+shelved, and Phases 0 and 1 are done. Phase 2 started on 2026-10-25 (decisions and build order in §6).
 
 ## 1. Current state
 
@@ -531,6 +531,38 @@ rest of Phase 0 (backend cache, rate limits, UI export, CI) runs alongside.
 9. ✅ Dashboard modules (account info, watchlist, orders, performance, market overview with gainers, losers
    and most active, top traders) and Trade-screen news. Uses the backend's news, movers and profile routes.
 10. ✅ Getting-started checklist (tutorial).
+
+### Phase 2 decisions
+
+Taken at the start of Phase 2 (2026-10-25), following the recommendations above:
+
+- **UI stays on the in-house kit** (decision 5, revisited as planned). There's no package manager, every
+  existing screen is imperative, and Phase 2's new UI is lists, a profile panel and one form, which
+  `UIKit` covers. A declarative library would leave two UI styles in one codebase.
+- **Sharing executed trades is on by default**, with a toggle on the player's own profile. Turning it off
+  hides their trades from their profile and the feed; the aggregate stats stay public, as in Phase 1.
+- **The feed is one global MemoryStore sorted map**, capped by count and a two-day expiry, because
+  MemoryStore memory is only 64 KB + 1.2 KB × concurrent users. Servers read it incrementally every few
+  seconds and cache it; the Following view filters that cache.
+- **Thesis text needs chat permission.** Only players `TextChatService:CanUserChatAsync` allows can add
+  text; anyone can publish the structured part (ticker, direction, target, horizon). Text is filtered
+  for broadcast when shown and cached per server.
+
+### Phase 2 build order
+
+1. ✅ Follows (`Following` in the profile, counts in DataStore `Followers_v1`), the trade-sharing setting,
+   and recent trades on public profiles.
+2. The feed: executed trades and milestones in MemoryStore, a code-built Social tab with All and
+   Following views, and `Navigation.openProfile`.
+3. Theses: structured posts in DataStore `Posts`, indexed by author and ticker; shown in the feed, on
+   profiles and on the Trade screen, labeled "Simulated, not financial advice".
+4. Safety: blocking and muting (hidden from your feed and profile views), and reporting theses.
+5. Reactions on feed items.
+6. Notifications: an inbox in the profile (ProfileStore messages for new followers and reactions), live
+   delivery through MessagingService, a toast and a nav badge.
+7. Asset discovery: per-ticker counts of watchers, traders and theses; "Trending in TradingBlox" on the
+   Social tab and in Market overview, and the counts on the Trade screen beside the fundamentals.
+8. Dashboard Social module: activity from followed players and trending theses.
 
 ## Sources
 

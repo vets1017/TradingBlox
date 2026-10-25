@@ -2,7 +2,9 @@
 --
 -- Builds and runs the Leaderboards screen (GDD §9): the top players on each
 -- board beside the public profile of whoever is selected - the player
--- themselves to start with. Built in code inside the empty screen
+-- themselves to start with. The profile has a Follow button for other
+-- players, the trade-sharing toggle on the player's own, and recent trades
+-- when they're shared (GDD §2). Built in code inside the empty screen
 -- ShellController adds; TerminalController switches to it.
 
 local Players = game:GetService("Players")
@@ -10,6 +12,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Theme = require(ReplicatedStorage.Modules.Multi.Theme)
 local NumberModule = require(ReplicatedStorage.Modules.Multi.NumberModule)
+local Navigation = require(ReplicatedStorage.Modules.Multi.Navigation)
 local LineChart = require(ReplicatedStorage.UI.LineChart)
 local UIKit = require(ReplicatedStorage.UI.UIKit)
 local Leaderboards = require(ReplicatedStorage.Config.Leaderboards)
@@ -22,6 +25,8 @@ local PlayerGui = Player:WaitForChild("PlayerGui")
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
 local GetLeaderboardEvent = EventsFolder:WaitForChild("GetLeaderboardEvent")
 local GetPublicProfileEvent = EventsFolder:WaitForChild("GetPublicProfileEvent")
+local FollowPlayerEvent = EventsFolder:WaitForChild("FollowPlayerEvent")
+local SetShareTradesEvent = EventsFolder:WaitForChild("SetShareTradesEvent")
 
 -- References
 local TerminalGui = PlayerGui:WaitForChild("TerminalGui")
@@ -50,13 +55,19 @@ local SCORE_WIDTH = 140
 local PROFILE_AVATAR_SIZE = 56
 local PROFILE_CHART_HEIGHT = 140
 local STAT_CELL_HEIGHT = 40
+local ACTION_HEIGHT = 28
+local ACTION_BUTTON_WIDTH = 124
+local TRADE_ROW_HEIGHT = 20
+local TRADE_ROW_PADDING = 6 -- inside the hover highlight
+local TRADE_AGE_WIDTH = 72
 
 local REFRESH_INTERVAL = 60
 local RETRY_DELAY = 1.1 -- the server allows one request a second per board and per profile
 local BOARD_CACHE_SECONDS = 30
 local HISTORY_DAYS = 30
 
-local PROFILE_STATS = { "winRate", "averages", "maxDrawdown", "realizedPL", "trades", "joined" }
+local PROFILE_STATS =
+	{ "winRate", "averages", "maxDrawdown", "realizedPL", "trades", "joined", "followers", "following" }
 local PROFILE_STAT_CAPTIONS = {
 	winRate = "Win rate",
 	averages = "Avg gain / loss",
@@ -64,6 +75,8 @@ local PROFILE_STAT_CAPTIONS = {
 	realizedPL = "Realized P/L",
 	trades = "Trades",
 	joined = "Joined",
+	followers = "Followers",
+	following = "Following",
 }
 
 -- State
@@ -73,6 +86,8 @@ local boardCache = {} -- [boardId] = { fetchedAt = os.clock(), page = {...} }
 local boardRequestId = 0
 local profileRequestId = 0
 local currentProfile = nil
+local isActionPending = false
+local isActionHovered = false
 
 local makeFrame = UIKit.makeFrame
 local makeLabel = UIKit.makeLabel
@@ -97,6 +112,33 @@ local function getChangeColor(amount)
 	end
 
 	return Theme.Colors.Text
+end
+
+local function sideText(side)
+	return string.format('<font color="#%s">%s</font>', side == "Buy" and UP_HEX or DOWN_HEX, side)
+end
+
+-- "Buy 5 AAPL @ $182.10", with the realized P/L after a sale
+local function describeTrade(trade)
+	local realized = ""
+
+	if trade.realizedPL then
+		realized = string.format(
+			' <font color="#%s">%s</font>',
+			trade.realizedPL >= 0 and UP_HEX or DOWN_HEX,
+			formatSignedMoney(trade.realizedPL)
+		)
+	end
+
+	return string.format(
+		"%s %s %s%s @ %s%s",
+		trade.settlement or sideText(trade.side),
+		NumberModule.formatShares(trade.quantity),
+		trade.ticker,
+		trade.contract and " opt" or "",
+		NumberModule.format(trade.price),
+		realized
+	)
 end
 
 local function formatScore(board, score)
@@ -260,7 +302,31 @@ local ProfileSubtitle =
 ProfileSubtitle.Position = UDim2.fromOffset(PROFILE_TEXT_X, PADDING + 32)
 ProfileSubtitle.Size = UDim2.new(1, -(PROFILE_TEXT_X + PADDING), 0, 18)
 
-local VALUE_Y = PADDING + PROFILE_AVATAR_SIZE + GAP
+local ACTION_Y = PADDING + PROFILE_AVATAR_SIZE + GAP
+
+-- Follow on other players' profiles, the trade-sharing toggle on your own
+local ProfileAction = Instance.new("TextButton")
+ProfileAction.Name = "Action"
+ProfileAction.Position = UDim2.fromOffset(PADDING, ACTION_Y)
+ProfileAction.Size = UDim2.fromOffset(ACTION_BUTTON_WIDTH, ACTION_HEIGHT)
+ProfileAction.AutoButtonColor = false
+ProfileAction.BorderSizePixel = 0
+ProfileAction.TextSize = Theme.TextSize.Body
+ProfileAction.Parent = ProfileContent
+UIKit.addCorner(ProfileAction)
+
+local ProfileActionStroke = UIKit.addStroke(ProfileAction)
+
+local ACTION_NOTE_X = PADDING + ACTION_BUTTON_WIDTH + 10
+
+-- What the toggle means, or why the last click failed
+local ProfileActionNote =
+	makeLabel("ActionNote", ProfileContent, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.TextMuted)
+ProfileActionNote.Position = UDim2.fromOffset(ACTION_NOTE_X, ACTION_Y)
+ProfileActionNote.Size = UDim2.new(1, -(ACTION_NOTE_X + PADDING), 0, ACTION_HEIGHT)
+ProfileActionNote.TextWrapped = true
+
+local VALUE_Y = ACTION_Y + ACTION_HEIGHT + GAP
 
 local ProfileValue =
 	makeLabel("NetWorth", ProfileContent, Theme.Fonts.MonoBold, Theme.TextSize.Display, Theme.Colors.Text)
@@ -308,10 +374,37 @@ for index, stat in ipairs(PROFILE_STATS) do
 	profileStatLabels[stat] = value
 end
 
+-- Recent trades, then when the profile was updated. A list layout, since
+-- the number of trades varies.
+local ProfileLower = makeFrame("Lower", ProfileContent)
+ProfileLower.Position = UDim2.fromOffset(PADDING, STATS_Y + math.ceil(#PROFILE_STATS / 2) * STAT_CELL_HEIGHT + GAP)
+ProfileLower.Size = UDim2.new(1, -PADDING * 2, 0, 0)
+ProfileLower.AutomaticSize = Enum.AutomaticSize.Y
+
+local ProfileLowerLayout = Instance.new("UIListLayout")
+ProfileLowerLayout.SortOrder = Enum.SortOrder.LayoutOrder
+ProfileLowerLayout.Padding = UDim.new(0, 6)
+ProfileLowerLayout.Parent = ProfileLower
+
+local TradesTitle =
+	makeLabel("TradesTitle", ProfileLower, Theme.Fonts.UISemibold, Theme.TextSize.Body, Theme.Colors.Text)
+TradesTitle.LayoutOrder = 1
+TradesTitle.Size = UDim2.new(1, 0, 0, 18)
+TradesTitle.Text = "Recent trades"
+
+local TradesList = makeFrame("TradesList", ProfileLower)
+TradesList.LayoutOrder = 2
+TradesList.Size = UDim2.fromScale(1, 0)
+TradesList.AutomaticSize = Enum.AutomaticSize.Y
+
+local TradesListLayout = Instance.new("UIListLayout")
+TradesListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+TradesListLayout.Parent = TradesList
+
 local ProfileUpdated =
-	makeLabel("Updated", ProfileContent, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.TextMuted)
-ProfileUpdated.Position = UDim2.fromOffset(PADDING, STATS_Y + math.ceil(#PROFILE_STATS / 2) * STAT_CELL_HEIGHT + GAP)
-ProfileUpdated.Size = UDim2.new(1, -PADDING * 2, 0, 16)
+	makeLabel("Updated", ProfileLower, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.TextMuted)
+ProfileUpdated.LayoutOrder = 3
+ProfileUpdated.Size = UDim2.new(1, 0, 0, 16)
 
 local ProfileMessage = makeLabel("Message", ProfilePanel, Theme.Fonts.UI, Theme.TextSize.Body, Theme.Colors.TextMuted)
 ProfileMessage.Size = UDim2.fromScale(1, 1)
@@ -325,6 +418,115 @@ local function setProfileStat(stat, text, color)
 
 	label.Text = text
 	label.TextColor3 = color or Theme.Colors.Text
+end
+
+-- Follow (Accent fill) or Following (outlined; "Unfollow" on hover) for
+-- other players, and the sharing toggle on your own profile
+local function renderAction()
+	local profile = currentProfile
+
+	if profile.userId == Player.UserId then
+		local isSharing = profile.sharesTrades ~= false
+
+		ProfileAction.Text = isSharing and "Share trades: On" or "Share trades: Off"
+		ProfileAction.FontFace = Theme.Fonts.UISemibold
+		ProfileAction.BackgroundColor3 = Theme.Colors.Raised
+		ProfileAction.TextColor3 = isSharing and Theme.Colors.Text or Theme.Colors.TextMuted
+		ProfileActionStroke.Enabled = true
+		ProfileActionStroke.Color = isSharing and Theme.Colors.Accent or Theme.Colors.Border
+		ProfileActionNote.Text = isSharing and "Other players see your latest trades."
+			or "Other players see your stats, not your trades."
+
+		return
+	end
+
+	if profile.isFollowing then
+		ProfileAction.Text = isActionHovered and "Unfollow" or "Following"
+		ProfileAction.FontFace = Theme.Fonts.UISemibold
+		ProfileAction.BackgroundColor3 = Theme.Colors.Raised
+		ProfileAction.TextColor3 = isActionHovered and Theme.Colors.Down or Theme.Colors.Text
+		ProfileActionStroke.Enabled = true
+		ProfileActionStroke.Color = Theme.Colors.Border
+	else
+		ProfileAction.Text = "Follow"
+		ProfileAction.FontFace = Theme.Fonts.UIBold
+		ProfileAction.BackgroundColor3 = Theme.Colors.Accent
+		ProfileAction.TextColor3 = Theme.Colors.Background -- dark on Accent reads better than white
+		ProfileActionStroke.Enabled = false
+	end
+
+	ProfileActionNote.Text = ""
+end
+
+local function addTradesMessage(text)
+	local message = makeLabel("Message", TradesList, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.TextMuted)
+	message.Size = UDim2.new(1, 0, 0, TRADE_ROW_HEIGHT)
+	message.Text = text
+end
+
+-- A trade row opens its ticker on the Trade tab
+local function createTradeRow(index, trade)
+	local row = Instance.new("TextButton")
+	row.Name = "Trade_" .. index
+	row.LayoutOrder = index
+	row.Size = UDim2.new(1, 0, 0, TRADE_ROW_HEIGHT)
+	row.AutoButtonColor = false
+	row.BorderSizePixel = 0
+	row.BackgroundColor3 = Theme.Colors.Raised
+	row.BackgroundTransparency = 1
+	row.Text = ""
+	row.Parent = TradesList
+	UIKit.addCorner(row)
+
+	local padding = Instance.new("UIPadding")
+	padding.PaddingLeft = UDim.new(0, TRADE_ROW_PADDING)
+	padding.PaddingRight = UDim.new(0, TRADE_ROW_PADDING)
+	padding.Parent = row
+
+	local detail = makeLabel("Detail", row, Theme.Fonts.Mono, Theme.TextSize.Caption, Theme.Colors.Text)
+	detail.Size = UDim2.new(1, -TRADE_AGE_WIDTH, 1, 0)
+	detail.RichText = true
+	detail.Text = describeTrade(trade)
+
+	local age = makeLabel("Age", row, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.TextMuted)
+	age.AnchorPoint = Vector2.new(1, 0)
+	age.Position = UDim2.fromScale(1, 0)
+	age.Size = UDim2.new(0, TRADE_AGE_WIDTH, 1, 0)
+	age.TextXAlignment = Enum.TextXAlignment.Right
+	age.Text = formatAge(os.time() - trade.time)
+
+	row.MouseEnter:Connect(function()
+		row.BackgroundTransparency = 0
+	end)
+
+	row.MouseLeave:Connect(function()
+		row.BackgroundTransparency = 1
+	end)
+
+	row.MouseButton1Click:Connect(function()
+		Navigation.openTicker(trade.ticker)
+	end)
+end
+
+local function renderRecentTrades(profile, isYou)
+	for _, child in ipairs(TradesList:GetChildren()) do
+		if child:IsA("GuiObject") then
+			child:Destroy()
+		end
+	end
+
+	-- nil (not false) on snapshots saved before trades could be shared
+	if profile.sharesTrades == false then
+		addTradesMessage(
+			isYou and "Hidden from other players." or ("@" .. profile.username .. " keeps trades private.")
+		)
+	elseif not profile.recentTrades or #profile.recentTrades == 0 then
+		addTradesMessage("No trades to show yet.")
+	else
+		for index, trade in ipairs(profile.recentTrades) do
+			createTradeRow(index, trade)
+		end
+	end
 end
 
 local function renderProfileChart()
@@ -395,7 +597,17 @@ local function renderProfile(profile)
 	setProfileStat("trades", NumberModule.formatShares(profile.trades))
 	setProfileStat("joined", profile.joinedAt and os.date("%b %Y", profile.joinedAt) or "—")
 
+	for _, stat in ipairs({ "followers", "following" }) do
+		if profile[stat] then
+			setProfileStat(stat, NumberModule.formatShares(profile[stat]))
+		else
+			setProfileStat(stat, "—", Theme.Colors.TextMuted)
+		end
+	end
+
 	ProfileUpdated.Text = "Updated " .. formatAge(os.time() - profile.updatedAt)
+	renderAction()
+	renderRecentTrades(profile, isYou)
 	renderProfileChart()
 end
 
@@ -441,6 +653,55 @@ local function loadProfile(userId)
 	if requestId == profileRequestId then
 		renderProfile(profile)
 	end
+end
+
+-- Follows or unfollows the player shown, or flips your own sharing setting
+local function onActionClicked()
+	local profile = currentProfile
+
+	if isActionPending or not profile then
+		return
+	end
+
+	local userId = profile.userId
+	local isYou = userId == Player.UserId
+	local result
+
+	isActionPending = true
+	ProfileActionNote.Text = ""
+
+	if isYou then
+		result = invoke(SetShareTradesEvent, profile.sharesTrades == false)
+	else
+		result = invoke(FollowPlayerEvent, userId, not profile.isFollowing)
+	end
+
+	isActionPending = false
+
+	-- A refresh may have replaced the profile table meanwhile, or the player
+	-- opened someone else
+	if not currentProfile or currentProfile.userId ~= userId then
+		return
+	end
+
+	if not result or not result.success then
+		ProfileActionNote.Text = result and result.message or "Couldn't reach the server. Try again."
+
+		return
+	end
+
+	if isYou then
+		-- Reloaded so the trades list matches the new setting
+		currentProfile.sharesTrades = result.shareTrades
+		renderAction()
+		loadProfile(userId)
+
+		return
+	end
+
+	currentProfile.isFollowing = result.isFollowing
+	currentProfile.followers = result.followers
+	renderProfile(currentProfile)
 end
 
 -- Board
@@ -667,6 +928,24 @@ local function layoutScreen()
 end
 
 -- Connections
+ProfileAction.MouseButton1Click:Connect(onActionClicked)
+
+ProfileAction.MouseEnter:Connect(function()
+	isActionHovered = true
+
+	if currentProfile then
+		renderAction()
+	end
+end)
+
+ProfileAction.MouseLeave:Connect(function()
+	isActionHovered = false
+
+	if currentProfile then
+		renderAction()
+	end
+end)
+
 for boardId, pill in pairs(boardPills) do
 	pill.button.MouseButton1Click:Connect(function()
 		loadBoard(boardId)

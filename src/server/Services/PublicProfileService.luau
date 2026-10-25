@@ -7,8 +7,8 @@
 -- at most, every 5 minutes, and as they leave - and submits the same numbers
 -- to the leaderboards, so any server can show any player.
 --
--- Holdings stay private for now; sharing them waits for Phase 2's privacy
--- setting.
+-- The latest trades are included only while the player shares them (see
+-- SocialService); holdings stay private.
 
 local DataStoreService = game:GetService("DataStoreService")
 local Players = game:GetService("Players")
@@ -17,11 +17,13 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local Economy = require(ReplicatedStorage.Config.Economy)
 local Progression = require(ReplicatedStorage.Config.Progression)
+local Social = require(ReplicatedStorage.Config.Social)
 local PlayerDataService = require(ServerScriptService.Services.PlayerDataService)
 local LeaderboardService = require(ServerScriptService.Services.LeaderboardService)
 local OrderEvents = require(ServerScriptService.Services.OrderEvents)
 local TradeLogModule = require(ServerScriptService.Modules.TradeLogModule)
 local PortfolioHistoryModule = require(ServerScriptService.Modules.PortfolioHistoryModule)
+local SocialModule = require(ServerScriptService.Modules.SocialModule)
 
 local SnapshotStore = DataStoreService:GetDataStore("PublicProfile_v1")
 
@@ -58,6 +60,12 @@ local function buildSnapshot(player, data, netWorth: number, now: number)
 		maxDrawdown = PortfolioHistoryModule.getMaxDrawdown(data.NetWorthHistory),
 		joinedAt = data.Stats.JoinedAt,
 		history = PortfolioHistoryModule.getRange(data.NetWorthHistory, HISTORY_RANGE, now),
+		following = SocialModule.countFollowing(data.Social),
+		sharesTrades = data.Social.ShareTrades,
+		-- Left out while private, so those trades never reach the DataStore
+		recentTrades = if data.Social.ShareTrades
+			then SocialModule.getRecentTrades(data.TradeLog, Social.RECENT_TRADES)
+			else nil,
 		updatedAt = now,
 	}
 end
@@ -107,6 +115,12 @@ local function requestPublish(player)
 			publish(player)
 		end
 	end)
+end
+
+-- Publishes the player's profile now, skipping the once-a-minute limit; for
+-- changes other servers should see quickly, like turning trade sharing off
+function PublicProfileService.publishNow(player)
+	task.spawn(publish, player)
 end
 
 -- A player's public profile, or nil if they've never had one published.

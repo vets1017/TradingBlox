@@ -56,7 +56,7 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
   (account info, watchlist, orders, performance, market overview, top traders), built in code inside the
   Studio widget frames; `TutorialController` for the "Getting started" checklist card; `TradeController` for the Trade screen; `PortfolioController` for the Portfolio screen, which it builds
   entirely in code inside the empty Studio `PortfolioScreen` frame; `LeaderboardController` for the Leaderboards
-  tab, whose nav button and empty screen `ShellController` creates in code (`CODE_BUILT_TABS`) and
+  tab (boards beside a public profile with Follow, the trade-sharing toggle and recent trades), whose nav button and empty screen `ShellController` creates in code (`CODE_BUILT_TABS`) and
   `TerminalController` registers for switching; Quote tabs and Options chain stubs). Controllers `WaitForChild` their way through a large, hand-built UI tree (no UI
   framework/library), wire up `TweenService` animations and `UserInputService` input handling directly, and
   call server `RemoteFunction`s to fetch data. Several controllers (`QuoteTabsController`,
@@ -66,7 +66,8 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
   - `ServerSetup.server.luau` creates the `EventsFolder` in `ReplicatedStorage` and all `RemoteFunction`s the
     client calls (`RequestChartEvent`, `GetMarketDataEvent`, `GetOptionsDataEvent`, `GetPositionsEvent`,
     `GetPortfolioEvent`, `GetLeaderboardEvent`, `GetPublicProfileEvent`, `GetNewsFeedEvent`, `GetMarketMoversEvent`,
-    `PlayerOrderEvent`, `PlayerOptionOrderEvent`, plus watchlist and research remotes). This must run before other server scripts wire up
+    `PlayerOrderEvent`, `PlayerOptionOrderEvent`, `FollowPlayerEvent`, `SetShareTradesEvent`, plus watchlist and
+    research remotes). This must run before other server scripts wire up
     `OnServerInvoke` handlers.
   - `API_Manager.server.luau` wires the market-data remotes. `Modules/MarketDataModule.luau` is the sole
     bridge to the external HTTP backend (`SERVER_URL`, a Render-hosted service): ticker validation, a
@@ -84,7 +85,7 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     backend (e.g. `http://localhost:3000` while developing `~/Documents/VS/StockDataFetcher`; Studio can reach
     localhost). Remove it after testing; live servers always use the deployed backend.
   - `Data_Manager.server.luau` is the bootstrap for the player services: it starts the services that listen
-    for players (`ProgressionService`, `LeaderboardService`, `PublicProfileService`, `OrderService`,
+    for players (`ProgressionService`, `LeaderboardService`, `PublicProfileService`, `SocialService`, `OrderService`,
     `SettlementService`) before `PlayerDataService`, so none misses a player who loads straight away.
   - `API_Manager`'s option and research remotes check level unlocks; a locked request gets
     `{ available = false, locked = true, message = "Unlocks at Level N · Name" }`, the shape the Trade screen
@@ -134,13 +135,19 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     OrderedDataStore (`LB_<board>_<period>`); top pages cached per server for 60 s.
   - `PublicProfileService` — the public profile snapshot in DataStore `PublicProfile_v1` (written ≤ 1/min
     after trades, every 5 min, and on leave via `PlayerDataService.onPlayerLeaving`); also submits leaderboard
-    scores.
-  - `Core/LeaderboardSystem.server.luau` wires `GetLeaderboardEvent` / `GetPublicProfileEvent`.
+    scores. The snapshot carries the latest trades only while the player shares them.
+  - `SocialService` — Phase 2 social trading (TECHNICAL-PLAN §6 has the build order): `playerData.Social`
+    holds the `Following` list (keyed by user id strings, capped by `Config/Social`) and the `ShareTrades`
+    setting; follower counts live in DataStore `Followers_v1` (`UpdateAsync`, cached 60 s). Pure rules are in
+    `Modules/SocialModule.luau`.
+  - `Core/LeaderboardSystem.server.luau` wires `GetLeaderboardEvent` / `GetPublicProfileEvent` (which adds the
+    follower count and whether the caller follows); `Core/SocialSystem.server.luau` wires `FollowPlayerEvent`
+    and `SetShareTradesEvent`.
 - **Vendored (`src/server/Vendor/`)** — `ProfileStore.luau`, unmodified below a provenance header (pinned
   commit, Apache-2.0; license in `THIRD_PARTY_LICENSES/`). Don't edit it in place.
 - **Shared config (`src/shared/Config/`)** — read by both sides: the server enforces it, the client explains it.
   `Progression` (levels, unlocks, XP rules), `Leaderboards` (boards, periods, eligibility, score encoding),
-  `Economy` (starting cash).
+  `Economy` (starting cash), `Social` (follow cap, how many recent trades a profile shows).
 - **Shared UI (`src/shared/UI/`)** — the in-house kit for UI built in code: `UIKit` (frame/label/panel/dot/
   avatar builders on Theme tokens) and `LineChart` (the gradient line + fill used by the Portfolio chart and
   profile panel). New code-built screens should use these instead of copying builders.
