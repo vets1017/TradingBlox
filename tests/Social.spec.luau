@@ -124,3 +124,18 @@ test("a capped map drops its oldest entry", function()
 
 	equal(map, { b = NOW + 1, c = NOW + 2 })
 end)
+
+test("a player's reactions are remembered, cleared and capped", function()
+	local social = { Reactions = {} }
+
+	SocialModule.setReaction(social, "a", "Fire", NOW, 2)
+	equal(SocialModule.getReaction(social, "a"), "Fire")
+
+	SocialModule.setReaction(social, "b", "Watching", NOW + 1, 2)
+	SocialModule.setReaction(social, "c", "Fire", NOW + 2, 2)
+	equal(SocialModule.getReaction(social, "a"), nil, "the oldest is forgotten")
+	equal(SocialModule.getReaction(social, "c"), "Fire")
+
+	SocialModule.setReaction(social, "c", nil, NOW + 3, 2)
+	equal(SocialModule.getReaction(social, "c"), nil)
+end)

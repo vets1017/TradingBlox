@@ -56,7 +56,8 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
   (account info, watchlist, orders, performance, market overview, top traders), built in code inside the
   Studio widget frames; `TutorialController` for the "Getting started" checklist card; `TradeController` for the Trade screen; `PortfolioController` for the Portfolio screen, which it builds
   entirely in code inside the empty Studio `PortfolioScreen` frame; `SocialController` for the Social tab (the feed,
-  All or Following, polled every 5 s while open; it also sends the server the player's Roblox block list) and `LeaderboardController` for the Leaderboards
+  All or Following, polled every 5 s while open, with reaction chips; it also sends the server the player's
+  Roblox block list) and `LeaderboardController` for the Leaderboards
   tab (boards beside a public profile with Follow, Mute, Block for players in the server, the trade-sharing
   toggle, recent trades and theses; every profile opens here), whose nav buttons and empty screens `ShellController` creates in code (`CODE_BUILT_TABS`) and
   `TerminalController` registers for switching; Quote tabs and Options chain stubs). Controllers `WaitForChild` their way through a large, hand-built UI tree (no UI
@@ -70,7 +71,7 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     `GetPortfolioEvent`, `GetLeaderboardEvent`, `GetPublicProfileEvent`, `GetNewsFeedEvent`, `GetMarketMoversEvent`,
     `PlayerOrderEvent`, `PlayerOptionOrderEvent`, `FollowPlayerEvent`, `SetShareTradesEvent`, `GetFeedEvent`,
     `PublishThesisEvent`, `DeleteThesisEvent`, `GetTickerThesesEvent`, `MutePlayerEvent`, `SetRobloxBlocksEvent`,
-    `ReportThesisEvent`, plus watchlist and research remotes). This must run before other server scripts wire up
+    `ReportThesisEvent`, `ReactToFeedItemEvent`, plus watchlist and research remotes). This must run before other server scripts wire up
     `OnServerInvoke` handlers.
   - `API_Manager.server.luau` wires the market-data remotes. `Modules/MarketDataModule.luau` is the sole
     bridge to the external HTTP backend (`SERVER_URL`, a Render-hosted service): ticker validation, a
@@ -149,6 +150,7 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
   - `FeedService` — the feed: executed trades (when shared; one per player per 30 s) and milestones in one
     MemoryStore sorted map `Feed_v1` shared by every server, capped at 120 items with a two-day expiry (the
     memory quota is tiny), cached 5 s per server. Turning sharing off removes the player's trades from it.
+    Reactions are counts on the item (`react`), with each reactor's choice in `playerData.Social.Reactions`.
     Item shapes and pure rules are in `Modules/FeedModule.luau`.
   - `ThesisService` — theses: a structured call on one ticker (bullish/bearish, horizon, optional target and
     text), kept in the author's `playerData.Social.Theses` and DataStore `TickerTheses_v1` (one key per
@@ -170,7 +172,7 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
 - **Shared config (`src/shared/Config/`)** — read by both sides: the server enforces it, the client explains it.
   `Progression` (levels, unlocks, XP rules), `Leaderboards` (boards, periods, eligibility, score encoding),
   `Economy` (starting cash), `Social` (follow cap, recent trades per profile, feed views and milestone wording,
-  thesis directions, horizons and limits).
+  thesis directions, horizons and limits, reactions, safety limits).
 - **Shared UI (`src/shared/UI/`)** — the in-house kit for UI built in code: `UIKit` (frame/label/panel/pill/
   dot/avatar builders on Theme tokens) and `LineChart` (the gradient line + fill used by the Portfolio chart and
   profile panel). New code-built screens should use these instead of copying builders.

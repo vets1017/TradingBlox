@@ -107,3 +107,21 @@ test("a thesis item points at the thesis, without its text", function()
 	equal(FeedModule.isThesis(item, "100-4"), false)
 	equal(FeedModule.isThesis({ kind = "Trade", thesisId = "100-3" }, "100-3"), false)
 end)
+
+test("reactions add, switch and clear without going below zero", function()
+	local item = {}
+
+	FeedModule.applyReaction(item, nil, "Fire")
+	FeedModule.applyReaction(item, nil, "Fire")
+	equal(item.reactions, { Fire = 2 })
+
+	FeedModule.applyReaction(item, "Fire", "Skeptical")
+	equal(item.reactions, { Fire = 1, Skeptical = 1 }, "switched")
+
+	FeedModule.applyReaction(item, "Skeptical", nil)
+	FeedModule.applyReaction(item, "Fire", nil)
+	equal(item.reactions, nil, "no zero counts left behind")
+
+	FeedModule.applyReaction(item, "Watching", nil)
+	equal(item.reactions, nil, "removing a reaction that isn't counted")
+end)

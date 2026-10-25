@@ -66,6 +66,7 @@ local TEMPLATE = {
 		ThesesToday = 0,
 		Muted = {}, -- [tostring(userId)] = time muted; see MuteService
 		HiddenTheses = {}, -- [thesisId] = time reported, hidden from this player
+		Reactions = {}, -- [feed item id] = { reaction, at }; see FeedService.react
 	},
 }
 

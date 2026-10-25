@@ -31,6 +31,7 @@ local EVENTS = {
 	"MutePlayerEvent",
 	"SetRobloxBlocksEvent",
 	"ReportThesisEvent",
+	"ReactToFeedItemEvent",
 }
 
 -- Server-to-client pushes (RemoteEvents rather than RemoteFunctions)

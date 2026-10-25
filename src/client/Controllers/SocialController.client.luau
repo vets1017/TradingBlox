@@ -3,7 +3,8 @@
 -- Builds and runs the Social tab (GDD §2): the feed of executed trades,
 -- theses and milestones from every player, or only from the players you
 -- follow. A row opens its player's profile; the ticker of a trade or thesis
--- opens on the Trade tab, where theses show in full.
+-- opens on the Trade tab, where theses show in full. Reaction chips on each
+-- row (one reaction per player per item; read-only on your own posts).
 --
 -- Also sends the server the player's Roblox block list, which only the
 -- client can read, so blocked players' posts are hidden everywhere.
@@ -27,6 +28,7 @@ local PlayerGui = Player:WaitForChild("PlayerGui")
 -- Remotes
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
 local GetFeedEvent = EventsFolder:WaitForChild("GetFeedEvent")
+local ReactToFeedItemEvent = EventsFolder:WaitForChild("ReactToFeedItemEvent")
 local SetRobloxBlocksEvent = EventsFolder:WaitForChild("SetRobloxBlocksEvent")
 
 -- References
@@ -50,6 +52,10 @@ local TEXT_X = AVATAR_SIZE + 10
 local KIND_WIDTH = 130
 local TICKER_PILL_WIDTH = 76
 local TICKER_PILL_HEIGHT = 24
+local CHIP_WIDTH = 44
+local CHIP_HEIGHT = 20
+local CHIP_GAP = 4
+local CHIPS_WIDTH = #Social.REACTIONS * (CHIP_WIDTH + CHIP_GAP)
 
 local POLL_INTERVAL = 5
 local CORE_RETRIES = 20 -- a second apart, while Roblox's core scripts register
@@ -66,6 +72,8 @@ local selectedView = Social.FEED_VIEWS[1]
 local requestId = 0
 local renderedSignature = nil -- the view and item ids on screen; an unchanged poll keeps scroll and hover
 local ageLabels = {} -- [label] = item, so ages tick without rebuilding rows
+local rowsById = {} -- [item id] = { item, chips = { [reactionId] = { button, stroke } } }
+local isReacting = false
 
 local makeFrame = UIKit.makeFrame
 local makeLabel = UIKit.makeLabel
@@ -240,6 +248,93 @@ local function clearRows()
 	end
 
 	table.clear(ageLabels)
+	table.clear(rowsById)
+end
+
+-- "🔥 3", or just "🔥" with no one on it yet; your own reaction is outlined
+local function updateChips(row)
+	local item = row.item
+	local counts = item.reactions or {}
+
+	for _, reaction in ipairs(Social.REACTIONS) do
+		local chip = row.chips[reaction.id]
+		local count = counts[reaction.id]
+		local isYours = item.yourReaction == reaction.id
+
+		chip.button.Text = count and string.format("%s %d", reaction.emoji, count) or reaction.emoji
+		chip.button.TextColor3 = isYours and Theme.Colors.Text or Theme.Colors.TextMuted
+		chip.stroke.Color = isYours and Theme.Colors.Accent or Theme.Colors.Border
+	end
+end
+
+-- Clicking your current reaction takes it off; another one switches to it
+local function react(row, reactionId)
+	if isReacting then
+		return
+	end
+
+	local item = row.item
+
+	isReacting = true
+
+	local success, result = pcall(
+		ReactToFeedItemEvent.InvokeServer,
+		ReactToFeedItemEvent,
+		item.id,
+		if item.yourReaction == reactionId then nil else reactionId
+	)
+
+	isReacting = false
+
+	if not success or not result or not result.success then
+		warn("[SocialController] Reaction failed: " .. tostring(result and result.message or result))
+
+		return
+	end
+
+	item.reactions = result.reactions
+	item.yourReaction = result.yourReaction
+	updateChips(row)
+end
+
+local function createChips(row, parent, item)
+	local isYours = item.userId == Player.UserId
+
+	local group = makeFrame("Reactions", parent)
+	group.AnchorPoint = Vector2.new(1, 0)
+	group.Size = UDim2.fromOffset(CHIPS_WIDTH, CHIP_HEIGHT)
+
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0, CHIP_GAP)
+	layout.Parent = group
+
+	for index, reaction in ipairs(Social.REACTIONS) do
+		local chip = Instance.new("TextButton")
+		chip.Name = reaction.id
+		chip.LayoutOrder = index
+		chip.Size = UDim2.fromOffset(CHIP_WIDTH, CHIP_HEIGHT)
+		chip.AutoButtonColor = false
+		chip.BorderSizePixel = 0
+		chip.BackgroundColor3 = Theme.Colors.Panel
+		chip.FontFace = Theme.Fonts.UI
+		chip.TextSize = Theme.TextSize.Caption
+		chip.Parent = group
+		UIKit.addCorner(chip)
+
+		row.chips[reaction.id] = { button = chip, stroke = UIKit.addStroke(chip) }
+
+		-- Your own posts show their counts but take no reactions
+		if not isYours then
+			chip.MouseButton1Click:Connect(function()
+				react(row, reaction.id)
+			end)
+		end
+	end
+
+	return group
 end
 
 -- A whole row opens the player's profile; the ticker pill of a trade or
@@ -300,9 +395,16 @@ local function createRow(index, item)
 		Theme.Colors.Text
 	)
 	detail.Position = UDim2.fromOffset(TEXT_X, 29)
-	detail.Size = UDim2.new(1, -(TEXT_X + rightWidth), 0, 18)
+	detail.Size = UDim2.new(1, -(TEXT_X + rightWidth + CHIPS_WIDTH + 8), 0, 18)
 	detail.RichText = true
 	detail.Text = describeItem(item)
+
+	local rowState = { item = item, chips = {} }
+	local chips = createChips(rowState, row, item)
+
+	chips.Position = UDim2.new(1, -rightWidth, 0, 28)
+	rowsById[item.id] = rowState
+	updateChips(rowState)
 
 	if hasTicker then
 		local tickerPill = Instance.new("TextButton")
@@ -373,7 +475,18 @@ local function renderFeed(result)
 		label.Text = describeKind(item)
 	end
 
+	-- Same items: counts change in place, so scroll and hover stay put
 	if signature == renderedSignature then
+		for _, item in ipairs(items) do
+			local row = rowsById[item.id]
+
+			if row then
+				row.item.reactions = item.reactions
+				row.item.yourReaction = item.yourReaction
+				updateChips(row)
+			end
+		end
+
 		return
 	end
 

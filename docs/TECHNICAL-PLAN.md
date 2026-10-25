@@ -567,7 +567,9 @@ Taken at the start of Phase 2 (2026-10-25), following the recommendations above:
    their profile; Block opens Roblox's own prompt for players in the same server. Reports go to DataStore
    `Reports_v1` for review and hide the thesis from the reporter; three from Roblox accounts at least 30
    days old take it down everywhere, reaching the author's own list through a ProfileStore message.
-5. Reactions on feed items.
+5. ✅ Reactions on feed items (🔥 Fire, 👀 Watching, 🤔 Skeptical; one per player per item). Counts live
+   on the MemoryStore item (`UpdateAsync`, keeping its expiry), so they cost no extra reads and expire with
+   it; each reactor's profile records their reaction, which is what prevents double counting.
 6. Notifications: an inbox in the profile (ProfileStore messages for new followers and reactions), live
    delivery through MessagingService, a toast and a nav badge.
 7. Asset discovery: per-ticker counts of watchers, traders and theses; "Trending in TradingBlox" on the

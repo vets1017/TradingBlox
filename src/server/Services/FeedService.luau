@@ -7,6 +7,10 @@
 -- whole experience). Each server caches the latest items for a few seconds,
 -- so reads grow with servers, not players. The feed is never the source of
 -- truth: trades come from the trade log and milestones from progression.
+--
+-- Reactions are counts on the item itself, so they cost no extra reads and
+-- expire with it. Who reacted with what is kept in each reactor's profile,
+-- which is also what stops a player counting twice.
 
 local HttpService = game:GetService("HttpService")
 local MemoryStoreService = game:GetService("MemoryStoreService")
@@ -28,6 +32,7 @@ local ITEM_LIFETIME = 2 * 86400
 local CACHE_SECONDS = 5
 local TRIM_INTERVAL = 60
 local MIN_SECONDS_BETWEEN_TRADES = 30 -- per player
+local MIN_UPDATE_LIFETIME = 60 -- an item about to expire still takes a reaction
 
 -- Tells this server's keys apart from every other server's
 local SERVER_TAG = string.sub(HttpService:GenerateGUID(false), 1, 8)
@@ -38,6 +43,7 @@ local fetchedAt = -math.huge
 local isFetching = false
 -- Weak keys, so a player who has left drops out on their own
 local lastTradePostedAt = setmetatable({}, { __mode = "k" }) -- [player] = os.time()
+local isReacting = setmetatable({}, { __mode = "k" }) -- [player] = true while a reaction saves
 
 local FeedService = {}
 
@@ -156,14 +162,111 @@ function FeedService.getFeed(player, view: string)
 	end
 
 	local filter = MuteService.getFilter(player)
-
-	return FeedModule.select(cachedItems, Social.FEED_PAGE_SIZE, function(item)
+	local selected = FeedModule.select(cachedItems, Social.FEED_PAGE_SIZE, function(item)
 		if filter.hidesUser(item.userId) or (item.thesisId and filter.hidesThesis(item.thesisId)) then
 			return false
 		end
 
 		return view ~= "Following" or SocialModule.isFollowing(data.Social, item.userId)
 	end)
+
+	-- Copies, since the cache is shared and `yourReaction` is the viewer's own
+	local items = {}
+
+	for index, item in ipairs(selected) do
+		local copy = table.clone(item)
+
+		copy.yourReaction = data and SocialModule.getReaction(data.Social, item.id)
+		items[index] = copy
+	end
+
+	return items
+end
+
+local function findCached(itemId: string)
+	for _, item in ipairs(cachedItems) do
+		if item.id == itemId then
+			return item
+		end
+	end
+
+	return nil
+end
+
+-- Runs with the player's lock held; yields
+local function saveReaction(player, cached, previous: string?, reaction: string?)
+	-- The item keeps its original expiry rather than starting two days over
+	local remaining = math.max(ITEM_LIFETIME - (os.time() - cached.time), MIN_UPDATE_LIFETIME)
+	local success, updated = pcall(FeedMap.UpdateAsync, FeedMap, cached.id, function(value)
+		-- nil cancels: the item expired or was trimmed
+		if value == nil then
+			return nil
+		end
+
+		return FeedModule.applyReaction(value, previous, reaction)
+	end, remaining)
+
+	if not success then
+		warn("[FeedService] Couldn't save a reaction: " .. tostring(updated))
+
+		return { success = false, message = "Couldn't save that. Try again in a moment." }
+	elseif not updated then
+		return { success = false, message = "That post is gone." }
+	end
+
+	local data = PlayerDataService.get(player)
+
+	if data then
+		SocialModule.setReaction(data.Social, cached.id, reaction, os.time(), Social.MAX_REACTIONS_KEPT)
+	end
+
+	-- This server shows the new counts straight away; others at their next refresh
+	cached.reactions = updated.reactions
+
+	return { success = true, reactions = updated.reactions, yourReaction = reaction }
+end
+
+-- Sets the player's reaction on a feed item; nil takes theirs off. Returns
+-- { success, message?, reactions, yourReaction }.
+function FeedService.react(player, itemId: string, reaction: string?)
+	local data = PlayerDataService.get(player)
+
+	if not data then
+		return { success = false, message = "Your data is still loading." }
+	end
+
+	local cached = findCached(itemId)
+
+	if not cached then
+		return { success = false, message = "That post is gone." }
+	elseif cached.userId == player.UserId then
+		return { success = false, message = "You can't react to your own post." }
+	end
+
+	local previous = SocialModule.getReaction(data.Social, itemId)
+
+	if previous == reaction then
+		return { success = true, reactions = cached.reactions, yourReaction = reaction }
+	end
+
+	-- Two overlapping clicks would both start from the same previous reaction
+	if isReacting[player] then
+		return { success = false, message = "Still saving your last reaction." }
+	end
+
+	isReacting[player] = true
+
+	local ok, result = pcall(saveReaction, player, cached, previous, reaction)
+
+	isReacting[player] = nil
+
+	if not ok then
+		warn("[FeedService] A reaction failed for " .. player.Name .. ": " .. tostring(result))
+
+		return { success = false, message = "Couldn't save that. Try again in a moment." }
+	end
+
+	return result
 end
 
 -- Takes the items `matches` accepts out of the feed. Other servers drop

@@ -15,7 +15,7 @@
 --     ticker, direction, horizon, targetPrice? } - no text: the feed points
 --     to the ticker, where the thesis shows in full
 -- Stored items carry no id; FeedService adds `id` (the item's key) when it
--- reads them.
+-- reads them. Any item can carry `reactions` = { [reactionId] = count }.
 
 local FeedModule = {}
 
@@ -94,6 +94,28 @@ function FeedModule.select(items, limit: number, keep: ((any) -> boolean)?)
 	end
 
 	return selected
+end
+
+-- Moves one player's reaction on `item` from `previous` to `reaction`
+-- (either may be nil), keeping counts at zero or more and dropping zeros
+function FeedModule.applyReaction(item, previous: string?, reaction: string?)
+	local reactions = item.reactions or {}
+
+	if previous and reactions[previous] then
+		reactions[previous] -= 1
+
+		if reactions[previous] <= 0 then
+			reactions[previous] = nil
+		end
+	end
+
+	if reaction then
+		reactions[reaction] = (reactions[reaction] or 0) + 1
+	end
+
+	item.reactions = if next(reactions) then reactions else nil
+
+	return item
 end
 
 -- Whether an item is one of `userId`'s trades, which leave the feed when

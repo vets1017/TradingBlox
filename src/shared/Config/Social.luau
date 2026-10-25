@@ -30,6 +30,26 @@ function Social.isFeedView(view): boolean
 	return table.find(Social.FEED_VIEWS, view) ~= nil
 end
 
+-- Reactions on feed items: one per player per item. Counts live on the
+-- item, so they expire with it.
+Social.REACTIONS = {
+	{ id = "Fire", emoji = "🔥", label = "Fire" },
+	{ id = "Watching", emoji = "👀", label = "Watching" },
+	{ id = "Skeptical", emoji = "🤔", label = "Skeptical" },
+}
+
+Social.MAX_REACTIONS_KEPT = 300 -- the player's own reactions remembered in their profile
+
+function Social.getReaction(reactionId)
+	for _, reaction in ipairs(Social.REACTIONS) do
+		if reaction.id == reactionId then
+			return reaction
+		end
+	end
+
+	return nil
+end
+
 -- Theses: a player's structured, public view on one ticker. Opinions, not
 -- trades, so they're labeled "Simulated, not financial advice" wherever
 -- they show.

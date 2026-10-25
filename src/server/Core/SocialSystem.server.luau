@@ -27,8 +27,10 @@ local GetTickerThesesEvent = EventsFolder:WaitForChild("GetTickerThesesEvent")
 local MutePlayerEvent = EventsFolder:WaitForChild("MutePlayerEvent")
 local SetRobloxBlocksEvent = EventsFolder:WaitForChild("SetRobloxBlocksEvent")
 local ReportThesisEvent = EventsFolder:WaitForChild("ReportThesisEvent")
+local ReactToFeedItemEvent = EventsFolder:WaitForChild("ReactToFeedItemEvent")
 
 local MAX_THESIS_ID_LENGTH = 40
+local MAX_FEED_ITEM_ID_LENGTH = 64
 
 local INVALID_REQUEST = { success = false, message = "Invalid request." }
 
@@ -136,4 +138,17 @@ RemoteGuard.handle(ReportThesisEvent, RemoteGuard.LIMITS.Rare, function(player, 
 	end
 
 	return ThesisService.report(player, thesisId, ticker)
+end, RemoteGuard.TOO_MANY_REQUESTS)
+
+-- ReactToFeedItemEvent(itemId, reactionId | nil)
+-- nil takes the player's reaction off. Returns { success, message?,
+-- reactions, yourReaction }
+RemoteGuard.handle(ReactToFeedItemEvent, RemoteGuard.LIMITS.Research, function(player, itemId, reactionId)
+	if type(itemId) ~= "string" or #itemId > MAX_FEED_ITEM_ID_LENGTH then
+		return INVALID_REQUEST
+	elseif reactionId ~= nil and not Social.getReaction(reactionId) then
+		return INVALID_REQUEST
+	end
+
+	return FeedService.react(player, itemId, reactionId)
 end, RemoteGuard.TOO_MANY_REQUESTS)

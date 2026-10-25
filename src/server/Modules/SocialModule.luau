@@ -90,6 +90,41 @@ function SocialModule.addCapped(map, key: string, now: number, cap: number)
 	end
 end
 
+-- The player's own reaction on a feed item, or nil
+function SocialModule.getReaction(social, itemId: string): string?
+	local entry = social.Reactions[itemId]
+
+	return entry and entry.reaction
+end
+
+-- Records (or with nil, clears) the player's reaction on a feed item,
+-- forgetting the oldest past `cap`; feed items expire anyway
+function SocialModule.setReaction(social, itemId: string, reaction: string?, now: number, cap: number)
+	local reactions = social.Reactions
+
+	if not reaction then
+		reactions[itemId] = nil
+
+		return
+	end
+
+	reactions[itemId] = { reaction = reaction, at = now }
+
+	local count, oldestId, oldestAt = 0, nil, math.huge
+
+	for id, entry in pairs(reactions) do
+		count += 1
+
+		if entry.at < oldestAt then
+			oldestId, oldestAt = id, entry.at
+		end
+	end
+
+	if count > cap and oldestId then
+		reactions[oldestId] = nil
+	end
+end
+
 -- A player's latest `limit` fills from their trade log (oldest first), newest
 -- first, as copies: the public snapshot is saved apart from the profile
 function SocialModule.getRecentTrades(tradeLog, limit: number)
