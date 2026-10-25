@@ -217,7 +217,12 @@ local Tabs = {
 		Button = TabContainer:WaitForChild("ChartsButton"),
 		Frame = ScreenContainer:WaitForChild("ChartsScreen"),
 	},
-	-- Built in code by ShellController and filled by LeaderboardController
+	-- Built in code by ShellController and filled by SocialController and
+	-- LeaderboardController
+	Social = {
+		Button = TabContainer:WaitForChild("SocialButton"),
+		Frame = ScreenContainer:WaitForChild("SocialScreen"),
+	},
 	Leaderboards = {
 		Button = TabContainer:WaitForChild("LeaderboardsButton"),
 		Frame = ScreenContainer:WaitForChild("LeaderboardsScreen"),
@@ -943,6 +948,11 @@ end
 -- Another screen opened a ticker (e.g. a Portfolio row); TradeController loads it
 Navigation.TickerRequested:Connect(function()
 	switchTab("Trade")
+end)
+
+-- Profiles live on the Leaderboards tab; LeaderboardController loads it
+Navigation.ProfileRequested:Connect(function()
+	switchTab("Leaderboards")
 end)
 
 Navigation.TabRequested:Connect(function(tabName)

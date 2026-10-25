@@ -100,15 +100,16 @@ function OrderService.fillShares(player, action, ticker, shares, price)
 	end
 
 	local now = os.time()
-	local realizedPL = TradeLogModule.record(data, {
+	local fill = {
 		ticker = ticker,
 		side = action,
 		quantity = shares,
 		price = price,
 		costBasis = costBasis,
-	}, now)
+	}
+	local realizedPL = TradeLogModule.record(data, fill, now)
 
-	OrderEvents.fireFilled(player, realizedPL, now)
+	OrderEvents.fireFilled(player, realizedPL, now, fill)
 	CalculatorModule.calculateNetWorth(player)
 
 	return {

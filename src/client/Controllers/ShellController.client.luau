@@ -181,7 +181,7 @@ NetWorthCaption.TextXAlignment = Enum.TextXAlignment.Right
 -- button and an empty screen, the tab's own controller fills the screen,
 -- and TerminalController switches to it like any other tab. They sort after
 -- the Studio tabs, which all have LayoutOrder 0.
-local CODE_BUILT_TABS = { "Leaderboards" }
+local CODE_BUILT_TABS = { "Social", "Leaderboards" }
 
 for index, tabName in ipairs(CODE_BUILT_TABS) do
 	local tabButton = Instance.new("TextButton")

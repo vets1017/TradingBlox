@@ -142,16 +142,17 @@ local function handleOptionOrder(player, action, contractSymbol, ticker, expirat
 	end
 
 	local now = os.time()
-	local realizedPL = TradeLogModule.record(playerData, {
+	local fill = {
 		ticker = targetTicker,
 		contract = contractSymbol,
 		side = action,
 		quantity = contracts,
 		price = fillPrice,
 		costBasis = costBasis,
-	}, now)
+	}
+	local realizedPL = TradeLogModule.record(playerData, fill, now)
 
-	OrderEvents.fireFilled(player, realizedPL, now)
+	OrderEvents.fireFilled(player, realizedPL, now, fill)
 	CalculatorModule.calculateNetWorth(player)
 
 	return {

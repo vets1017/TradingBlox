@@ -552,8 +552,9 @@ Taken at the start of Phase 2 (2026-10-25), following the recommendations above:
 
 1. ✅ Follows (`Following` in the profile, counts in DataStore `Followers_v1`), the trade-sharing setting,
    and recent trades on public profiles.
-2. The feed: executed trades and milestones in MemoryStore, a code-built Social tab with All and
-   Following views, and `Navigation.openProfile`.
+2. ✅ The feed: executed trades and milestones in MemoryStore, a code-built Social tab with All and
+   Following views, and `Navigation.openProfile`. The Following view only filters the shared feed for
+   now; adding followed players' snapshots (§2) waits until the 120-item cap proves too short.
 3. Theses: structured posts in DataStore `Posts`, indexed by author and ticker; shown in the feed, on
    profiles and on the Trade screen, labeled "Simulated, not financial advice".
 4. Safety: blocking and muting (hidden from your feed and profile views), and reporting theses.

@@ -13,6 +13,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local Social = require(ReplicatedStorage.Config.Social)
 local PlayerDataService = require(ServerScriptService.Services.PlayerDataService)
 local PublicProfileService = require(ServerScriptService.Services.PublicProfileService)
+local FeedService = require(ServerScriptService.Services.FeedService)
 local SocialModule = require(ServerScriptService.Modules.SocialModule)
 
 local FollowerStore = DataStoreService:GetDataStore("Followers_v1")
@@ -143,8 +144,8 @@ function SocialService.setFollowing(player, targetUserId: number, shouldFollow: 
 	return result
 end
 
--- Shows or hides the player's recent trades on their public profile.
--- Returns { success, message?, shareTrades }.
+-- Shows or hides the player's recent trades on their public profile and in
+-- the feed. Returns { success, message?, shareTrades }.
 function SocialService.setShareTrades(player, shareTrades: boolean)
 	local data = PlayerDataService.get(player)
 
@@ -157,6 +158,12 @@ function SocialService.setShareTrades(player, shareTrades: boolean)
 	-- Published straight away rather than within the minute, so turning
 	-- sharing off reaches other servers as soon as their profile caches expire
 	PublicProfileService.publishNow(player)
+
+	-- Trades already in the feed go too; turning sharing back on doesn't
+	-- restore them
+	if not shareTrades then
+		task.spawn(FeedService.removeTrades, player.UserId)
+	end
 
 	return { success = true, shareTrades = shareTrades }
 end

@@ -12,4 +12,22 @@ Social.MAX_FOLLOWING = 200
 -- they share trades
 Social.RECENT_TRADES = 10
 
+-- The feed's views: everyone, or only the players you follow
+Social.FEED_VIEWS = { "All", "Following" }
+
+-- How many feed items a request returns
+Social.FEED_PAGE_SIZE = 50
+
+-- How a milestone reads in the feed, after the player's name
+Social.FEED_MILESTONES = {
+	FirstTrade = "Made their first trade",
+	FirstProfitableSale = "Closed their first profitable trade",
+	Diversified = "Diversified into 3 positions",
+	TutorialComplete = "Finished getting started",
+}
+
+function Social.isFeedView(view): boolean
+	return table.find(Social.FEED_VIEWS, view) ~= nil
+end
+
 return Social

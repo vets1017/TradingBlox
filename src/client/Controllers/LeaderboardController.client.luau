@@ -434,7 +434,7 @@ local function renderAction()
 		ProfileAction.TextColor3 = isSharing and Theme.Colors.Text or Theme.Colors.TextMuted
 		ProfileActionStroke.Enabled = true
 		ProfileActionStroke.Color = isSharing and Theme.Colors.Accent or Theme.Colors.Border
-		ProfileActionNote.Text = isSharing and "Other players see your latest trades."
+		ProfileActionNote.Text = isSharing and "Your trades show on your profile and in the feed."
 			or "Other players see your stats, not your trades."
 
 		return
@@ -741,6 +741,7 @@ local function createBoardRow(board, entry)
 	row.BackgroundColor3 = Theme.Colors.Raised
 	row.BackgroundTransparency = isSelected and 0 or 1
 	row.Text = ""
+	row:SetAttribute("UserId", entry.userId)
 	row.Parent = BoardList
 	UIKit.addCorner(row)
 
@@ -928,6 +929,18 @@ local function layoutScreen()
 end
 
 -- Connections
+-- Another screen asked for a player's profile (e.g. a feed row);
+-- TerminalController switches to this tab
+Navigation.ProfileRequested:Connect(function(userId)
+	for _, row in ipairs(BoardList:GetChildren()) do
+		if row:IsA("GuiButton") then
+			row.BackgroundTransparency = row:GetAttribute("UserId") == userId and 0 or 1
+		end
+	end
+
+	loadProfile(userId)
+end)
+
 ProfileAction.MouseButton1Click:Connect(onActionClicked)
 
 ProfileAction.MouseEnter:Connect(function()

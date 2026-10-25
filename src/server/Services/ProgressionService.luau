@@ -15,6 +15,12 @@ local RemoteGuard = require(ServerScriptService.Modules.RemoteGuard)
 
 local ProgressionService = {}
 
+local achieved = Instance.new("BindableEvent")
+
+-- Fires (player, kind, value) when a player claims a milestone (kind
+-- "Milestone", value its name) or reaches a new level ("Level", the level)
+ProgressionService.Achieved = achieved.Event
+
 local function isTutorialStepDone(progression, step)
 	if step.milestone then
 		return progression.Milestones[step.id] == true
@@ -51,25 +57,26 @@ local function countKeys(dictionary)
 end
 
 -- XP for a milestone the first time it's reached, 0 after that
-local function claimMilestone(progression, milestone)
+local function claimMilestone(player, progression, milestone)
 	if progression.Milestones[milestone] then
 		return 0
 	end
 
 	progression.Milestones[milestone] = true
+	achieved:Fire(player, "Milestone", milestone)
 
 	return Progression.MILESTONES[milestone]
 end
 
 -- The completion bonus, the first time every tutorial step is done
-local function claimTutorialIfDone(progression)
+local function claimTutorialIfDone(player, progression)
 	for _, step in ipairs(Progression.TUTORIAL) do
 		if not isTutorialStepDone(progression, step) then
 			return 0
 		end
 	end
 
-	return claimMilestone(progression, "TutorialComplete")
+	return claimMilestone(player, progression, "TutorialComplete")
 end
 
 function ProgressionService.getLevel(player): number
@@ -89,8 +96,16 @@ function ProgressionService.addXP(player, amount: number)
 		return
 	end
 
+	local previousLevel = Progression.getLevel(data.Progression.XP)
+
 	data.Progression.XP += amount
 	publish(player, data.Progression)
+
+	local level = Progression.getLevel(data.Progression.XP)
+
+	if level > previousLevel then
+		achieved:Fire(player, "Level", level)
+	end
 end
 
 -- After every filled order. The first fill of each UTC day earns a bonus;
@@ -119,19 +134,19 @@ local function onFill(player, realizedPL: number?, now: number)
 		xp += fillXP
 	end
 
-	xp += claimMilestone(progression, "FirstTrade")
+	xp += claimMilestone(player, progression, "FirstTrade")
 
 	if realizedPL and realizedPL > 0 then
-		xp += claimMilestone(progression, "FirstProfitableSale")
+		xp += claimMilestone(player, progression, "FirstProfitableSale")
 	end
 
 	local holdings = countKeys(data.Portfolio.Shares) + countKeys(data.Portfolio.Options)
 
 	if holdings >= Progression.DIVERSIFIED_HOLDINGS then
-		xp += claimMilestone(progression, "Diversified")
+		xp += claimMilestone(player, progression, "Diversified")
 	end
 
-	xp += claimTutorialIfDone(progression)
+	xp += claimTutorialIfDone(player, progression)
 	ProgressionService.addXP(player, xp)
 end
 
@@ -147,7 +162,7 @@ local function completeTutorialStep(player, stepId)
 
 	data.Progression.TutorialSteps[stepId] = true
 
-	local xp = claimTutorialIfDone(data.Progression)
+	local xp = claimTutorialIfDone(player, data.Progression)
 
 	if xp > 0 then
 		ProgressionService.addXP(player, xp)

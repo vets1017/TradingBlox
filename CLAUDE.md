@@ -10,7 +10,7 @@ or test it outside Studio.
 
 - **Product spec:** `docs/GAME-DESIGN.md`. Treat it as the source of truth for what to build.
 - **Architecture and roadmap:** `docs/TECHNICAL-PLAN.md` — current-state inventory, platform limits, Phases
-  0–6, the decisions taken, and the Phase 1 build order (§6). Check it before starting a feature.
+  0–6, the decisions taken, and the Phase 1 and Phase 2 build orders (§6). Check it before starting a feature.
 
 ## Commands
 
@@ -55,8 +55,10 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
   switching, the Dashboard greeting and countdown, and Charts; `DashboardController` for the Dashboard's widgets
   (account info, watchlist, orders, performance, market overview, top traders), built in code inside the
   Studio widget frames; `TutorialController` for the "Getting started" checklist card; `TradeController` for the Trade screen; `PortfolioController` for the Portfolio screen, which it builds
-  entirely in code inside the empty Studio `PortfolioScreen` frame; `LeaderboardController` for the Leaderboards
-  tab (boards beside a public profile with Follow, the trade-sharing toggle and recent trades), whose nav button and empty screen `ShellController` creates in code (`CODE_BUILT_TABS`) and
+  entirely in code inside the empty Studio `PortfolioScreen` frame; `SocialController` for the Social tab (the feed,
+  All or Following, polled every 5 s while open) and `LeaderboardController` for the Leaderboards
+  tab (boards beside a public profile with Follow, the trade-sharing toggle and recent trades; every profile
+  opens here), whose nav buttons and empty screens `ShellController` creates in code (`CODE_BUILT_TABS`) and
   `TerminalController` registers for switching; Quote tabs and Options chain stubs). Controllers `WaitForChild` their way through a large, hand-built UI tree (no UI
   framework/library), wire up `TweenService` animations and `UserInputService` input handling directly, and
   call server `RemoteFunction`s to fetch data. Several controllers (`QuoteTabsController`,
@@ -66,8 +68,8 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
   - `ServerSetup.server.luau` creates the `EventsFolder` in `ReplicatedStorage` and all `RemoteFunction`s the
     client calls (`RequestChartEvent`, `GetMarketDataEvent`, `GetOptionsDataEvent`, `GetPositionsEvent`,
     `GetPortfolioEvent`, `GetLeaderboardEvent`, `GetPublicProfileEvent`, `GetNewsFeedEvent`, `GetMarketMoversEvent`,
-    `PlayerOrderEvent`, `PlayerOptionOrderEvent`, `FollowPlayerEvent`, `SetShareTradesEvent`, plus watchlist and
-    research remotes). This must run before other server scripts wire up
+    `PlayerOrderEvent`, `PlayerOptionOrderEvent`, `FollowPlayerEvent`, `SetShareTradesEvent`, `GetFeedEvent`, plus
+    watchlist and research remotes). This must run before other server scripts wire up
     `OnServerInvoke` handlers.
   - `API_Manager.server.luau` wires the market-data remotes. `Modules/MarketDataModule.luau` is the sole
     bridge to the external HTTP backend (`SERVER_URL`, a Render-hosted service): ticker validation, a
@@ -85,8 +87,8 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     backend (e.g. `http://localhost:3000` while developing `~/Documents/VS/StockDataFetcher`; Studio can reach
     localhost). Remove it after testing; live servers always use the deployed backend.
   - `Data_Manager.server.luau` is the bootstrap for the player services: it starts the services that listen
-    for players (`ProgressionService`, `LeaderboardService`, `PublicProfileService`, `SocialService`, `OrderService`,
-    `SettlementService`) before `PlayerDataService`, so none misses a player who loads straight away.
+    for players (`ProgressionService`, `LeaderboardService`, `PublicProfileService`, `SocialService`, `FeedService`,
+    `OrderService`, `SettlementService`) before `PlayerDataService`, so none misses a player who loads straight away.
   - `API_Manager`'s option and research remotes check level unlocks; a locked request gets
     `{ available = false, locked = true, message = "Unlocks at Level N · Name" }`, the shape the Trade screen
     already renders as "no data".
@@ -119,7 +121,7 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     The profile template is the source of truth for the data shape; `Reconcile` adds new fields to old saves.
   - `ProgressionService` — XP, levels, feature unlocks (`hasFeature(player, feature)`) and the getting-started
     tutorial. Mirrors `XP`, `Level`, `TutorialProgress` and `TutorialComplete` to player attributes, and handles
-    `CompleteTutorialStepEvent` itself.
+    `CompleteTutorialStepEvent` itself. `Achieved` fires `(player, "Milestone", name)` or `(player, "Level", n)`.
   - `OrderService` — share execution: `fillShares` (market orders and limit fills share it) and level 2 limit
     orders kept in `playerData.Orders`: checked every 15 s while the player is online, caught up at login
     against candles since placement, expired after 30 days. `getFillPrice(ticker, side)` prices every share
@@ -129,8 +131,9 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     underlying's close (logged with `settlement = "Expired"`, which counts in realized P/L but not trades),
     and applies stock splits to shares, average cost and open orders (cash in lieu for fractions), using
     `Portfolio.SplitCheckedAt` so a split is never applied twice or retroactively.
-  - `OrderEvents` — `Filled` fires after every share or option fill; progression, leaderboards and profiles
-    subscribe rather than the order scripts calling each of them. Fire it from any new order path.
+  - `OrderEvents` — `Filled` fires `(player, realizedPL, now, fill)` after every share or option fill (`fill` is
+    what went into the trade log); progression, leaderboards, profiles and the feed subscribe rather than the
+    order scripts calling each of them. Fire it from any new order path.
   - `LeaderboardService` — scores players on the boards in `Config/Leaderboards`; each board+period is its own
     OrderedDataStore (`LB_<board>_<period>`); top pages cached per server for 60 s.
   - `PublicProfileService` — the public profile snapshot in DataStore `PublicProfile_v1` (written ≤ 1/min
@@ -140,14 +143,18 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     holds the `Following` list (keyed by user id strings, capped by `Config/Social`) and the `ShareTrades`
     setting; follower counts live in DataStore `Followers_v1` (`UpdateAsync`, cached 60 s). Pure rules are in
     `Modules/SocialModule.luau`.
+  - `FeedService` — the feed: executed trades (when shared; one per player per 30 s) and milestones in one
+    MemoryStore sorted map `Feed_v1` shared by every server, capped at 120 items with a two-day expiry (the
+    memory quota is tiny), cached 5 s per server. Turning sharing off removes the player's trades from it.
+    Item shapes and pure rules are in `Modules/FeedModule.luau`.
   - `Core/LeaderboardSystem.server.luau` wires `GetLeaderboardEvent` / `GetPublicProfileEvent` (which adds the
-    follower count and whether the caller follows); `Core/SocialSystem.server.luau` wires `FollowPlayerEvent`
-    and `SetShareTradesEvent`.
+    follower count and whether the caller follows); `Core/SocialSystem.server.luau` wires `FollowPlayerEvent`,
+    `SetShareTradesEvent` and `GetFeedEvent`.
 - **Vendored (`src/server/Vendor/`)** — `ProfileStore.luau`, unmodified below a provenance header (pinned
   commit, Apache-2.0; license in `THIRD_PARTY_LICENSES/`). Don't edit it in place.
 - **Shared config (`src/shared/Config/`)** — read by both sides: the server enforces it, the client explains it.
   `Progression` (levels, unlocks, XP rules), `Leaderboards` (boards, periods, eligibility, score encoding),
-  `Economy` (starting cash), `Social` (follow cap, how many recent trades a profile shows).
+  `Economy` (starting cash), `Social` (follow cap, recent trades per profile, feed views and milestone wording).
 - **Shared UI (`src/shared/UI/`)** — the in-house kit for UI built in code: `UIKit` (frame/label/panel/dot/
   avatar builders on Theme tokens) and `LineChart` (the gradient line + fill used by the Portfolio chart and
   profile panel). New code-built screens should use these instead of copying builders.
@@ -156,9 +163,9 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     `ChartRenderer` (pure UI-building candlestick/grid/axis renderer, takes a table of UI element refs +
     OHLC data and returns min/max price), `MarketHoursModule` (NYSE open/closed + holiday calendar, computed
     algorithmically including Easter-relative Good Friday), `NumberModule` (currency formatting), `Navigation`
-    (client-only: `Navigation.openTicker(ticker)` and `Navigation.openTab(name)` let any controller send the
-    player to a ticker on the Trade tab or to another tab — the only link between controllers, which otherwise
-    can't reach each other's locals).
+    (client-only: `Navigation.openTicker(ticker)`, `Navigation.openProfile(userId)` and `Navigation.openTab(name)`
+    let any controller send the player to a ticker on the Trade tab, a profile on the Leaderboards tab or another
+    tab — the only link between controllers, which otherwise can't reach each other's locals).
   - `Terminal/` and `Trade/` subfolders hold per-screen logic pulled out of the client controllers as they
     grow. `Trade/OrderTicketModule` is the Trade screen's Market/Limit preset ticket (one-click presets, the
     house style for order entry); the other files there are still empty placeholders.
