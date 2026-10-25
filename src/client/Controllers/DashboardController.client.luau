@@ -493,7 +493,7 @@ local function renderOrders(orders, fills)
 			index,
 			string.format(
 				"%s %d %s%s @ %s%s · %s",
-				sideText(fill.side),
+				fill.settlement and string.lower(fill.settlement) or sideText(fill.side),
 				fill.quantity,
 				fill.ticker,
 				fill.contract and " opt" or "",

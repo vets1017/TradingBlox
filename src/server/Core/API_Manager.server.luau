@@ -371,6 +371,13 @@ local isFetchingMarketOverview = false
 
 local function fetchMarketOverview()
 	local quotes = {}
+	local tickers = {}
+
+	for _, benchmark in ipairs(MARKET_OVERVIEW) do
+		table.insert(tickers, benchmark.ticker)
+	end
+
+	MarketDataModule.getQuotes(tickers) -- all six in one request
 
 	for _, benchmark in ipairs(MARKET_OVERVIEW) do
 		local quote = MarketDataModule.getQuote(benchmark.ticker)

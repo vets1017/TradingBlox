@@ -26,6 +26,9 @@ end
 --   quantity: number,    shares or contracts
 --   price: number,       per share, or per-share premium for options
 --   costBasis: number?,  average cost per unit before the fill; required for sells
+--   settlement: string?, set when no order caused it (e.g. "Expired" for an
+--                        option settled at expiry): logged and counted in the
+--                        realized P/L stats, but not as one of the player's trades
 -- }
 -- Returns the fill's realized P/L (nil for buys).
 function TradeLogModule.record(playerData, fill, now)
@@ -46,7 +49,9 @@ function TradeLogModule.record(playerData, fill, now)
 		end
 	end
 
-	stats.Trades += 1
+	if not fill.settlement then
+		stats.Trades += 1
+	end
 
 	local log = playerData.TradeLog
 
@@ -58,6 +63,7 @@ function TradeLogModule.record(playerData, fill, now)
 		quantity = fill.quantity,
 		price = fill.price,
 		realizedPL = realizedPL,
+		settlement = fill.settlement,
 	})
 
 	while #log > MAX_LOG_ENTRIES do

@@ -49,12 +49,16 @@ local function describeOrder(order)
 	return string.format("%s %d %s @ %s limit", order.side, order.quantity, order.ticker, NumberModule.format(order.limitPrice))
 end
 
--- Tells the player's client about an order they aren't waiting on
-local function notify(player, kind, message)
+-- Tells the player's client about something that happened to their orders
+-- or positions while they weren't waiting on it. `kind` is "filled",
+-- "cancelled", "expired" or "split".
+function OrderService.notify(player, kind, message)
 	if player.Parent == Players then
 		OrderUpdateEvent:FireClient(player, { kind = kind, message = message })
 	end
 end
+
+local notify = OrderService.notify
 
 -- Executes a share fill at `price`. Checks cash and holdings only: callers
 -- have validated the request and that the market is open.
@@ -218,6 +222,26 @@ local function crossesLimit(order, low, high)
 	return high >= order.limitPrice
 end
 
+-- The live price an order on `ticker` fills at - the ask for a buy and the
+-- bid for a sell in regular trading - or nil and why not. Falls back to the
+-- candle-based price when the quote route can't be reached.
+function OrderService.getFillPrice(ticker, side)
+	local isCrypto = MarketDataModule.isCryptoTicker(ticker)
+	local quote = MarketDataModule.getLiveQuote(ticker)
+
+	if quote then
+		return MarketDataModule.getFillPrice(quote, side, isCrypto, os.time())
+	end
+
+	local price = MarketDataModule.getCurrentPrice(ticker)
+
+	if not price then
+		return nil, "Price unavailable for " .. ticker .. "."
+	end
+
+	return price
+end
+
 -- Fills or cancels one order, if it's still open. `price` is what it fills at.
 local function settle(player, order, price)
 	local data = PlayerDataService.get(player)
@@ -299,14 +323,17 @@ local function checkOpenOrders()
 		end
 	end
 
-	local prices = {}
+	local tickerList = {}
 
 	for ticker in pairs(tickers) do
-		prices[ticker] = MarketDataModule.getCurrentPrice(ticker)
+		table.insert(tickerList, ticker)
 	end
 
+	MarketDataModule.getQuotes(tickerList) -- one batch request per pass
+
+	-- A buy limit triggers when the ask reaches it and a sell when the bid does
 	for _, entry in ipairs(pending) do
-		local price = prices[entry.order.ticker]
+		local price = OrderService.getFillPrice(entry.order.ticker, entry.order.side)
 
 		if price and crossesLimit(entry.order, price, price) then
 			task.spawn(settle, entry.player, entry.order, price)

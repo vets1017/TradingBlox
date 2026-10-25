@@ -354,13 +354,20 @@ task.spawn(function()
 	end
 end)
 
--- Limit orders fill or get cancelled on the server's schedule, so they're
--- announced here wherever the player is. Spawned so waiting for the remote
+-- Limit orders fill or get cancelled, options expire and stocks split on
+-- the server's schedule, so they're announced here wherever the player is. Spawned so waiting for the remote
 -- never holds up the shell.
 task.spawn(function()
 	local OrderUpdateEvent = ReplicatedStorage:WaitForChild("EventsFolder"):WaitForChild("OrderUpdateEvent")
 
+	local TITLES = {
+		filled = "Order filled",
+		cancelled = "Order cancelled",
+		expired = "Option expired",
+		split = "Stock split",
+	}
+
 	OrderUpdateEvent.OnClientEvent:Connect(function(update)
-		showToast(update.kind == "filled" and "Order filled" or "Order cancelled", update.message)
+		showToast(TITLES[update.kind] or "Update", update.message)
 	end)
 end)

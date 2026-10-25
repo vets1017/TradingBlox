@@ -25,6 +25,8 @@ GetWatchlistEvent.OnServerInvoke = function(player)
 
 	local rows = {}
 
+	MarketDataModule.getQuotes(playerData.Watchlist) -- one batch request for the whole list
+
 	for _, ticker in ipairs(playerData.Watchlist) do
 		local quote = MarketDataModule.getQuote(ticker)
 		local price = quote and quote.price

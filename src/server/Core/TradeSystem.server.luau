@@ -50,10 +50,10 @@ PlayerOrderEvent.OnServerInvoke = function(player, action, ticker, shares)
 		return { success = false, message = "Player data not loaded." }
 	end
 
-	local price = MarketDataModule.getCurrentPrice(targetTicker)
+	local price, reason = OrderService.getFillPrice(targetTicker, action)
 
 	if not price then
-		return { success = false, message = "Price unavailable for " .. targetTicker .. "." }
+		return { success = false, message = reason }
 	end
 
 	return OrderService.fillShares(player, action, targetTicker, shares, price)
@@ -91,6 +91,15 @@ GetPositionsEvent.OnServerInvoke = function(player, ticker)
 
 	local targetTicker = type(ticker) == "string" and string.upper(ticker) or nil
 	local positions = {}
+	local tickers = {}
+
+	for posTicker in pairs(playerData.Portfolio.Shares) do
+		if not targetTicker or posTicker == targetTicker then
+			table.insert(tickers, posTicker)
+		end
+	end
+
+	MarketDataModule.getQuotes(tickers) -- one batch request for every row
 
 	for posTicker, quantity in pairs(playerData.Portfolio.Shares) do
 		if not targetTicker or posTicker == targetTicker then

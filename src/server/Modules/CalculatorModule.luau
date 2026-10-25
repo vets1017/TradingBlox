@@ -27,6 +27,15 @@ function CalculatorModule.calculateNetWorth(player)
 	local isComplete = true
 
 	if playerData.Portfolio and playerData.Portfolio.Shares then
+		local tickers = {}
+
+		for ticker in pairs(playerData.Portfolio.Shares) do
+			table.insert(tickers, ticker)
+		end
+
+		-- One batch request; the per-ticker lookups below then hit the quote table
+		MarketDataModule.getQuotes(tickers)
+
 		for ticker, shares in pairs(playerData.Portfolio.Shares) do
 			local price = MarketDataModule.getCurrentPrice(ticker)
 

@@ -28,6 +28,8 @@ local OPTIONS_CHAIN_ENDPOINT = SERVER_URL .. "/api/option-chain/"
 local NEWS_ENDPOINT = SERVER_URL .. "/api/news/"
 local MOVERS_ENDPOINT = SERVER_URL .. "/api/movers"
 local PROFILE_ENDPOINT = SERVER_URL .. "/api/profile/"
+local QUOTES_ENDPOINT = SERVER_URL .. "/api/quotes?symbols="
+local SPLITS_ENDPOINT = SERVER_URL .. "/api/splits/"
 
 local CHART_CACHE_DURATION = 300
 local QUOTE_DETAILS_CACHE_DURATION = 60
@@ -38,6 +40,15 @@ local OPTION_CHAIN_CACHE_DURATION = 300
 local NEWS_CACHE_DURATION = 600
 local MOVERS_CACHE_DURATION = 120
 local PROFILE_CACHE_DURATION = 86400 -- a company's sector doesn't change
+local QUOTE_CACHE_DURATION = 10 -- how old a "live" price may be
+local SPLITS_CACHE_DURATION = 43200
+local MAX_QUOTES_PER_REQUEST = 50 -- the backend's batch limit
+
+-- Fills use the bid or ask only in regular trading with a sane spread;
+-- otherwise (crypto, after hours, a gapped book) they use the last price
+local MAX_FILL_SPREAD = 0.02 -- as a fraction of the price
+-- A regular-session stock quote this old means the feed has stalled
+local STALE_QUOTE_SECONDS = 15 * 60
 local CACHE_SWEEP_INTERVAL = 600
 local MAX_TICKER_LENGTH = 10
 local VALID_TIMEFRAMES = { ["1M"] = true, ["5M"] = true, ["30M"] = true, ["H"] = true, ["D"] = true }
@@ -52,6 +63,8 @@ local OptionChainCache = {}
 local NewsCache = {}
 local MoversCache = {}
 local ProfileCache = {}
+local QuoteCache = {} -- [ticker] = { data = quote, lastUpdated }, filled in batches
+local SplitsCache = {}
 
 --
 
@@ -194,6 +207,20 @@ local function cachedFetch(cache, key, ttl, fetchFn)
 	return data, err
 end
 
+-- Fetches a backend route through a cache, treating an `error` field in the
+-- response as a failure
+local function cachedRoute(cache, key, ttl, url)
+	return cachedFetch(cache, key, ttl, function()
+		local data, err = fetchJSON(url)
+
+		if data and data.error then
+			return nil, tostring(data.error)
+		end
+
+		return data, err
+	end)
+end
+
 -- Fetches candles for ticker/timeframe/mode, using the shared cache for
 -- non-live requests (mode == "live" always hits the backend, matching how
 -- the client already treats live requests as cache-busting).
@@ -245,10 +272,69 @@ function MarketDataModule.getCandles(ticker, timeframe, mode)
 	return data, nil
 end
 
--- Current price for a ticker. Fetched with mode="live", which makes the
--- backend overwrite the last candle's Close with a real Yahoo Finance quote
--- (regularMarketPrice) rather than a stale historical close.
+-- Live quotes for many tickers: { [ticker] = { price, bid, ask, prevClose,
+-- time, marketState } }. Tickers quoted in the last QUOTE_CACHE_DURATION
+-- seconds come from this server's quote table; the rest are fetched together,
+-- 50 to a request. Callers about to price several tickers should call this
+-- first so the per-ticker lookups after it hit the table.
+function MarketDataModule.getQuotes(tickers)
+	local now = os.time()
+	local missing = {}
+	local seen = {}
+
+	for _, ticker in ipairs(tickers) do
+		local targetTicker = string.upper(ticker)
+		local cached = QuoteCache[targetTicker]
+
+		if MarketDataModule.isValidTicker(targetTicker) and not seen[targetTicker] then
+			seen[targetTicker] = true
+
+			if not cached or now - cached.lastUpdated >= QUOTE_CACHE_DURATION then
+				table.insert(missing, targetTicker)
+			end
+		end
+	end
+
+	for first = 1, #missing, MAX_QUOTES_PER_REQUEST do
+		local batch = table.move(missing, first, math.min(first + MAX_QUOTES_PER_REQUEST - 1, #missing), 1, {})
+		local data, err = fetchJSON(QUOTES_ENDPOINT .. HttpService:UrlEncode(table.concat(batch, ",")))
+
+		if data and not data.error then
+			for symbol, quote in pairs(data) do
+				QuoteCache[symbol] = { data = quote, lastUpdated = now }
+			end
+		else
+			warn("[MarketDataModule] Quote batch failed: " .. tostring(err or data.error))
+		end
+	end
+
+	local quotes = {}
+
+	for targetTicker in pairs(seen) do
+		quotes[targetTicker] = QuoteCache[targetTicker] and QuoteCache[targetTicker].data
+	end
+
+	return quotes
+end
+
+function MarketDataModule.getLiveQuote(ticker)
+	if not MarketDataModule.isValidTicker(ticker) then
+		return nil
+	end
+
+	return MarketDataModule.getQuotes({ ticker })[string.upper(ticker)]
+end
+
+-- Current price for a ticker, from the quote table. If the batch route is
+-- unavailable it falls back to candles fetched with mode="live", where the
+-- backend overwrites the last Close with the live quote.
 function MarketDataModule.getCurrentPrice(ticker)
+	local quote = MarketDataModule.getLiveQuote(ticker)
+
+	if quote and quote.price then
+		return quote.price
+	end
+
 	local candles = MarketDataModule.getCandles(ticker, "5M", "live")
 
 	if not candles or #candles == 0 then
@@ -258,10 +344,59 @@ function MarketDataModule.getCurrentPrice(ticker)
 	return candles[#candles].Close
 end
 
--- Minimal quote shape: { ticker, price, prevClose }, derived purely from
--- candles. Bid/ask/volume/etc. come from getQuoteDetails below instead, which
--- hits the dedicated quote-details route.
+-- The price an order fills at, or nil and a reason not to fill. Pure, so it
+-- can be tested with made-up quotes. A buy pays the ask and a sell gets the
+-- bid during regular trading when the spread is sane; otherwise (crypto,
+-- after hours, a gapped book) both use the last price. A regular-session
+-- stock quote older than STALE_QUOTE_SECONDS is refused rather than traded
+-- against.
+function MarketDataModule.getFillPrice(quote, side, isCrypto, now)
+	if not quote or not quote.price or quote.price <= 0 then
+		return nil, "Price unavailable."
+	end
+
+	local isRegular = quote.marketState == "REGULAR"
+
+	if isRegular and not isCrypto and quote.time and now - quote.time > STALE_QUOTE_SECONDS then
+		return nil, "The price feed is behind; try again in a moment."
+	end
+
+	local bid, ask = quote.bid, quote.ask
+	local hasSaneSpread = bid and ask and bid > 0 and ask >= bid and (ask - bid) / quote.price <= MAX_FILL_SPREAD
+
+	if isRegular and not isCrypto and hasSaneSpread then
+		return side == "Buy" and ask or bid
+	end
+
+	return quote.price
+end
+
+-- Splits over the last two years: { { date, numerator, denominator } }, dates
+-- as unix seconds; nil if the backend can't be reached
+function MarketDataModule.getSplits(ticker)
+	if not MarketDataModule.isValidTicker(ticker) then
+		return nil
+	end
+
+	local targetTicker = string.upper(ticker)
+	local data = cachedRoute(SplitsCache, targetTicker, SPLITS_CACHE_DURATION, SPLITS_ENDPOINT .. HttpService:UrlEncode(targetTicker))
+
+	return data and data.splits
+end
+
+-- Minimal quote shape: { ticker, price, prevClose }. The quote table has
+-- the previous close; daily candles stand in when it doesn't.
 function MarketDataModule.getQuote(ticker)
+	local liveQuote = MarketDataModule.getLiveQuote(ticker)
+
+	if liveQuote and liveQuote.price and liveQuote.prevClose then
+		return {
+			ticker = string.upper(ticker),
+			price = liveQuote.price,
+			prevClose = liveQuote.prevClose,
+		}
+	end
+
 	local price = MarketDataModule.getCurrentPrice(ticker)
 
 	if not price then
@@ -406,20 +541,6 @@ function MarketDataModule.getOptionQuote(ticker, contractSymbol)
 	return nil, "Contract not found"
 end
 
--- Fetches a backend route through a cache, treating an `error` field in the
--- response as a failure
-local function cachedRoute(cache, key, ttl, url)
-	return cachedFetch(cache, key, ttl, function()
-		local data, err = fetchJSON(url)
-
-		if data and data.error then
-			return nil, tostring(data.error)
-		end
-
-		return data, err
-	end)
-end
-
 -- Recent headlines mentioning a ticker:
 -- { available, items = { { title, publisher, link, publishedAt, relatedTickers } } }
 function MarketDataModule.getNews(ticker)
@@ -465,6 +586,8 @@ local ALL_CACHES = {
 	{ cache = NewsCache, ttl = NEWS_CACHE_DURATION },
 	{ cache = MoversCache, ttl = MOVERS_CACHE_DURATION },
 	{ cache = ProfileCache, ttl = PROFILE_CACHE_DURATION },
+	{ cache = QuoteCache, ttl = QUOTE_CACHE_DURATION },
+	{ cache = SplitsCache, ttl = SPLITS_CACHE_DURATION },
 }
 
 task.spawn(function()

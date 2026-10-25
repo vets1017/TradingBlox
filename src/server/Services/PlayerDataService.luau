@@ -25,6 +25,7 @@ local TEMPLATE = {
 		Shares = {}, -- [ticker] = share count
 		AvgCost = {}, -- [ticker] = average cost per share
 		Options = {}, -- [contractSymbol] = { contracts, ticker, expiration, strike, type, avgCost }
+		SplitCheckedAt = {}, -- [ticker] = time splits have been applied through; see SettlementService
 	},
 	Watchlist = {},
 	Stats = {
@@ -118,8 +119,14 @@ function PlayerDataService.updateShares(player, ticker, shares, price)
 	if newShares <= 0 then
 		portfolio.Shares[ticker] = nil
 		portfolio.AvgCost[ticker] = nil
+		portfolio.SplitCheckedAt[ticker] = nil
 
 		return
+	end
+
+	-- A new position is only affected by splits after it was opened
+	if currentShares == 0 then
+		portfolio.SplitCheckedAt[ticker] = os.time()
 	end
 
 	if shares > 0 and price then
