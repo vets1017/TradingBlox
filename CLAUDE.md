@@ -54,8 +54,8 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
   full-screen shell — nav bar, inbox bell, balance and level pills, status bar, toasts; `InboxController` for the
   bell's unread badge and the notification list it opens; `TerminalController` for tab
   switching, the Dashboard greeting and countdown, and Charts; `DashboardController` for the Dashboard's widgets
-  (account info, watchlist, orders, performance, market overview, top traders), built in code inside the
-  Studio widget frames; `TutorialController` for the "Getting started" checklist card; `TradeController` for the Trade screen; `PortfolioController` for the Portfolio screen, which it builds
+  (account info, watchlist, orders, performance, market overview with a Trending view, and Social — followed
+  players' posts, theses ranked by reactions, top traders), built in code inside the Studio widget frames; `TutorialController` for the "Getting started" checklist card; `TradeController` for the Trade screen; `PortfolioController` for the Portfolio screen, which it builds
   entirely in code inside the empty Studio `PortfolioScreen` frame; `SocialController` for the Social tab (the feed,
   All or Following, polled every 5 s while open, with reaction chips, plus a Trending view; it also sends the server the player's
   Roblox block list) and `LeaderboardController` for the Leaderboards
@@ -186,7 +186,7 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
   `Economy` (starting cash), `Social` (follow cap, recent trades per profile, feed views and milestone wording,
   thesis directions, horizons and limits, reactions, safety limits).
 - **Shared UI (`src/shared/UI/`)** — the in-house kit for UI built in code: `UIKit` (frame/label/panel/pill/
-  dot/avatar builders on Theme tokens) and `LineChart` (the gradient line + fill used by the Portfolio chart and
+  dot/avatar builders on Theme tokens), `FeedText` (how feed items read, shared by the Social tab and Dashboard) and `LineChart` (the gradient line + fill used by the Portfolio chart and
   profile panel). New code-built screens should use these instead of copying builders.
 - **Shared (`src/shared/Modules/`)**:
   - `Multi/` — cross-boundary utilities used by both client and server-side logic conceptually:

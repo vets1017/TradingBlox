@@ -19,8 +19,8 @@ local Theme = require(ReplicatedStorage.Modules.Multi.Theme)
 local NumberModule = require(ReplicatedStorage.Modules.Multi.NumberModule)
 local Navigation = require(ReplicatedStorage.Modules.Multi.Navigation)
 local UIKit = require(ReplicatedStorage.UI.UIKit)
+local FeedText = require(ReplicatedStorage.UI.FeedText)
 local Social = require(ReplicatedStorage.Config.Social)
-local Progression = require(ReplicatedStorage.Config.Progression)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -88,85 +88,14 @@ local makeFrame = UIKit.makeFrame
 local makeLabel = UIKit.makeLabel
 
 -- Formatting
-local UP_HEX = Theme.Colors.Up:ToHex()
-local DOWN_HEX = Theme.Colors.Down:ToHex()
 local MUTED_HEX = Theme.Colors.TextMuted:ToHex()
 
-local RICH_TEXT_ESCAPES = { ["<"] = "&lt;", [">"] = "&gt;", ["&"] = "&amp;" }
-
-local function escape(text: string): string
-	return (string.gsub(text, "[<>&]", RICH_TEXT_ESCAPES))
-end
-
-local function formatSignedMoney(amount)
-	return (amount >= 0 and "+" or "-") .. NumberModule.format(math.abs(amount))
-end
-
--- "now", "12m", "3h", "2d"
-local function formatAge(seconds)
-	if seconds < 60 then
-		return "now"
-	elseif seconds < 3600 then
-		return math.floor(seconds / 60) .. "m"
-	elseif seconds < 86400 then
-		return math.floor(seconds / 3600) .. "h"
-	end
-
-	return math.floor(seconds / 86400) .. "d"
-end
+local escape = FeedText.escape
+local formatAge = FeedText.formatAge
+local describeItem = FeedText.describe
 
 local function describeKind(item)
 	return string.format("%s · %s", KIND_LABELS[item.kind] or item.kind, formatAge(os.time() - item.time))
-end
-
--- "Bought 5 AAPL @ $182.10", with the realized P/L after a sale; "Bullish
--- on AAPL · target $210.00 · 1 month" for a thesis; "Reached Level 2 ·
--- Investor" for a milestone
-local function describeItem(item)
-	if item.kind == "Trade" then
-		local isBuy = item.side == "Buy"
-		local realized = ""
-
-		if item.realizedPL then
-			realized = string.format(
-				' <font color="#%s">%s</font>',
-				item.realizedPL >= 0 and UP_HEX or DOWN_HEX,
-				formatSignedMoney(item.realizedPL)
-			)
-		end
-
-		return string.format(
-			'<font color="#%s">%s</font> %s %s%s @ %s%s',
-			isBuy and UP_HEX or DOWN_HEX,
-			isBuy and "Bought" or "Sold",
-			NumberModule.formatShares(item.quantity),
-			item.ticker,
-			item.contract and " opt" or "",
-			NumberModule.format(item.price),
-			realized
-		)
-	end
-
-	if item.kind == "Thesis" then
-		local horizon = Social.getHorizon(item.horizon)
-
-		return string.format(
-			'<font color="#%s">%s</font> on %s%s · %s',
-			item.direction == "Bullish" and UP_HEX or DOWN_HEX,
-			item.direction,
-			item.ticker,
-			item.targetPrice and (" · target " .. NumberModule.format(item.targetPrice)) or "",
-			horizon and horizon.label or item.horizon
-		)
-	end
-
-	local levelInfo = item.level and Progression.LEVELS[item.level]
-
-	if levelInfo then
-		return string.format("Reached Level %d · %s", item.level, levelInfo.name)
-	end
-
-	return Social.FEED_MILESTONES[item.milestone] or "Reached a milestone"
 end
 
 -- Feed Panel

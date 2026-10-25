@@ -26,7 +26,7 @@ Roblox storage for the MVP.
 of progression, limit orders, portfolio analytics, public profiles, two leaderboards and a working
 Dashboard. Social trading comes next because it is the GDD's headline feature, then the Roblox market.
 - **Decisions were made on 2026-10-24** (§6): every recommendation was accepted, the memecoins plan is
-shelved, and Phases 0 and 1 are done. Phase 2 started on 2026-10-25 (decisions and build order in §6).
+shelved, and Phases 0, 1 and 2 are done; Phase 2 ran on 2026-10-25 (decisions and build order in §6).
 
 ## 1. Current state
 
@@ -64,7 +64,7 @@ shelved, and Phases 0 and 1 are done. Phase 2 started on 2026-10-25 (decisions a
 | §3     | Dashboard                | ◐      | Greeting, NYSE countdown, Account Info ("option power" is a placeholder), Watchlist and Event Feed widgets (built in Studio, not wired up). No market overview, performance, social or allocation modules, and no customization |
 | §3     | Market status            | ◐      | Open/closed and countdown. No pre-market or after-hours, no early closes, no earnings or economic calendar, and the daylight-saving bug                                                                                         |
 | —      | Watchlist                | ✅      | Saved, up to 20 tickers (Charts screen)                                                                                                                                                                                         |
-| §2     | Social trading           | ✗      | Only the player's own Portfolio header exists                                                                                                                                                                                   |
+| §2     | Social trading           | ✅      | Phase 2: follows, a feed of shared trades, theses and milestones, reactions, notifications, trending tickers, mutes, blocks and reports. No comments or direct messages (deferred), no following funds or securities            |
 | §6     | Roblox-native market     | ✗      | A different feature is planned instead (player memecoins, plan `f417577`, not built)                                                                                                                                            |
 | §7     | Funds                    | ✗      |                                                                                                                                                                                                                                 |
 | §8     | Progression              | ✗      | Everything is unlocked for everyone, including options                                                                                                                                                                          |
@@ -579,7 +579,12 @@ Taken at the start of Phase 2 (2026-10-25), following the recommendations above:
    Trending view on the Social tab and in Market overview lists the most traded (today and yesterday) and
    most watched tickers; the Trade screen's section, now "Community", shows the ticker's watchers and trades
    beside its theses. Ranked reads are cached two minutes because their budget is small.
-8. Dashboard Social module: activity from followed players and trending theses.
+8. ✅ Dashboard Social module: the Top traders widget became Social, with Following (followed players' latest
+   posts), Theses (the feed's theses ranked by reactions) and Top traders.
+
+Phase 2's "done when" holds: following someone shows their verified trades and theses within seconds on any
+server (feed items reach other servers at their next five-second refresh), popular assets show under
+Trending, and every typed text is filtered for broadcast before it's stored.
 
 ## Sources
 

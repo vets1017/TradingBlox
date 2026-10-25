@@ -1,7 +1,8 @@
 -- DashboardController.client.luau
 --
 -- Fills the Dashboard's Studio-built widgets (GDD §3): Account Info, the
--- watchlist, orders, performance, a market overview and top traders. The
+-- watchlist, orders, performance, a market overview, and Social: activity
+-- from followed players, theses ranked by reactions, and top traders. The
 -- widget frames come from Studio; their contents are built here from Theme
 -- tokens. TerminalController still owns the greeting and NYSE countdown.
 -- Everything refreshes when the Dashboard opens, after a trade, and once a
@@ -15,6 +16,7 @@ local NumberModule = require(ReplicatedStorage.Modules.Multi.NumberModule)
 local Navigation = require(ReplicatedStorage.Modules.Multi.Navigation)
 local LineChart = require(ReplicatedStorage.UI.LineChart)
 local UIKit = require(ReplicatedStorage.UI.UIKit)
+local FeedText = require(ReplicatedStorage.UI.FeedText)
 local Economy = require(ReplicatedStorage.Config.Economy)
 local Progression = require(ReplicatedStorage.Config.Progression)
 
@@ -31,6 +33,7 @@ local GetMarketOverviewEvent = EventsFolder:WaitForChild("GetMarketOverviewEvent
 local GetMarketMoversEvent = EventsFolder:WaitForChild("GetMarketMoversEvent")
 local GetTrendingEvent = EventsFolder:WaitForChild("GetTrendingEvent")
 local GetLeaderboardEvent = EventsFolder:WaitForChild("GetLeaderboardEvent")
+local GetFeedEvent = EventsFolder:WaitForChild("GetFeedEvent")
 local OrderUpdateEvent = EventsFolder:WaitForChild("OrderUpdateEvent")
 
 -- References
@@ -67,6 +70,9 @@ local PERFORMANCE_CHART_HEIGHT = 110
 local MAX_OPEN_ORDER_LINES = 4
 local MAX_FILL_LINES = 5
 local MAX_TRADERS = 10
+local SOCIAL_PILL_HEIGHT = 22
+local SOCIAL_ROW_HEIGHT = 36
+local MAX_SOCIAL_ROWS = 6
 local HEAT_FULL_MOVE = 3 -- a move this many percent gets the strongest tint
 local PERFORMANCE_RANGE = "7d"
 
@@ -74,9 +80,14 @@ local REFRESH_INTERVAL = 60
 
 local UP_HEX = Theme.Colors.Up:ToHex()
 local DOWN_HEX = Theme.Colors.Down:ToHex()
+local MUTED_HEX = Theme.Colors.TextMuted:ToHex()
 
 -- State
 local isRefreshing = false
+local socialView = "Following" -- or "Theses", "Traders"
+local lastFollowing = nil -- GetFeedEvent("Following")'s { items, following }
+local lastAllFeed = nil -- GetFeedEvent("All"), for the theses in it
+local lastTraders = nil -- the net-worth board's top page
 local isRefreshQueued = false
 local performanceHistory = nil
 local lastOrders = {} -- from the last refresh, so Available Funds stays right between refreshes
@@ -354,13 +365,38 @@ MarketUpdated.AnchorPoint = Vector2.new(0, 1)
 MarketUpdated.Position = UDim2.fromScale(0, 1)
 MarketUpdated.Size = UDim2.new(1, 0, 0, LINE_HEIGHT)
 
--- Top traders
-local TradersContent = buildWidget(EventFeedWidget, "Top traders")
+-- Social: one view at a time, picked with the pills under the title
+local SocialContent = buildWidget(EventFeedWidget, "Social")
 
-local TradersList = makeList("List", TradersContent)
-TradersList.Size = UDim2.new(1, 0, 1, -LINK_HEIGHT)
+local SOCIAL_VIEWS = {
+	{ id = "Following", label = "Following" },
+	{ id = "Theses", label = "Theses" },
+	{ id = "Traders", label = "Top traders" },
+}
 
-makeLink("LeaderboardsLink", TradersContent, "Full leaderboards →", "Leaderboards")
+local SocialViewPills = makeFrame("Views", SocialContent)
+SocialViewPills.Size = UDim2.new(1, 0, 0, SOCIAL_PILL_HEIGHT)
+
+local SocialViewPillsLayout = Instance.new("UIListLayout")
+SocialViewPillsLayout.FillDirection = Enum.FillDirection.Horizontal
+SocialViewPillsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+SocialViewPillsLayout.Padding = UDim.new(0, 4)
+SocialViewPillsLayout.Parent = SocialViewPills
+
+local socialViewPills = {} -- [view id] = { button, stroke }
+
+for index, view in ipairs(SOCIAL_VIEWS) do
+	local pill, stroke = UIKit.makePill(view.id, SocialViewPills, view.label)
+	pill.LayoutOrder = index
+	socialViewPills[view.id] = { button = pill, stroke = stroke }
+end
+
+local SocialList = makeList("List", SocialContent)
+SocialList.Position = UDim2.fromOffset(0, SOCIAL_PILL_HEIGHT + 8)
+SocialList.Size = UDim2.new(1, 0, 1, -(SOCIAL_PILL_HEIGHT + 8 + LINK_HEIGHT))
+
+local SocialLink = makeLink("SocialLink", SocialContent, "Open Social →", "Social")
+local LeaderboardsLink = makeLink("LeaderboardsLink", SocialContent, "Full leaderboards →", "Leaderboards")
 
 -- Rendering
 -- Called with fresh data on a refresh, and with nothing when an attribute
@@ -775,10 +811,10 @@ local function renderMarket()
 end
 
 local function renderTopTraders(page)
-	clearList(TradersList)
+	clearList(SocialList)
 
 	if #page.entries == 0 then
-		addLine(TradersList, 1, "No one is ranked yet", Theme.Colors.TextMuted)
+		addLine(SocialList, 1, "No one is ranked yet", Theme.Colors.TextMuted)
 
 		return
 	end
@@ -787,7 +823,7 @@ local function renderTopTraders(page)
 		local entry = page.entries[index]
 		local isYou = entry.userId == Player.UserId
 
-		local row = makeFrame("Trader_" .. entry.rank, TradersList)
+		local row = makeFrame("Trader_" .. entry.rank, SocialList)
 		row.LayoutOrder = index
 		row.Size = UDim2.new(1, 0, 0, TRADER_ROW_HEIGHT)
 
@@ -816,6 +852,156 @@ local function renderTopTraders(page)
 		value.Size = UDim2.new(0, 100, 1, 0)
 		value.TextXAlignment = Enum.TextXAlignment.Right
 		value.Text = NumberModule.formatCompact(entry.score)
+	end
+end
+
+-- A post: who, what and how long ago; `onClick` decides where it leads
+local function addSocialRow(index, item, onClick, suffix)
+	local row = Instance.new("TextButton")
+	row.Name = "Post_" .. index
+	row.LayoutOrder = index
+	row.Size = UDim2.new(1, 0, 0, SOCIAL_ROW_HEIGHT)
+	row.AutoButtonColor = false
+	row.BorderSizePixel = 0
+	row.BackgroundColor3 = Theme.Colors.Raised
+	row.BackgroundTransparency = 1
+	row.Text = ""
+	row.Parent = SocialList
+	UIKit.addCorner(row)
+
+	local avatar = UIKit.makeAvatar("Avatar", row, item.userId, TRADER_AVATAR_SIZE)
+	avatar.AnchorPoint = Vector2.new(0, 0.5)
+	avatar.Position = UDim2.new(0, 2, 0.5, 0)
+
+	local textX = TRADER_AVATAR_SIZE + 10
+
+	local name = makeLabel("Name", row, Theme.Fonts.UISemibold, Theme.TextSize.Caption, Theme.Colors.Text)
+	name.Position = UDim2.fromOffset(textX, 2)
+	name.Size = UDim2.new(1, -(textX + 36), 0, 16)
+	name.Text = item.displayName
+
+	local age = makeLabel("Age", row, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.TextMuted)
+	age.AnchorPoint = Vector2.new(1, 0)
+	age.Position = UDim2.new(1, -2, 0, 2)
+	age.Size = UDim2.fromOffset(34, 16)
+	age.TextXAlignment = Enum.TextXAlignment.Right
+	age.Text = FeedText.formatAge(os.time() - item.time)
+
+	local detail = makeLabel("Detail", row, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.Text)
+	detail.Position = UDim2.fromOffset(textX, 18)
+	detail.Size = UDim2.new(1, -(textX + 2), 0, 16)
+	detail.RichText = true
+	detail.Text = FeedText.describe(item) .. (suffix or "")
+
+	row.MouseEnter:Connect(function()
+		row.BackgroundTransparency = 0
+	end)
+
+	row.MouseLeave:Connect(function()
+		row.BackgroundTransparency = 1
+	end)
+
+	row.MouseButton1Click:Connect(function()
+		onClick(item)
+	end)
+end
+
+local function openAuthor(item)
+	Navigation.openProfile(item.userId)
+end
+
+local function openItemTicker(item)
+	Navigation.openTicker(item.ticker)
+end
+
+-- Followed players' latest posts, or the feed's theses ranked by how many
+-- reactions they drew, or the top of the net-worth board
+local function renderSocial()
+	for viewId, pill in pairs(socialViewPills) do
+		local isActive = viewId == socialView
+
+		pill.button.BackgroundTransparency = isActive and 0 or 1
+		pill.button.TextColor3 = isActive and Theme.Colors.Text or Theme.Colors.TextMuted
+		pill.stroke.Enabled = isActive
+	end
+
+	SocialLink.Visible = socialView ~= "Traders"
+	LeaderboardsLink.Visible = socialView == "Traders"
+
+	if socialView == "Traders" then
+		if lastTraders then
+			renderTopTraders(lastTraders)
+		else
+			clearList(SocialList)
+			addLine(SocialList, 1, "Couldn't load the board", Theme.Colors.TextMuted)
+		end
+
+		return
+	end
+
+	clearList(SocialList)
+
+	local feed = if socialView == "Following" then lastFollowing else lastAllFeed
+
+	if not feed then
+		addLine(SocialList, 1, "Couldn't load activity", Theme.Colors.TextMuted)
+
+		return
+	end
+
+	if socialView == "Following" then
+		if #feed.items == 0 then
+			addLine(
+				SocialList,
+				1,
+				feed.following == 0 and "Follow players from their profiles to see their trades here"
+					or "Nothing new from players you follow",
+				Theme.Colors.TextMuted
+			)
+		end
+
+		for index = 1, math.min(#feed.items, MAX_SOCIAL_ROWS) do
+			addSocialRow(index, feed.items[index], openAuthor)
+		end
+
+		return
+	end
+
+	local theses = {}
+
+	for _, item in ipairs(feed.items) do
+		if item.kind == "Thesis" then
+			table.insert(theses, item)
+		end
+	end
+
+	table.sort(theses, function(a, b)
+		local reactionsA, reactionsB = FeedText.countReactions(a), FeedText.countReactions(b)
+
+		if reactionsA ~= reactionsB then
+			return reactionsA > reactionsB
+		end
+
+		return a.time > b.time
+	end)
+
+	if #theses == 0 then
+		addLine(SocialList, 1, "No theses in the last two days", Theme.Colors.TextMuted)
+	end
+
+	for index = 1, math.min(#theses, MAX_SOCIAL_ROWS) do
+		local item = theses[index]
+		local reactions = FeedText.countReactions(item)
+		local suffix = reactions > 0
+				and string.format(
+					' <font color="#%s">· %d %s</font>',
+					MUTED_HEX,
+					reactions,
+					reactions == 1 and "reaction" or "reactions"
+				)
+			or ""
+
+		addSocialRow(index, item, openItemTicker, suffix)
 	end
 end
 
@@ -853,6 +1039,8 @@ local function refresh()
 		movers = { GetMarketMoversEvent },
 		trending = { GetTrendingEvent },
 		traders = { GetLeaderboardEvent, "NetWorth" },
+		following = { GetFeedEvent, "Following" },
+		allFeed = { GetFeedEvent, "All" },
 	}
 	local pending = 0
 
@@ -897,9 +1085,19 @@ local function refresh()
 
 	renderMarket()
 
-	if results.traders then
-		renderTopTraders(results.traders)
+	if results.following then
+		lastFollowing = results.following
 	end
+
+	if results.allFeed then
+		lastAllFeed = results.allFeed
+	end
+
+	if results.traders then
+		lastTraders = results.traders
+	end
+
+	renderSocial()
 
 	isRefreshing = false
 
@@ -910,6 +1108,13 @@ local function refresh()
 end
 
 -- Connections
+for viewId, pill in pairs(socialViewPills) do
+	pill.button.MouseButton1Click:Connect(function()
+		socialView = viewId
+		renderSocial()
+	end)
+end
+
 for viewId, pill in pairs(marketViewPills) do
 	pill.button.MouseButton1Click:Connect(function()
 		marketView = viewId
