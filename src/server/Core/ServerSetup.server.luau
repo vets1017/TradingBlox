@@ -29,8 +29,6 @@ local PUSH_EVENTS = {
 	"OrderUpdateEvent", -- a limit order filled or was cancelled while the player wasn't waiting on it
 }
 
-local Event = {}
-
 local function getOrCreateFolder(parent, name)
 	local folder = parent:FindFirstChild(name)
 
@@ -58,16 +56,9 @@ end
 local EventsFolder = getOrCreateFolder(ReplicatedStorage, "EventsFolder")
 
 for _, eventName in ipairs(EVENTS) do
-	Event[eventName] = getOrCreateRemote(EventsFolder, eventName, "RemoteFunction")
+	getOrCreateRemote(EventsFolder, eventName, "RemoteFunction")
 end
 
 for _, eventName in ipairs(PUSH_EVENTS) do
-	Event[eventName] = getOrCreateRemote(EventsFolder, eventName, "RemoteEvent")
+	getOrCreateRemote(EventsFolder, eventName, "RemoteEvent")
 end
-
-local RequestChartEvent = Event.RequestChartEvent
-local GetMarketDataEvent = Event.GetMarketDataEvent
-local GetOptionsDataEvent = Event.GetOptionsDataEvent
-local GetPositionsEvent = Event.GetPositionsEvent
-local GetNewsFeedEvent = Event.GetNewsFeedEvent
-local PlayerOrderEvent = Event.PlayerOrderEvent

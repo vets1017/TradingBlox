@@ -161,7 +161,7 @@ MarketDotCorner.Parent = MarketDot
 
 local MarketLabel = makeTextLabel("MarketLabel", "TextMuted", StatusBar)
 MarketLabel.Position = UDim2.fromOffset(EDGE_PADDING + 16, 0)
-MarketLabel.Size = UDim2.new(0.5, 0, 1, 0)
+MarketLabel.Size = UDim2.fromScale(0.5, 1)
 MarketLabel.TextXAlignment = Enum.TextXAlignment.Left
 
 local NetWorthValue = makeTextLabel("NetWorthValue", "Number", StatusBar)
@@ -211,7 +211,7 @@ TabLayout.Padding = UDim.new(0, 4)
 for _, tabButton in ipairs(TabContainer:GetChildren()) do
 	if tabButton:IsA("TextButton") then
 		tabButton.AutomaticSize = Enum.AutomaticSize.X
-		tabButton.Size = UDim2.new(0, 0, 1, 0)
+		tabButton.Size = UDim2.fromScale(0, 1)
 
 		local padding = Instance.new("UIPadding")
 		padding.PaddingLeft = UDim.new(0, TAB_TEXT_PADDING)

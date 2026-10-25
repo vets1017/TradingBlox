@@ -7,6 +7,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local MarketDataModule = require(ServerScriptService.Modules.MarketDataModule)
+local PlayerDataService = require(ServerScriptService.Services.PlayerDataService)
 local RemoteGuard = require(ServerScriptService.Modules.RemoteGuard)
 
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
@@ -18,7 +19,7 @@ local WATCHLIST_CAP = 20
 -- GetWatchlistEvent
 -- Returns the player's watchlist tickers priced against live market data.
 RemoteGuard.handle(GetWatchlistEvent, RemoteGuard.LIMITS.Read, function(player)
-	local playerData = _G.PlayerData[player.UserId]
+	local playerData = PlayerDataService.get(player)
 
 	if not playerData or not playerData.Watchlist then
 		return {}
@@ -59,7 +60,7 @@ RemoteGuard.handle(ToggleWatchlistEvent, RemoteGuard.LIMITS.Research, function(p
 		return { success = false, message = "Invalid ticker." }
 	end
 
-	local playerData = _G.PlayerData[player.UserId]
+	local playerData = PlayerDataService.get(player)
 
 	if not playerData then
 		return { success = false, message = "Player data not loaded." }

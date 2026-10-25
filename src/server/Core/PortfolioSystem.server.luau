@@ -14,6 +14,7 @@ local CalculatorModule = require(ServerScriptService.Modules.CalculatorModule)
 local PortfolioHistoryModule = require(ServerScriptService.Modules.PortfolioHistoryModule)
 local TradeLogModule = require(ServerScriptService.Modules.TradeLogModule)
 local ProgressionService = require(ServerScriptService.Services.ProgressionService)
+local PlayerDataService = require(ServerScriptService.Services.PlayerDataService)
 local RemoteGuard = require(ServerScriptService.Modules.RemoteGuard)
 local Progression = require(ReplicatedStorage.Config.Progression)
 
@@ -121,7 +122,7 @@ end
 -- everything the Portfolio tab shows except share positions. Every range's
 -- chart comes back at once so switching ranges needs no round trip.
 RemoteGuard.handle(GetPortfolioEvent, RemoteGuard.LIMITS.Research, function(player)
-	local playerData = _G.PlayerData[player.UserId]
+	local playerData = PlayerDataService.get(player)
 
 	-- Portfolio is set once the DataStore load finishes
 	if not playerData or not playerData.Portfolio then
@@ -167,7 +168,7 @@ task.spawn(function()
 		task.wait(SAMPLE_INTERVAL)
 
 		for _, player in ipairs(Players:GetPlayers()) do
-			local playerData = _G.PlayerData[player.UserId]
+			local playerData = PlayerDataService.get(player)
 
 			if playerData and playerData.Portfolio then
 				task.spawn(CalculatorModule.calculateNetWorth, player)

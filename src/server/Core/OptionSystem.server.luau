@@ -11,6 +11,7 @@ local CalculatorModule = require(ServerScriptService.Modules.CalculatorModule)
 local TradeLogModule = require(ServerScriptService.Modules.TradeLogModule)
 local ProgressionService = require(ServerScriptService.Services.ProgressionService)
 local OrderEvents = require(ServerScriptService.Services.OrderEvents)
+local PlayerDataService = require(ServerScriptService.Services.PlayerDataService)
 local RemoteGuard = require(ServerScriptService.Modules.RemoteGuard)
 local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursModule)
 local Progression = require(ReplicatedStorage.Config.Progression)
@@ -66,7 +67,7 @@ RemoteGuard.handle(PlayerOptionOrderEvent, RemoteGuard.LIMITS.Order, function(pl
 	end
 
 	local targetTicker = string.upper(ticker)
-	local playerData = _G.PlayerData[player.UserId]
+	local playerData = PlayerDataService.get(player)
 
 	if not playerData then
 		return { success = false, message = "Player data not loaded." }
@@ -109,7 +110,7 @@ RemoteGuard.handle(PlayerOptionOrderEvent, RemoteGuard.LIMITS.Order, function(pl
 			avgCost = ((currentAvgCost * currentContracts) + (price * contracts)) / newContracts,
 		}
 
-		_G.UpdatePlayerStat(player, "Balance", playerData.Balance - totalCost)
+		PlayerDataService.setStat(player, "Balance", playerData.Balance - totalCost)
 		fillPrice = price
 	else -- Sell
 		local price = quote.bid
@@ -137,7 +138,7 @@ RemoteGuard.handle(PlayerOptionOrderEvent, RemoteGuard.LIMITS.Order, function(pl
 			playerData.Portfolio.Options[contractSymbol] = nil
 		end
 
-		_G.UpdatePlayerStat(player, "Balance", playerData.Balance + totalProceeds)
+		PlayerDataService.setStat(player, "Balance", playerData.Balance + totalProceeds)
 	end
 
 	local now = os.time()

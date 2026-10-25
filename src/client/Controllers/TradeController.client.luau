@@ -5,7 +5,6 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
-local UserInputService = game:GetService("UserInputService")
 
 local NumberModule = require(ReplicatedStorage.Modules.Multi.NumberModule)
 local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursModule)
@@ -151,7 +150,6 @@ local OPTION_STATS_ROWS = {
 -- State
 local currentTicker = ""
 local currentPrice = 0
-local currentPrevClose = 0
 local currentQuoteData = nil
 local currentOptionData = nil
 local currentAnalystData = nil
@@ -174,8 +172,8 @@ local selectedContract = nil
 local ContractIndicator = Instance.new("TextButton")
 
 ContractIndicator.Name = "ContractIndicator"
-ContractIndicator.Size = UDim2.new(0.86, 0, 1, 0)
-ContractIndicator.Position = UDim2.new(0.12, 0, 0, 0)
+ContractIndicator.Size = UDim2.fromScale(0.86, 1)
+ContractIndicator.Position = UDim2.fromScale(0.12, 0)
 ContractIndicator.BackgroundTransparency = 1
 ContractIndicator.Text = ""
 ContractIndicator.TextColor3 = TEXT_PRIMARY
@@ -407,7 +405,7 @@ local function renderFieldGrid(container, fields, data, prefix)
 
 		lbl.Name = "Label"
 		lbl.Text = field.label
-		lbl.Size = UDim2.new(0.55, 0, 1, 0)
+		lbl.Size = UDim2.fromScale(0.55, 1)
 		lbl.BackgroundTransparency = 1
 		lbl.TextColor3 = TEXT_SECONDARY
 		lbl.FontFace = Theme.Fonts.UI
@@ -419,7 +417,7 @@ local function renderFieldGrid(container, fields, data, prefix)
 
 		val.Name = "Value"
 		val.Text = formatValue(data[field.key], field.format)
-		val.Size = UDim2.new(0.45, 0, 1, 0)
+		val.Size = UDim2.fromScale(0.45, 1)
 		val.Position = UDim2.fromScale(0.55, 0)
 		val.BackgroundTransparency = 1
 		val.TextColor3 = TEXT_PRIMARY
@@ -457,7 +455,7 @@ local function renderUnavailable(container, prefix, message)
 
 	lbl.Name = "Label"
 	lbl.Text = message
-	lbl.Size = UDim2.new(1, 0, 1, 0)
+	lbl.Size = UDim2.fromScale(1, 1)
 	lbl.BackgroundTransparency = 1
 	lbl.TextColor3 = TEXT_SECONDARY
 	lbl.FontFace = Theme.Fonts.UI
@@ -475,7 +473,7 @@ local function makeLabel(parent, props)
 
 	lbl.Name = props.name or "Label"
 	lbl.Text = props.text or ""
-	lbl.Size = props.sz or UDim2.new(1, 0, 1, 0)
+	lbl.Size = props.sz or UDim2.fromScale(1, 1)
 	lbl.Position = props.pos or UDim2.fromOffset(0, 0)
 	lbl.BackgroundTransparency = 1
 	lbl.FontFace = props.font or Theme.Fonts.UI
@@ -576,7 +574,7 @@ local function renderOptionStats(data)
 	makeLabel(header, {
 		name = "HeaderLabel",
 		text = string.format("Nearest Expiry: %s   ·   Strike: %.2f", formatValue(data.expiration, "date"), data.strike or 0),
-		sz = UDim2.new(1, 0, 1, 0),
+		sz = UDim2.fromScale(1, 1),
 		color = TEXT_SECONDARY,
 		font = Theme.Fonts.UISemibold,
 		align = Enum.TextXAlignment.Left,
@@ -593,7 +591,7 @@ local function renderOptionStats(data)
 	makeLabel(columnsRow, {
 		name = "CallHeader",
 		text = "CALL",
-		sz = UDim2.new(0.35, 0, 1, 0),
+		sz = UDim2.fromScale(0.35, 1),
 		pos = UDim2.fromScale(0.4, 0),
 		color = TEXT_SECONDARY,
 		font = Theme.Fonts.UISemibold,
@@ -603,7 +601,7 @@ local function renderOptionStats(data)
 	makeLabel(columnsRow, {
 		name = "PutHeader",
 		text = "PUT",
-		sz = UDim2.new(0.35, 0, 1, 0),
+		sz = UDim2.fromScale(0.35, 1),
 		pos = UDim2.fromScale(0.75, 0),
 		color = TEXT_SECONDARY,
 		font = Theme.Fonts.UISemibold,
@@ -622,7 +620,7 @@ local function renderOptionStats(data)
 		makeLabel(row, {
 			name = "Label",
 			text = field.label,
-			sz = UDim2.new(0.4, 0, 1, 0),
+			sz = UDim2.fromScale(0.4, 1),
 			color = TEXT_SECONDARY,
 			align = Enum.TextXAlignment.Left,
 		})
@@ -630,7 +628,7 @@ local function renderOptionStats(data)
 		makeLabel(row, {
 			name = "CallValue",
 			text = formatValue(data.call and data.call[field.key], field.format),
-			sz = UDim2.new(0.3, 0, 1, 0),
+			sz = UDim2.fromScale(0.3, 1),
 			pos = UDim2.fromScale(0.4, 0),
 			color = TEXT_PRIMARY,
 			font = Theme.Fonts.Mono,
@@ -640,7 +638,7 @@ local function renderOptionStats(data)
 		makeLabel(row, {
 			name = "PutValue",
 			text = formatValue(data.put and data.put[field.key], field.format),
-			sz = UDim2.new(0.3, 0, 1, 0),
+			sz = UDim2.fromScale(0.3, 1),
 			pos = UDim2.fromScale(0.75, 0),
 			color = TEXT_PRIMARY,
 			font = Theme.Fonts.Mono,
@@ -665,7 +663,8 @@ local function renderQuoteDetails(data)
 	renderFieldGrid(ContentQuoteDetails, QUOTE_FIELDS, data, "QF_")
 end
 
--- Refresh Quotes
+-- Refresh Quotes: kept for a live "Last" field (see the chart refresh below)
+-- selene: allow(unused_variable)
 local function updateQuoteField(key, value, format)
 	local row = ContentQuoteDetails:FindFirstChild("QF_" .. key)
 
@@ -774,7 +773,7 @@ local function createStrikeRow(parent, index, s, spotPrice)
 	makeLabel(row, {
 		name = "StrikeLabel",
 		text = string.format("%.2f", s.strike),
-		sz = UDim2.new(0.24, 0, 1, 0),
+		sz = UDim2.fromScale(0.24, 1),
 		pos = UDim2.fromScale(0.38, 0),
 		color = isATM and TEXT_PRIMARY or TEXT_SECONDARY,
 		font = isATM and Theme.Fonts.MonoBold or Theme.Fonts.Mono,
@@ -785,7 +784,7 @@ local function createStrikeRow(parent, index, s, spotPrice)
 		name = "PutBidAsk",
 		text = string.format("%.2f / %.2f", putBid or 0, putAsk or 0),
 		sz = UDim2.new(0.38, -8, 1, 0),
-		pos = UDim2.new(0.62, 0, 0, 0),
+		pos = UDim2.fromScale(0.62, 0),
 		color = putITM and TEXT_PRIMARY or TEXT_SECONDARY,
 		font = Theme.Fonts.Mono,
 		align = Enum.TextXAlignment.Right,
@@ -812,7 +811,7 @@ local function createStrikeRow(parent, index, s, spotPrice)
 
 		putHit.Name = "PutHitArea"
 		putHit.Size = UDim2.new(0.38, -8, 1, 0)
-		putHit.Position = UDim2.new(0.62, 0, 0, 0)
+		putHit.Position = UDim2.fromScale(0.62, 0)
 		putHit.BackgroundTransparency = 1
 		putHit.Text = ""
 		putHit.ZIndex = 2
@@ -963,7 +962,7 @@ local function createNewsItem(parent, index, item)
 	makeLabel(row, {
 		name = "Timestamp",
 		text = item.publishedAt and formatNewsAge(os.time() - item.publishedAt) or "",
-		sz = UDim2.new(0, 78, 0, 16),
+		sz = UDim2.fromOffset(78, 16),
 		pos = UDim2.new(1, -82, 0, 4),
 		color = TEXT_SECONDARY,
 		size = Theme.TextSize.Caption,
@@ -974,7 +973,7 @@ local function createNewsItem(parent, index, item)
 		makeLabel(row, {
 			name = "Source",
 			text = item.publisher,
-			sz = UDim2.new(0, 78, 0, 13),
+			sz = UDim2.fromOffset(78, 13),
 			pos = UDim2.new(1, -82, 1, -16),
 			color = TEXT_SECONDARY,
 			size = Theme.TextSize.Caption,
@@ -1056,7 +1055,7 @@ end
 local function setChainExpanded(expanded)
 	chainExpanded = expanded
 	print("ran")
-	local targetSize = expanded and UDim2.new(1, 0, 0.45, 0) or UDim2.new(1, 0, 0, 30) -- collapsed to just the toggle bar
+	local targetSize = expanded and UDim2.fromScale(1, 0.45) or UDim2.new(1, 0, 0, 30) -- collapsed to just the toggle bar
 
 	TweenService:Create(OptionChain, TWEEN_MED, { Size = targetSize }):Play()
 	ChainData.Visible = expanded
@@ -1212,7 +1211,7 @@ local function renderMiniChart(chartData)
 		seg.BorderSizePixel = 0
 		seg.ZIndex = 2
 		seg.AnchorPoint = Vector2.new(0.5, 0.5)
-		seg.Size = UDim2.new(0, length, 0, 2)
+		seg.Size = UDim2.fromOffset(length, 2)
 		seg.Rotation = angle
 		seg.Position = UDim2.fromScale((x1 + x2) / 2, (y1 + y2) / 2)
 		seg.Parent = MiniChart
@@ -1301,7 +1300,6 @@ local function loadTicker(rawTicker)
 
 	currentQuoteData = marketData
 	currentPrice = marketData.price or 0
-	currentPrevClose = marketData.prevClose or currentPrice
 
 	TickerInput.Text = ticker
 	updateHeader(marketData)

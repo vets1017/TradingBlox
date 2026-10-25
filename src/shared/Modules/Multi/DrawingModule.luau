@@ -81,7 +81,7 @@ function DrawingModule.render(elements, chartData, minPrice, maxPrice, drawings)
 			segment.BackgroundColor3 = line.color or DrawingModule.DEFAULT_COLOR
 			segment.BorderSizePixel = 0
 			segment.ZIndex = 3
-			segment.Size = UDim2.new(0, math.max(length, 1), 0, 2)
+			segment.Size = UDim2.fromOffset(math.max(length, 1), 2)
 			segment.Rotation = angle
 			segment.Position = UDim2.fromScale((x1 + x2) / 2, (y1 + y2) / 2)
 			segment.Parent = DrawingsContainer

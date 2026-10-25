@@ -50,7 +50,7 @@ RemoteGuard.handle(GetLeaderboardEvent, RemoteGuard.LIMITS.Research, function(pl
 end)
 
 -- GetPublicProfileEvent
-RemoteGuard.handle(GetPublicProfileEvent, RemoteGuard.LIMITS.Research, function(player, userId)
+RemoteGuard.handle(GetPublicProfileEvent, RemoteGuard.LIMITS.Research, function(_player, userId)
 	if type(userId) ~= "number" or userId ~= math.floor(userId) or userId <= 0 then
 		return nil
 	end

@@ -2,6 +2,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local MarketDataModule = require(ServerScriptService.Modules.MarketDataModule)
 local PortfolioHistoryModule = require(ServerScriptService.Modules.PortfolioHistoryModule)
+local PlayerDataService = require(ServerScriptService.Services.PlayerDataService)
 
 local CalculatorModule = {}
 
@@ -12,7 +13,7 @@ function CalculatorModule.getOptionPremium(quote)
 end
 
 function CalculatorModule.calculateNetWorth(player)
-	local playerData = _G.PlayerData[player.UserId]
+	local playerData = PlayerDataService.get(player)
 
 	if not playerData then
 		return 0
@@ -70,11 +71,7 @@ function CalculatorModule.calculateNetWorth(player)
 			PortfolioHistoryModule.record(playerData.NetWorthHistory or {}, finalNetWorth, os.time())
 	end
 
-	if _G.UpdatePlayerStat then
-		_G.UpdatePlayerStat(player, "NetWorth", finalNetWorth)
-	else
-		warn("UpdatePlayerStat function not found. Net worth will not be updated for " .. player.Name)
-	end
+	PlayerDataService.setStat(player, "NetWorth", finalNetWorth)
 
 	return finalNetWorth
 end

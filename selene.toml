@@ -1,1 +1,4 @@
 std = "roblox"
+
+# Vendored code stays byte-for-byte upstream (see src/server/Vendor)
+exclude = ["src/server/Vendor/*"]

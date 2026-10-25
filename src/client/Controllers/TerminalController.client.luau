@@ -37,9 +37,7 @@ local GreetingBar = DashboardScreen:WaitForChild("GreetingBar")
 local GreetingText = GreetingBar:WaitForChild("GreetingText")
 local DateText = GreetingBar:WaitForChild("DateText")
 local DashboardGrid = DashboardScreen:WaitForChild("DashboardGrid")
-local RightSidebar = DashboardGrid:WaitForChild("RightSidebar")
 local MainWorkspace = DashboardGrid:WaitForChild("MainWorkspace")
-local BottomRow = MainWorkspace:WaitForChild("BottomRow")
 local TopRow = MainWorkspace:WaitForChild("TopRow")
 local CountdownWidget = TopRow:WaitForChild("CountdownWidget")
 local TimeContainer = CountdownWidget:WaitForChild("TimeContainer")
@@ -172,7 +170,6 @@ local startRightOffset = 0 -- UI Offset for Scroll
 
 -- Booleans
 local isFetchingData = false
-local isHoveringChart = false
 local isActiveTradeVisible = false
 local isSymbolInfoVisible = false
 local isWatchlistVisible = false
@@ -268,7 +265,8 @@ local IndicatorOptions = {
 	},
 }
 
--- Unfinished
+-- Unfinished: wired up once the stock list lands
+-- selene: allow(unused_variable)
 local function refreshTerminal()
 	local marketData = GetMarketDataEvent:InvokeServer()
 
