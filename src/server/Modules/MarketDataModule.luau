@@ -44,11 +44,6 @@ local QUOTE_CACHE_DURATION = 10 -- how old a "live" price may be
 local SPLITS_CACHE_DURATION = 43200
 local MAX_QUOTES_PER_REQUEST = 50 -- the backend's batch limit
 
--- Fills use the bid or ask only in regular trading with a sane spread;
--- otherwise (crypto, after hours, a gapped book) they use the last price
-local MAX_FILL_SPREAD = 0.02 -- as a fraction of the price
--- A regular-session stock quote this old means the feed has stalled
-local STALE_QUOTE_SECONDS = 15 * 60
 local CACHE_SWEEP_INTERVAL = 600
 local MAX_TICKER_LENGTH = 10
 local VALID_TIMEFRAMES = { ["1M"] = true, ["5M"] = true, ["30M"] = true, ["H"] = true, ["D"] = true }
@@ -342,33 +337,6 @@ function MarketDataModule.getCurrentPrice(ticker)
 	end
 
 	return candles[#candles].Close
-end
-
--- The price an order fills at, or nil and a reason not to fill. Pure, so it
--- can be tested with made-up quotes. A buy pays the ask and a sell gets the
--- bid during regular trading when the spread is sane; otherwise (crypto,
--- after hours, a gapped book) both use the last price. A regular-session
--- stock quote older than STALE_QUOTE_SECONDS is refused rather than traded
--- against.
-function MarketDataModule.getFillPrice(quote, side, isCrypto, now)
-	if not quote or not quote.price or quote.price <= 0 then
-		return nil, "Price unavailable."
-	end
-
-	local isRegular = quote.marketState == "REGULAR"
-
-	if isRegular and not isCrypto and quote.time and now - quote.time > STALE_QUOTE_SECONDS then
-		return nil, "The price feed is behind; try again in a moment."
-	end
-
-	local bid, ask = quote.bid, quote.ask
-	local hasSaneSpread = bid and ask and bid > 0 and ask >= bid and (ask - bid) / quote.price <= MAX_FILL_SPREAD
-
-	if isRegular and not isCrypto and hasSaneSpread then
-		return side == "Buy" and ask or bid
-	end
-
-	return quote.price
 end
 
 -- Splits over the last two years: { { date, numerator, denominator } }, dates

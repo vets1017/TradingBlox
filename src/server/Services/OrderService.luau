@@ -20,6 +20,7 @@ local PlayerDataService = require(ServerScriptService.Services.PlayerDataService
 local ProgressionService = require(ServerScriptService.Services.ProgressionService)
 local OrderEvents = require(ServerScriptService.Services.OrderEvents)
 local MarketDataModule = require(ServerScriptService.Modules.MarketDataModule)
+local FillPriceModule = require(ServerScriptService.Modules.FillPriceModule)
 local CalculatorModule = require(ServerScriptService.Modules.CalculatorModule)
 local TradeLogModule = require(ServerScriptService.Modules.TradeLogModule)
 local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursModule)
@@ -236,7 +237,7 @@ function OrderService.getFillPrice(ticker, side)
 	local quote = MarketDataModule.getLiveQuote(ticker)
 
 	if quote then
-		return MarketDataModule.getFillPrice(quote, side, isCrypto, os.time())
+		return FillPriceModule.getFillPrice(quote, side, isCrypto, os.time())
 	end
 
 	local price = MarketDataModule.getCurrentPrice(ticker)

@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Installs the tools pinned in aftman.toml (rojo, selene, stylua, lune)
+      - uses: ok-nick/setup-aftman@v0.4.2
+
+      - name: Lint
+        run: selene src tests
+
+      - name: Check formatting
+        run: stylua --check src tests
+
+      - name: Unit tests
+        run: lune run tests/run.luau
+
+      - name: Build the place
+        run: rojo build default.project.json -o build.rbxlx
