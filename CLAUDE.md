@@ -56,9 +56,9 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
   (account info, watchlist, orders, performance, market overview, top traders), built in code inside the
   Studio widget frames; `TutorialController` for the "Getting started" checklist card; `TradeController` for the Trade screen; `PortfolioController` for the Portfolio screen, which it builds
   entirely in code inside the empty Studio `PortfolioScreen` frame; `SocialController` for the Social tab (the feed,
-  All or Following, polled every 5 s while open) and `LeaderboardController` for the Leaderboards
-  tab (boards beside a public profile with Follow, the trade-sharing toggle and recent trades; every profile
-  opens here), whose nav buttons and empty screens `ShellController` creates in code (`CODE_BUILT_TABS`) and
+  All or Following, polled every 5 s while open; it also sends the server the player's Roblox block list) and `LeaderboardController` for the Leaderboards
+  tab (boards beside a public profile with Follow, Mute, Block for players in the server, the trade-sharing
+  toggle, recent trades and theses; every profile opens here), whose nav buttons and empty screens `ShellController` creates in code (`CODE_BUILT_TABS`) and
   `TerminalController` registers for switching; Quote tabs and Options chain stubs). Controllers `WaitForChild` their way through a large, hand-built UI tree (no UI
   framework/library), wire up `TweenService` animations and `UserInputService` input handling directly, and
   call server `RemoteFunction`s to fetch data. Several controllers (`QuoteTabsController`,
@@ -69,7 +69,8 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     client calls (`RequestChartEvent`, `GetMarketDataEvent`, `GetOptionsDataEvent`, `GetPositionsEvent`,
     `GetPortfolioEvent`, `GetLeaderboardEvent`, `GetPublicProfileEvent`, `GetNewsFeedEvent`, `GetMarketMoversEvent`,
     `PlayerOrderEvent`, `PlayerOptionOrderEvent`, `FollowPlayerEvent`, `SetShareTradesEvent`, `GetFeedEvent`,
-    `PublishThesisEvent`, `DeleteThesisEvent`, `GetTickerThesesEvent`, plus watchlist and research remotes). This must run before other server scripts wire up
+    `PublishThesisEvent`, `DeleteThesisEvent`, `GetTickerThesesEvent`, `MutePlayerEvent`, `SetRobloxBlocksEvent`,
+    `ReportThesisEvent`, plus watchlist and research remotes). This must run before other server scripts wire up
     `OnServerInvoke` handlers.
   - `API_Manager.server.luau` wires the market-data remotes. `Modules/MarketDataModule.luau` is the sole
     bridge to the external HTTP backend (`SERVER_URL`, a Render-hosted service): ticker validation, a
@@ -117,7 +118,9 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     (store `PlayerData_v2`, key `Player_<userId>`, $50,000 start), autosaved every 60 s. A failed load kicks the
     player rather than handing them default data. `get(player)`, `setStat`, `updateShares`, `PlayerLoaded`
     (fires with the player only: a BindableEvent would hand listeners a *copy* of a data table — always read
-    data with `get`), `onPlayerLeaving` (synchronous, just before the final save).
+    data with `get`), `onPlayerLeaving` (synchronous, just before the final save). `sendMessage(userId, { kind,
+    ... })` leaves a ProfileStore message in any player's profile (handled by `onMessage(kind, fn)` on the server
+    holding their session, or at their next login) — the way to change another player's saved data.
     The profile template is the source of truth for the data shape; `Reconcile` adds new fields to old saves.
   - `ProgressionService` — XP, levels, feature unlocks (`hasFeature(player, feature)`) and the getting-started
     tutorial. Mirrors `XP`, `Level`, `TutorialProgress` and `TutorialComplete` to player attributes, and handles
@@ -153,6 +156,12 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     when it's published and only the filtered result is stored** — `TextService` refuses to filter for a sender
     who isn't in the server, so stored text can't be re-filtered later. Only players `canUseText` allows
     (`TextChatService:CanUserChatAsync`) can write text or see others'. Pure rules: `Modules/ThesisModule.luau`.
+    Reports go to DataStore `Reports_v1` (one key per thesis, with the thesis as reported); enough of them take the
+    thesis down (ticker list, feed, and a `ThesisRemoved` profile message to its author).
+  - `MuteService` — what a viewer has hidden: mutes (`playerData.Social.Muted`), their Roblox blocks (the client
+    sends `StarterGui:GetCore("GetBlockedUserIds")` each session; servers can't read it) and theses they
+    reported. **Any list of other players' content shown to a player goes through `MuteService.getFilter(viewer)`**
+    (the feed, ticker theses and public profiles do).
   - `Core/LeaderboardSystem.server.luau` wires `GetLeaderboardEvent` / `GetPublicProfileEvent` (which adds the
     follower count, whether the caller follows, and the player's latest theses); `Core/SocialSystem.server.luau`
     wires `FollowPlayerEvent`, `SetShareTradesEvent`, `GetFeedEvent` and the thesis remotes.

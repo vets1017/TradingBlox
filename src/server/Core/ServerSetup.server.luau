@@ -28,6 +28,9 @@ local EVENTS = {
 	"PublishThesisEvent",
 	"DeleteThesisEvent",
 	"GetTickerThesesEvent",
+	"MutePlayerEvent",
+	"SetRobloxBlocksEvent",
+	"ReportThesisEvent",
 }
 
 -- Server-to-client pushes (RemoteEvents rather than RemoteFunctions)

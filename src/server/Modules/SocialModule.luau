@@ -44,6 +44,52 @@ function SocialModule.setFollowing(social, userId: number, isFollowing: boolean,
 	social.Following[toKey(userId)] = if isFollowing then now else nil
 end
 
+function SocialModule.isMuted(social, userId: number): boolean
+	return social.Muted[toKey(userId)] ~= nil
+end
+
+-- Whether `ownUserId` may mute `targetUserId`, and why not
+function SocialModule.checkMute(social, ownUserId: number, targetUserId: number, maxMuted: number)
+	if targetUserId == ownUserId then
+		return false, "You can't mute yourself."
+	end
+
+	local count = 0
+
+	for _ in pairs(social.Muted) do
+		count += 1
+	end
+
+	if count >= maxMuted then
+		return false, string.format("You can mute up to %d players.", maxMuted)
+	end
+
+	return true, nil
+end
+
+function SocialModule.setMuted(social, userId: number, isMuted: boolean, now: number)
+	social.Muted[toKey(userId)] = if isMuted then now else nil
+end
+
+-- Adds `key` to a map of key -> time, dropping the oldest entry past `cap`
+function SocialModule.addCapped(map, key: string, now: number, cap: number)
+	map[key] = now
+
+	local count, oldestKey, oldestTime = 0, nil, math.huge
+
+	for existingKey, time in pairs(map) do
+		count += 1
+
+		if time < oldestTime then
+			oldestKey, oldestTime = existingKey, time
+		end
+	end
+
+	if count > cap and oldestKey then
+		map[oldestKey] = nil
+	end
+end
+
 -- A player's latest `limit` fills from their trade log (oldest first), newest
 -- first, as copies: the public snapshot is saved apart from the profile
 function SocialModule.getRecentTrades(tradeLog, limit: number)

@@ -11,6 +11,9 @@
 -- server, so it's filtered for broadcast when it's published and only the
 -- filtered result is saved. Only players whose accounts allow chat can write
 -- text or see other players' text.
+--
+-- Reports go to DataStore Reports_v1 (one key per thesis) for review, with
+-- the thesis as it was reported. Enough of them take the thesis down.
 
 local DataStoreService = game:GetService("DataStoreService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -22,10 +25,12 @@ local Social = require(ReplicatedStorage.Config.Social)
 local PlayerDataService = require(ServerScriptService.Services.PlayerDataService)
 local PublicProfileService = require(ServerScriptService.Services.PublicProfileService)
 local FeedService = require(ServerScriptService.Services.FeedService)
+local MuteService = require(ServerScriptService.Services.MuteService)
 local MarketDataModule = require(ServerScriptService.Modules.MarketDataModule)
 local ThesisModule = require(ServerScriptService.Modules.ThesisModule)
 
 local TickerStore = DataStoreService:GetDataStore("TickerTheses_v1")
+local ReportStore = DataStoreService:GetDataStore("Reports_v1")
 
 local TICKER_CACHE_SECONDS = 60
 local SWEEP_INTERVAL = 300
@@ -187,7 +192,8 @@ local function publishThesis(player, ticker: string, draft)
 	return { success = true, thesis = thesis }
 end
 
-local function deleteThesis(player, thesis)
+-- Takes a thesis off its ticker's list; returns whether that saved
+local function removeFromTicker(thesis): boolean
 	local ticker = thesis.ticker
 	local success, theses = pcall(TickerStore.UpdateAsync, TickerStore, ticker, function(list)
 		-- nil leaves the key as it is
@@ -199,13 +205,21 @@ local function deleteThesis(player, thesis)
 	end)
 
 	if not success then
-		warn("[ThesisService] Couldn't delete a thesis on " .. ticker .. ": " .. tostring(theses))
+		warn("[ThesisService] Couldn't remove a thesis on " .. ticker .. ": " .. tostring(theses))
 
-		return failure("Couldn't delete that. Try again in a moment.")
+		return false
 	end
 
 	-- nil when there was nothing to remove from the ticker's list
 	tickerCache[ticker] = if theses then { fetchedAt = os.clock(), theses = theses } else nil
+
+	return true
+end
+
+local function deleteThesis(player, thesis)
+	if not removeFromTicker(thesis) then
+		return failure("Couldn't delete that. Try again in a moment.")
+	end
 
 	local data = PlayerDataService.get(player)
 
@@ -287,9 +301,24 @@ function ThesisService.delete(player, thesisId: string)
 	return failure("That thesis isn't yours, or it's already gone.")
 end
 
+-- Theses from `list` (oldest first) that `player` hasn't muted, blocked or
+-- reported, as they may see them: newest first, text only if they can chat
+function ThesisService.forViewer(player, list, limit: number)
+	local filter = MuteService.getFilter(player)
+	local visible = {}
+
+	for _, thesis in ipairs(list) do
+		if not filter.hidesUser(thesis.userId) and not filter.hidesThesis(thesis.id) then
+			table.insert(visible, thesis)
+		end
+	end
+
+	return ThesisModule.forViewer(visible, limit, ThesisService.canUseText(player))
+end
+
 -- A ticker's theses as `player` sees them, or nil if they can't be read:
 -- { ticker, theses (newest first), counts = { Bullish, Bearish } (open
--- ones), canUseText, openThesisId (the player's own open one, if any) }
+-- ones shown), canUseText, openThesisId (the player's own open one, if any) }
 function ThesisService.getForTicker(player, ticker: string)
 	ticker = string.upper(ticker)
 
@@ -300,20 +329,101 @@ function ThesisService.getForTicker(player, ticker: string)
 	end
 
 	local now = os.time()
-	local canUseText = ThesisService.canUseText(player)
 	local data = PlayerDataService.get(player)
 	local openThesis = data and ThesisModule.findOpen(data.Social.Theses, ticker, now)
+	local visible = ThesisService.forViewer(player, theses, Social.THESES_PER_TICKER)
 
 	return {
 		ticker = ticker,
-		theses = ThesisModule.forViewer(theses, Social.THESES_PER_TICKER, canUseText),
-		counts = ThesisModule.countOpen(theses, now),
-		canUseText = canUseText,
+		theses = visible,
+		counts = ThesisModule.countOpen(visible, now),
+		canUseText = ThesisService.canUseText(player),
 		openThesisId = openThesis and openThesis.id,
 	}
 end
 
+-- The thesis `thesisId` from its ticker's list, or else from its author's
+-- public profile (a ticker keeps only its latest few)
+local function findThesis(thesisId: string, ticker: string)
+	for _, thesis in ipairs(readTicker(ticker) or {}) do
+		if thesis.id == thesisId then
+			return thesis
+		end
+	end
+
+	local authorId = tonumber(string.match(thesisId, "^(%d+)%-%d+$"))
+	local profile = authorId and PublicProfileService.get(authorId)
+
+	for _, thesis in ipairs(profile and profile.theses or {}) do
+		if thesis.id == thesisId then
+			return thesis
+		end
+	end
+
+	return nil
+end
+
+-- Off its ticker's list and the feed now, and out of its author's own list
+-- once their profile gets the message (straight away if they're online)
+local function takeDown(thesis)
+	removeFromTicker(thesis)
+	FeedService.removeThesis(thesis.id)
+	PlayerDataService.sendMessage(thesis.userId, { kind = "ThesisRemoved", thesisId = thesis.id })
+end
+
+-- Reports someone else's thesis on `ticker`. Once recorded it's hidden from
+-- the reporter; REPORTS_TO_TAKE_DOWN reports from established accounts take
+-- it down for everyone. Returns { success, message? }.
+function ThesisService.report(player, thesisId: string, ticker: string)
+	if not PlayerDataService.get(player) then
+		return failure("Your data is still loading.")
+	end
+
+	local thesis = findThesis(thesisId, string.upper(ticker))
+
+	if not thesis then
+		return failure("That thesis is already gone.")
+	elseif thesis.userId == player.UserId then
+		return failure("You can't report your own thesis.")
+	end
+
+	local counts = player.AccountAge >= Social.MIN_REPORTER_ACCOUNT_AGE_DAYS
+	local now = os.time()
+	local reachedThreshold = false
+
+	local success, err = pcall(ReportStore.UpdateAsync, ReportStore, thesisId, function(record)
+		local updated
+
+		-- Reset on every run: UpdateAsync can run this more than once
+		updated, reachedThreshold =
+			ThesisModule.addReport(record, thesis, player.UserId, counts, now, Social.REPORTS_TO_TAKE_DOWN)
+
+		return updated
+	end)
+
+	if not success then
+		warn("[ThesisService] Couldn't record a report on " .. thesisId .. ": " .. tostring(err))
+
+		return failure("Couldn't send the report. Try again in a moment.")
+	end
+
+	MuteService.hideThesis(player, thesisId)
+
+	if reachedThreshold then
+		task.spawn(takeDown, thesis)
+	end
+
+	return { success = true }
+end
+
 function ThesisService.start()
+	-- A thesis taken down after reports leaves its author's own list too
+	PlayerDataService.onMessage("ThesisRemoved", function(player, data, message)
+		if type(message.thesisId) == "string" and ThesisModule.removeFromList(data.Social.Theses, message.thesisId) then
+			PublicProfileService.publishNow(player)
+		end
+	end)
+
 	task.spawn(function()
 		while true do
 			task.wait(SWEEP_INTERVAL)

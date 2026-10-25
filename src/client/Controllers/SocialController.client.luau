@@ -4,11 +4,15 @@
 -- theses and milestones from every player, or only from the players you
 -- follow. A row opens its player's profile; the ticker of a trade or thesis
 -- opens on the Trade tab, where theses show in full.
+--
+-- Also sends the server the player's Roblox block list, which only the
+-- client can read, so blocked players' posts are hidden everywhere.
 -- Built in code inside the empty screen ShellController adds;
 -- TerminalController switches to it.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local StarterGui = game:GetService("StarterGui")
 
 local Theme = require(ReplicatedStorage.Modules.Multi.Theme)
 local NumberModule = require(ReplicatedStorage.Modules.Multi.NumberModule)
@@ -23,6 +27,7 @@ local PlayerGui = Player:WaitForChild("PlayerGui")
 -- Remotes
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
 local GetFeedEvent = EventsFolder:WaitForChild("GetFeedEvent")
+local SetRobloxBlocksEvent = EventsFolder:WaitForChild("SetRobloxBlocksEvent")
 
 -- References
 local TerminalGui = PlayerGui:WaitForChild("TerminalGui")
@@ -47,6 +52,7 @@ local TICKER_PILL_WIDTH = 76
 local TICKER_PILL_HEIGHT = 24
 
 local POLL_INTERVAL = 5
+local CORE_RETRIES = 20 -- a second apart, while Roblox's core scripts register
 local RETRY_DELAY = 1.1 -- past the server's per-request cooldown when throttled
 
 local KIND_LABELS = {
@@ -490,6 +496,52 @@ task.spawn(function()
 
 		if SocialScreen.Visible then
 			task.spawn(loadFeed)
+		end
+	end
+end)
+
+-- Roblox blocks: read with GetCore, which fails until Roblox's core scripts
+-- have registered it, so each lookup is retried
+local function getCore(name)
+	for _ = 1, CORE_RETRIES do
+		local success, value = pcall(StarterGui.GetCore, StarterGui, name)
+
+		if success and value ~= nil then
+			return value
+		end
+
+		task.wait(1)
+	end
+
+	warn("[SocialController] GetCore " .. name .. " never became available")
+
+	return nil
+end
+
+local function sendRobloxBlocks()
+	local userIds = getCore("GetBlockedUserIds")
+
+	if type(userIds) == "table" then
+		pcall(SetRobloxBlocksEvent.InvokeServer, SetRobloxBlocksEvent, userIds)
+	end
+end
+
+task.spawn(function()
+	sendRobloxBlocks()
+
+	for _, eventName in ipairs({ "PlayerBlockedEvent", "PlayerUnblockedEvent" }) do
+		local event = getCore(eventName)
+
+		if event then
+			event.Event:Connect(function()
+				sendRobloxBlocks()
+
+				-- Redrawn without (or with) the player just blocked (or unblocked)
+				if SocialScreen.Visible then
+					renderedSignature = nil
+					loadFeed()
+				end
+			end)
 		end
 	end
 end)

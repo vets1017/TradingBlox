@@ -4,11 +4,13 @@
 -- board beside the public profile of whoever is selected - the player
 -- themselves to start with. The profile has a Follow button for other
 -- players, the trade-sharing toggle on the player's own, recent trades when
--- they're shared, and recent theses (GDD §2). Built in code inside the empty screen
+-- they're shared, and recent theses (GDD §2). Mute hides a player's posts;
+-- Block opens Roblox's own block prompt, for players in this server. Built in code inside the empty screen
 -- ShellController adds; TerminalController switches to it.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local StarterGui = game:GetService("StarterGui")
 
 local Theme = require(ReplicatedStorage.Modules.Multi.Theme)
 local NumberModule = require(ReplicatedStorage.Modules.Multi.NumberModule)
@@ -28,6 +30,7 @@ local GetLeaderboardEvent = EventsFolder:WaitForChild("GetLeaderboardEvent")
 local GetPublicProfileEvent = EventsFolder:WaitForChild("GetPublicProfileEvent")
 local FollowPlayerEvent = EventsFolder:WaitForChild("FollowPlayerEvent")
 local SetShareTradesEvent = EventsFolder:WaitForChild("SetShareTradesEvent")
+local MutePlayerEvent = EventsFolder:WaitForChild("MutePlayerEvent")
 
 -- References
 local TerminalGui = PlayerGui:WaitForChild("TerminalGui")
@@ -57,7 +60,10 @@ local PROFILE_AVATAR_SIZE = 56
 local PROFILE_CHART_HEIGHT = 140
 local STAT_CELL_HEIGHT = 40
 local ACTION_HEIGHT = 28
-local ACTION_BUTTON_WIDTH = 124
+local ACTION_BUTTON_WIDTH = 124 -- the sharing toggle; Follow is narrower to leave room for Mute and Block
+local FOLLOW_BUTTON_WIDTH = 100
+local SMALL_BUTTON_WIDTH = 64
+local ACTION_GAP = 6
 local TRADE_ROW_HEIGHT = 20
 local TRADE_ROW_PADDING = 6 -- inside the hover highlight
 local TRADE_AGE_WIDTH = 72
@@ -89,6 +95,9 @@ local profileRequestId = 0
 local currentProfile = nil
 local isActionPending = false
 local isActionHovered = false
+local isMuteHovered = false
+local BLOCK_SETTLE_SECONDS = 1.5 -- lets SocialController send the new block list first
+local CORE_RETRIES = 20 -- a second apart
 
 local makeFrame = UIKit.makeFrame
 local makeLabel = UIKit.makeLabel
@@ -333,13 +342,28 @@ UIKit.addCorner(ProfileAction)
 
 local ProfileActionStroke = UIKit.addStroke(ProfileAction)
 
-local ACTION_NOTE_X = PADDING + ACTION_BUTTON_WIDTH + 10
+-- Mute and Block, on other players' profiles; renderAction places them
+local function makeSmallAction(name)
+	local button = Instance.new("TextButton")
+	button.Name = name
+	button.Size = UDim2.fromOffset(SMALL_BUTTON_WIDTH, ACTION_HEIGHT)
+	button.AutoButtonColor = false
+	button.BorderSizePixel = 0
+	button.BackgroundColor3 = Theme.Colors.Raised
+	button.FontFace = Theme.Fonts.UISemibold
+	button.TextSize = Theme.TextSize.Caption
+	button.Parent = ProfileContent
+	UIKit.addCorner(button)
+
+	return button, UIKit.addStroke(button)
+end
+
+local MuteButton, MuteStroke = makeSmallAction("Mute")
+local BlockButton = makeSmallAction("Block")
 
 -- What the toggle means, or why the last click failed
 local ProfileActionNote =
 	makeLabel("ActionNote", ProfileContent, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.TextMuted)
-ProfileActionNote.Position = UDim2.fromOffset(ACTION_NOTE_X, ACTION_Y)
-ProfileActionNote.Size = UDim2.new(1, -(ACTION_NOTE_X + PADDING), 0, ACTION_HEIGHT)
 ProfileActionNote.TextWrapped = true
 
 local VALUE_Y = ACTION_Y + ACTION_HEIGHT + GAP
@@ -451,12 +475,53 @@ local function setProfileStat(stat, text, color)
 	label.TextColor3 = color or Theme.Colors.Text
 end
 
--- Follow (Accent fill) or Following (outlined; "Unfollow" on hover) for
--- other players, and the sharing toggle on your own profile
+-- Lays the action row out left to right, with the note taking what's left
+local function placeActions(buttons)
+	local x = PADDING
+
+	for _, entry in ipairs(buttons) do
+		entry.button.Position = UDim2.fromOffset(x, ACTION_Y)
+		entry.button.Size = UDim2.fromOffset(entry.width, ACTION_HEIGHT)
+		x += entry.width + ACTION_GAP
+	end
+
+	ProfileActionNote.Position = UDim2.fromOffset(x + 4, ACTION_Y)
+	ProfileActionNote.Size = UDim2.new(1, -(x + 4 + PADDING), 0, ACTION_HEIGHT)
+end
+
+-- Follow (Accent fill) or Following (outlined; "Unfollow" on hover), Mute
+-- and, for players in this server, Block; the sharing toggle on your own
+-- profile
 local function renderAction()
 	local profile = currentProfile
+	local isYou = profile.userId == Player.UserId
+	local inServer = not isYou and Players:GetPlayerByUserId(profile.userId) ~= nil
 
-	if profile.userId == Player.UserId then
+	MuteButton.Visible = not isYou
+	BlockButton.Visible = inServer
+
+	if isYou then
+		placeActions({ { button = ProfileAction, width = ACTION_BUTTON_WIDTH } })
+	else
+		local buttons = {
+			{ button = ProfileAction, width = FOLLOW_BUTTON_WIDTH },
+			{ button = MuteButton, width = SMALL_BUTTON_WIDTH },
+		}
+
+		if inServer then
+			table.insert(buttons, { button = BlockButton, width = SMALL_BUTTON_WIDTH })
+		end
+
+		placeActions(buttons)
+
+		MuteButton.Text = profile.isMuted and (isMuteHovered and "Unmute" or "Muted") or "Mute"
+		MuteButton.TextColor3 = profile.isMuted and Theme.Colors.Down or Theme.Colors.TextMuted
+		MuteStroke.Color = profile.isMuted and Theme.Colors.Down or Theme.Colors.Border
+		BlockButton.Text = profile.isBlocked and "Unblock" or "Block"
+		BlockButton.TextColor3 = profile.isBlocked and Theme.Colors.Down or Theme.Colors.TextMuted
+	end
+
+	if isYou then
 		local isSharing = profile.sharesTrades ~= false
 
 		ProfileAction.Text = isSharing and "Share trades: On" or "Share trades: Off"
@@ -547,11 +612,26 @@ local function createTradeRow(index, trade)
 	end)
 end
 
+-- Why a muted or blocked player's trades and theses are missing, or nil
+local function describeHidden(profile)
+	if profile.isBlocked then
+		return "Hidden: you blocked @" .. profile.username .. " on Roblox."
+	elseif profile.isMuted then
+		return "Hidden while you mute @" .. profile.username .. "."
+	end
+
+	return nil
+end
+
 local function renderRecentTrades(profile, isYou)
 	clearList(TradesList)
 
+	local hidden = describeHidden(profile)
+
 	-- nil (not false) on snapshots saved before trades could be shared
-	if profile.sharesTrades == false then
+	if hidden then
+		addListMessage(TradesList, hidden)
+	elseif profile.sharesTrades == false then
 		addListMessage(
 			TradesList,
 			isYou and "Hidden from other players." or ("@" .. profile.username .. " keeps trades private.")
@@ -634,7 +714,13 @@ end
 local function renderTheses(profile, isYou)
 	clearList(ThesesList)
 
-	if not profile.theses or #profile.theses == 0 then
+	local hidden = describeHidden(profile)
+
+	if hidden then
+		addListMessage(ThesesList, hidden)
+
+		return
+	elseif not profile.theses or #profile.theses == 0 then
 		addListMessage(ThesesList, isYou and "Publish one from a ticker on the Trade tab." or "No theses yet.")
 
 		return
@@ -819,6 +905,61 @@ local function onActionClicked()
 	currentProfile.isFollowing = result.isFollowing
 	currentProfile.followers = result.followers
 	renderProfile(currentProfile)
+end
+
+-- Mutes or unmutes the player shown; reloaded so their trades and theses
+-- hide or come back
+local function onMuteClicked()
+	local profile = currentProfile
+
+	if isActionPending or not profile or profile.userId == Player.UserId then
+		return
+	end
+
+	local userId = profile.userId
+
+	isActionPending = true
+
+	local result = invoke(MutePlayerEvent, userId, not profile.isMuted)
+
+	isActionPending = false
+
+	if not currentProfile or currentProfile.userId ~= userId then
+		return
+	end
+
+	if not result or not result.success then
+		ProfileActionNote.Text = result and result.message or "Couldn't reach the server. Try again."
+
+		return
+	end
+
+	currentProfile.isMuted = result.isMuted
+	renderAction()
+	loadProfile(userId)
+end
+
+-- Roblox's own block (or unblock) prompt; it needs the Player, so only for
+-- players in this server. SocialController sends the new block list and
+-- the profile reloads after it.
+local function onBlockClicked()
+	local profile = currentProfile
+	local target = profile and Players:GetPlayerByUserId(profile.userId)
+
+	if not target or target == Player then
+		return
+	end
+
+	local success, err = pcall(
+		StarterGui.SetCore,
+		StarterGui,
+		profile.isBlocked and "PromptUnblockPlayer" or "PromptBlockPlayer",
+		target
+	)
+
+	if not success then
+		warn("[LeaderboardController] Block prompt failed: " .. tostring(err))
+	end
 end
 
 -- Board
@@ -1059,6 +1200,49 @@ Navigation.ProfileRequested:Connect(function(userId)
 end)
 
 ProfileAction.MouseButton1Click:Connect(onActionClicked)
+MuteButton.MouseButton1Click:Connect(onMuteClicked)
+BlockButton.MouseButton1Click:Connect(onBlockClicked)
+
+MuteButton.MouseEnter:Connect(function()
+	isMuteHovered = true
+
+	if currentProfile then
+		renderAction()
+	end
+end)
+
+MuteButton.MouseLeave:Connect(function()
+	isMuteHovered = false
+
+	if currentProfile then
+		renderAction()
+	end
+end)
+
+-- Reload after a block or unblock anywhere (the prompt above, or Roblox's
+-- own menus), once the server has the new list. GetCore fails until
+-- Roblox's core scripts have registered these, so it's retried.
+task.spawn(function()
+	for _, eventName in ipairs({ "PlayerBlockedEvent", "PlayerUnblockedEvent" }) do
+		for _ = 1, CORE_RETRIES do
+			local success, event = pcall(StarterGui.GetCore, StarterGui, eventName)
+
+			if success and event then
+				event.Event:Connect(function()
+					task.delay(BLOCK_SETTLE_SECONDS, function()
+						if LeaderboardsScreen.Visible then
+							loadProfile(selectedUserId)
+						end
+					end)
+				end)
+
+				break
+			end
+
+			task.wait(1)
+		end
+	end
+end)
 
 ProfileAction.MouseEnter:Connect(function()
 	isActionHovered = true

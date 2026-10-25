@@ -147,6 +147,35 @@ function ThesisModule.forViewer(list, limit: number, canSeeText: boolean)
 	return copies
 end
 
+-- Records a report on a thesis in its report `record` (nil for the first):
+-- { thesis, reporters = { [userId string] = { at, counted } }, counted,
+-- firstReportedAt, takenDown? }. A reporter counts once, and only when
+-- `counts` (their account is old enough). Returns the record and whether
+-- this report is the one that reached `threshold`.
+function ThesisModule.addReport(record, thesis, reporterId: number, counts: boolean, now: number, threshold: number)
+	record = record or { thesis = thesis, reporters = {}, counted = 0, firstReportedAt = now }
+
+	local key = tostring(reporterId)
+
+	if record.reporters[key] then
+		return record, false
+	end
+
+	record.reporters[key] = { at = now, counted = counts }
+
+	if counts then
+		record.counted += 1
+	end
+
+	if record.counted >= threshold and not record.takenDown then
+		record.takenDown = true
+
+		return record, true
+	end
+
+	return record, false
+end
+
 -- Open theses on each side, for a ticker's "3 bullish · 1 bearish"
 function ThesisModule.countOpen(list, now: number)
 	local counts = { Bullish = 0, Bearish = 0 }

@@ -91,3 +91,36 @@ test("recent trades keep every field and are copies", function()
 
 	equal(log[1].ticker, "AAPL", "the log is untouched")
 end)
+
+test("muting and unmuting a player", function()
+	local social = { Following = {}, Muted = {} }
+
+	SocialModule.setMuted(social, OTHER, true, NOW)
+	equal(SocialModule.isMuted(social, OTHER), true)
+	equal(social.Muted["200"], NOW)
+
+	SocialModule.setMuted(social, OTHER, false, NOW)
+	equal(SocialModule.isMuted(social, OTHER), false)
+end)
+
+test("a player can't mute themselves or past the cap", function()
+	local social = { Following = {}, Muted = {} }
+
+	equal(select(2, SocialModule.checkMute(social, ME, ME, 2)), "You can't mute yourself.")
+
+	SocialModule.setMuted(social, 1, true, NOW)
+	SocialModule.setMuted(social, 2, true, NOW)
+
+	equal(select(2, SocialModule.checkMute(social, ME, OTHER, 2)), "You can mute up to 2 players.")
+	equal(SocialModule.checkMute(social, ME, OTHER, 3), true)
+end)
+
+test("a capped map drops its oldest entry", function()
+	local map = {}
+
+	SocialModule.addCapped(map, "a", NOW, 2)
+	SocialModule.addCapped(map, "b", NOW + 1, 2)
+	SocialModule.addCapped(map, "c", NOW + 2, 2)
+
+	equal(map, { b = NOW + 1, c = NOW + 2 })
+end)

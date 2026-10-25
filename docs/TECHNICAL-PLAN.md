@@ -562,7 +562,11 @@ Taken at the start of Phase 2 (2026-10-25), following the recommendations above:
    screen, labeled "Simulated, not financial advice". Stored in the author's profile (latest 20) and in
    DataStore `TickerTheses_v1`, one key per ticker (latest 30), rather than a `Posts` store; reactions
    (step 5) will add a per-post store if they need one. One open thesis per ticker per player, five a day.
-4. Safety: blocking and muting (hidden from your feed and profile views), and reporting theses.
+4. ✅ Safety: muting (saved in the profile) and the player's Roblox blocks (sent by the client each session;
+   Roblox gives servers no block list) hide a player's feed items, theses, and the trades and theses on
+   their profile; Block opens Roblox's own prompt for players in the same server. Reports go to DataStore
+   `Reports_v1` for review and hide the thesis from the reporter; three from Roblox accounts at least 30
+   days old take it down everywhere, reaching the author's own list through a ProfileStore message.
 5. Reactions on feed items.
 6. Notifications: an inbox in the profile (ProfileStore messages for new followers and reactions), live
    delivery through MessagingService, a toast and a nav badge.

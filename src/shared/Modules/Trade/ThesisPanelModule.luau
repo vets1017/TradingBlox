@@ -4,7 +4,7 @@
 -- the loaded ticker - bullish or bearish, a time horizon, an optional target
 -- and text - and a composer to publish your own. They're opinions, so the
 -- section says "Simulated, not financial advice". An author's name opens
--- their profile.
+-- their profile; other players' theses can be reported.
 --
 -- Client-only. TradeController calls load(ticker) whenever a ticker loads.
 
@@ -21,6 +21,7 @@ local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
 local GetTickerThesesEvent = EventsFolder:WaitForChild("GetTickerThesesEvent")
 local PublishThesisEvent = EventsFolder:WaitForChild("PublishThesisEvent")
 local DeleteThesisEvent = EventsFolder:WaitForChild("DeleteThesisEvent")
+local ReportThesisEvent = EventsFolder:WaitForChild("ReportThesisEvent")
 
 local Player = Players.LocalPlayer
 
@@ -529,10 +530,18 @@ function ThesisPanelModule:renderThesis(index, thesis, now)
 	meta.TextXAlignment = Enum.TextXAlignment.Right
 	meta.Text = formatAge(now - thesis.createdAt)
 
+	-- Delete on your own theses, Report on everyone else's
+	meta.Size = UDim2.new(0, AUTHOR_META_WIDTH - 60, 1, 0)
+	meta.Position = UDim2.new(1, -60, 0, 0)
+
 	if isYours then
-		meta.Size = UDim2.new(0, AUTHOR_META_WIDTH - 60, 1, 0)
-		meta.Position = UDim2.new(1, -60, 0, 0)
-		self:addDeleteButton(top, thesis)
+		self:addConfirmButton(top, "Delete", "Sure?", Theme.Colors.Down, function()
+			self:delete(thesis)
+		end)
+	else
+		self:addConfirmButton(top, "Report", "Report?", Theme.Colors.TextMuted, function()
+			self:report(thesis)
+		end)
 	end
 
 	local call = UIKit.makeLabel("Call", card, Theme.Fonts.UI, Theme.TextSize.Body, Theme.Colors.Text)
@@ -553,45 +562,46 @@ function ThesisPanelModule:renderThesis(index, thesis, now)
 	end
 end
 
--- Two clicks: the first asks for confirmation for a few seconds
-function ThesisPanelModule:addDeleteButton(parent, thesis)
-	local delete = Instance.new("TextButton")
-	delete.Name = "Delete"
-	delete.AnchorPoint = Vector2.new(1, 0)
-	delete.Position = UDim2.fromScale(1, 0)
-	delete.Size = UDim2.new(0, 56, 1, 0)
-	delete.BackgroundTransparency = 1
-	delete.BorderSizePixel = 0
-	delete.FontFace = Theme.Fonts.UISemibold
-	delete.TextSize = Theme.TextSize.Caption
-	delete.TextColor3 = Theme.Colors.Down
-	delete.TextXAlignment = Enum.TextXAlignment.Right
-	delete.Text = "Delete"
-	delete.Parent = parent
+-- A text button that acts on the second click; the first asks for
+-- confirmation for a few seconds
+function ThesisPanelModule:addConfirmButton(parent, text, confirmText, color, onConfirm)
+	local button = Instance.new("TextButton")
+	button.Name = text
+	button.AnchorPoint = Vector2.new(1, 0)
+	button.Position = UDim2.fromScale(1, 0)
+	button.Size = UDim2.new(0, 56, 1, 0)
+	button.BackgroundTransparency = 1
+	button.BorderSizePixel = 0
+	button.FontFace = Theme.Fonts.UISemibold
+	button.TextSize = Theme.TextSize.Caption
+	button.TextColor3 = color
+	button.TextXAlignment = Enum.TextXAlignment.Right
+	button.Text = text
+	button.Parent = parent
 
 	local isConfirming = false
 
-	delete.MouseButton1Click:Connect(function()
+	button.MouseButton1Click:Connect(function()
 		if self.isBusy then
 			return
 		end
 
 		if not isConfirming then
 			isConfirming = true
-			delete.Text = "Sure?"
+			button.Text = confirmText
 
 			task.delay(CONFIRM_SECONDS, function()
 				isConfirming = false
 
-				if delete.Parent then
-					delete.Text = "Delete"
+				if button.Parent then
+					button.Text = text
 				end
 			end)
 
 			return
 		end
 
-		self:delete(thesis)
+		onConfirm()
 	end)
 end
 
@@ -715,6 +725,35 @@ function ThesisPanelModule:publish()
 
 	self:setComposerOpen(false)
 	self:load(ticker)
+end
+
+-- The reported thesis is hidden for the reporter from then on
+function ThesisPanelModule:report(thesis)
+	local ticker = self.ticker
+
+	self.isBusy = true
+
+	local result = invoke(ReportThesisEvent, thesis.id, thesis.ticker)
+
+	self.isBusy = false
+
+	if ticker ~= self.ticker then
+		return
+	end
+
+	if not result or not result.success then
+		self.message.Visible = true
+		self.message.Text = result and result.message or "Couldn't reach the server. Try again."
+
+		return
+	end
+
+	self:load(ticker)
+
+	if ticker == self.ticker then
+		self.message.Visible = true
+		self.message.Text = "Thanks for the report. That thesis is hidden for you now."
+	end
 end
 
 function ThesisPanelModule:delete(thesis)

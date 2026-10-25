@@ -17,6 +17,7 @@ local Social = require(ReplicatedStorage.Config.Social)
 local PlayerDataService = require(ServerScriptService.Services.PlayerDataService)
 local ProgressionService = require(ServerScriptService.Services.ProgressionService)
 local OrderEvents = require(ServerScriptService.Services.OrderEvents)
+local MuteService = require(ServerScriptService.Services.MuteService)
 local FeedModule = require(ServerScriptService.Modules.FeedModule)
 local SocialModule = require(ServerScriptService.Modules.SocialModule)
 
@@ -141,24 +142,27 @@ local function onAchieved(player, kind: string, value)
 end
 
 -- The newest items for `view` ("All", or "Following" for the players
--- `player` follows), up to Social.FEED_PAGE_SIZE
+-- `player` follows), up to Social.FEED_PAGE_SIZE, leaving out players they
+-- muted or blocked and theses they reported
 function FeedService.getFeed(player, view: string)
 	if os.clock() - fetchedAt >= CACHE_SECONDS and not isFetching then
 		refresh()
 	end
 
-	if view ~= "Following" then
-		return FeedModule.select(cachedItems, Social.FEED_PAGE_SIZE)
-	end
-
 	local data = PlayerDataService.get(player)
 
-	if not data then
+	if view == "Following" and not data then
 		return {}
 	end
 
+	local filter = MuteService.getFilter(player)
+
 	return FeedModule.select(cachedItems, Social.FEED_PAGE_SIZE, function(item)
-		return SocialModule.isFollowing(data.Social, item.userId)
+		if filter.hidesUser(item.userId) or (item.thesisId and filter.hidesThesis(item.thesisId)) then
+			return false
+		end
+
+		return view ~= "Following" or SocialModule.isFollowing(data.Social, item.userId)
 	end)
 end
 

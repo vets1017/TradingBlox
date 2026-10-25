@@ -12,7 +12,7 @@ local PlayerDataService = require(ServerScriptService.Services.PlayerDataService
 local PublicProfileService = require(ServerScriptService.Services.PublicProfileService)
 local SocialService = require(ServerScriptService.Services.SocialService)
 local ThesisService = require(ServerScriptService.Services.ThesisService)
-local ThesisModule = require(ServerScriptService.Modules.ThesisModule)
+local MuteService = require(ServerScriptService.Services.MuteService)
 local RemoteGuard = require(ServerScriptService.Modules.RemoteGuard)
 local Leaderboards = require(ReplicatedStorage.Config.Leaderboards)
 local Social = require(ReplicatedStorage.Config.Social)
@@ -57,7 +57,9 @@ end)
 -- Returns the player's public snapshot (see PublicProfileService) plus
 -- `followers` (nil if unknown) and `isFollowing` (whether the caller follows
 -- them), or nil if they have no public profile. `theses` comes newest first,
--- without text for callers whose accounts can't chat.
+-- without text for callers whose accounts can't chat. `isMuted` and
+-- `isBlocked` say whether the caller hides this player; if so, their trades
+-- and theses are left out.
 RemoteGuard.handle(GetPublicProfileEvent, RemoteGuard.LIMITS.Research, function(player, userId)
 	if type(userId) ~= "number" or userId ~= math.floor(userId) or userId <= 0 then
 		return nil
@@ -74,8 +76,18 @@ RemoteGuard.handle(GetPublicProfileEvent, RemoteGuard.LIMITS.Research, function(
 
 	profile.followers = SocialService.getFollowerCount(userId)
 	profile.isFollowing = SocialService.isFollowing(player, userId)
-	profile.theses =
-		ThesisModule.forViewer(snapshot.theses or {}, Social.PROFILE_THESES, ThesisService.canUseText(player))
+
+	local filter = MuteService.getFilter(player)
+
+	profile.isMuted = filter.isMuted(userId)
+	profile.isBlocked = filter.isBlocked(userId)
+
+	if filter.hidesUser(userId) then
+		profile.recentTrades = nil
+		profile.theses = {}
+	else
+		profile.theses = ThesisService.forViewer(player, snapshot.theses or {}, Social.PROFILE_THESES)
+	end
 
 	return profile
 end)

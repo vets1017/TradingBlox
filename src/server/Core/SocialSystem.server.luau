@@ -1,7 +1,7 @@
 -- SocialSystem.server.luau
 --
--- Social remotes: following players, the trade-sharing setting, the feed
--- and theses. The follower counts themselves come with GetPublicProfileEvent
+-- Social remotes: following players, the trade-sharing setting, the feed,
+-- theses, and muting, blocking and reporting. The follower counts themselves come with GetPublicProfileEvent
 -- (LeaderboardSystem).
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -11,6 +11,7 @@ local Social = require(ReplicatedStorage.Config.Social)
 local SocialService = require(ServerScriptService.Services.SocialService)
 local FeedService = require(ServerScriptService.Services.FeedService)
 local ThesisService = require(ServerScriptService.Services.ThesisService)
+local MuteService = require(ServerScriptService.Services.MuteService)
 local PlayerDataService = require(ServerScriptService.Services.PlayerDataService)
 local SocialModule = require(ServerScriptService.Modules.SocialModule)
 local MarketDataModule = require(ServerScriptService.Modules.MarketDataModule)
@@ -23,6 +24,9 @@ local GetFeedEvent = EventsFolder:WaitForChild("GetFeedEvent")
 local PublishThesisEvent = EventsFolder:WaitForChild("PublishThesisEvent")
 local DeleteThesisEvent = EventsFolder:WaitForChild("DeleteThesisEvent")
 local GetTickerThesesEvent = EventsFolder:WaitForChild("GetTickerThesesEvent")
+local MutePlayerEvent = EventsFolder:WaitForChild("MutePlayerEvent")
+local SetRobloxBlocksEvent = EventsFolder:WaitForChild("SetRobloxBlocksEvent")
+local ReportThesisEvent = EventsFolder:WaitForChild("ReportThesisEvent")
 
 local MAX_THESIS_ID_LENGTH = 40
 
@@ -101,3 +105,35 @@ RemoteGuard.handle(GetTickerThesesEvent, RemoteGuard.LIMITS.Research, function(p
 
 	return ThesisService.getForTicker(player, ticker)
 end)
+
+-- MutePlayerEvent(userId, shouldMute)
+-- Returns { success, message?, isMuted }
+RemoteGuard.handle(MutePlayerEvent, RemoteGuard.LIMITS.Rare, function(player, userId, shouldMute)
+	if not isUserId(userId) or type(shouldMute) ~= "boolean" then
+		return INVALID_REQUEST
+	end
+
+	return MuteService.setMuted(player, userId, shouldMute)
+end, RemoteGuard.TOO_MANY_REQUESTS)
+
+-- SetRobloxBlocksEvent(userIds)
+-- The client's Roblox block list, sent at startup and whenever it changes
+RemoteGuard.handle(SetRobloxBlocksEvent, RemoteGuard.LIMITS.Rare, function(player, userIds)
+	if type(userIds) ~= "table" then
+		return false
+	end
+
+	MuteService.setRobloxBlocks(player, userIds)
+
+	return true
+end, false)
+
+-- ReportThesisEvent(thesisId, ticker)
+-- Returns { success, message? }
+RemoteGuard.handle(ReportThesisEvent, RemoteGuard.LIMITS.Rare, function(player, thesisId, ticker)
+	if type(thesisId) ~= "string" or #thesisId > MAX_THESIS_ID_LENGTH or not MarketDataModule.isValidTicker(ticker) then
+		return INVALID_REQUEST
+	end
+
+	return ThesisService.report(player, thesisId, ticker)
+end, RemoteGuard.TOO_MANY_REQUESTS)

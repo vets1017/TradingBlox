@@ -64,6 +64,8 @@ local TEMPLATE = {
 		ThesisSequence = 0, -- numbers the next thesis id
 		ThesisDay = "", -- UTC date of the last thesis, for the daily limit
 		ThesesToday = 0,
+		Muted = {}, -- [tostring(userId)] = time muted; see MuteService
+		HiddenTheses = {}, -- [thesisId] = time reported, hidden from this player
 	},
 }
 
@@ -74,6 +76,7 @@ local PlayerStore = ProfileStore.New(STORE_NAME, TEMPLATE)
 local profiles = {} -- [player] = profile, only while this server holds the session
 local startedPlayers = {} -- [player] = true once a load has begun
 local leavingCallbacks = {}
+local messageHandlers = {} -- [kind] = callback(player, data, message)
 local playerLoaded = Instance.new("BindableEvent")
 
 local PlayerDataService = {}
@@ -97,6 +100,28 @@ end
 -- spawn anything that yields, since the save waits for them.
 function PlayerDataService.onPlayerLeaving(callback)
 	table.insert(leavingCallbacks, callback)
+end
+
+-- Calls `callback(player, data, message)` for each message of `kind` sent
+-- with sendMessage, once the player's profile is loaded here. Register
+-- before start(). Messages of a kind nothing handles stay in the profile.
+function PlayerDataService.onMessage(kind: string, callback)
+	messageHandlers[kind] = callback
+end
+
+-- Leaves `message` ({ kind = ..., ... }) in a player's profile wherever
+-- they are: the server holding their session handles it within an autosave,
+-- or the next server they join does. Yields; returns whether it was sent.
+function PlayerDataService.sendMessage(userId: number, message): boolean
+	local success, sent = pcall(PlayerStore.MessageAsync, PlayerStore, "Player_" .. userId, message)
+
+	if not success or not sent then
+		warn("[PlayerDataService] Couldn't message the profile of " .. userId .. ": " .. tostring(sent))
+
+		return false
+	end
+
+	return true
 end
 
 -- Sets a top-level stat and mirrors it to the player's attribute of the same
@@ -194,6 +219,16 @@ local function onPlayerAdded(player)
 
 	profiles[player] = profile
 	player:SetAttribute("Balance", profile.Data.Balance)
+
+	profile:MessageHandler(function(message, processed)
+		local handler = type(message) == "table" and messageHandlers[message.kind]
+
+		if handler then
+			handler(player, profile.Data, message)
+			processed()
+		end
+	end)
+
 	playerLoaded:Fire(player)
 end
 

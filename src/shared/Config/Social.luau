@@ -49,6 +49,18 @@ Social.THESES_KEPT = 20 -- in the author's profile
 Social.THESES_PER_TICKER = 30 -- in a ticker's list
 Social.PROFILE_THESES = 5 -- on the public profile
 
+-- Safety: mutes are the game's own and saved; blocks are the player's
+-- Roblox blocks. Either one hides that player's feed items and theses, and
+-- the trades and theses on their profile.
+Social.MAX_MUTED = 500
+Social.MAX_HIDDEN_THESES = 200 -- theses a player reported, hidden from them
+
+-- A thesis comes down everywhere once this many players have reported it,
+-- counting only Roblox accounts at least MIN_REPORTER_ACCOUNT_AGE_DAYS old
+-- so a few fresh alts can't take down whatever they like
+Social.REPORTS_TO_TAKE_DOWN = 3
+Social.MIN_REPORTER_ACCOUNT_AGE_DAYS = 30
+
 function Social.getHorizon(horizonId)
 	for _, horizon in ipairs(Social.THESIS_HORIZONS) do
 		if horizon.id == horizonId then

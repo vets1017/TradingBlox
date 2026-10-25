@@ -135,3 +135,29 @@ test("open theses are counted per side", function()
 
 	equal(ThesisModule.countOpen(list, NOW), { Bullish = 2, Bearish = 1 })
 end)
+
+test("reports count each old-enough reporter once and cross the threshold once", function()
+	local thesis = { id = "9-1" }
+	local record, crossed = ThesisModule.addReport(nil, thesis, 1, true, NOW, 2)
+
+	equal(record.counted, 1)
+	equal(crossed, false)
+	equal(record.thesis, thesis)
+
+	record, crossed = ThesisModule.addReport(record, thesis, 1, true, NOW, 2)
+	equal(record.counted, 1, "the same reporter again")
+	equal(crossed, false)
+
+	record, crossed = ThesisModule.addReport(record, thesis, 2, false, NOW, 2)
+	equal(record.counted, 1, "a new account is recorded but not counted")
+	equal(record.reporters["2"].counted, false)
+	equal(crossed, false)
+
+	record, crossed = ThesisModule.addReport(record, thesis, 3, true, NOW, 2)
+	equal(record.counted, 2)
+	equal(crossed, true)
+	equal(record.takenDown, true)
+
+	record, crossed = ThesisModule.addReport(record, thesis, 4, true, NOW, 2)
+	equal(crossed, false, "already taken down")
+end)
