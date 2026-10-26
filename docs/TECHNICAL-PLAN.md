@@ -40,7 +40,7 @@ shelved, and Phases 0, 1 and 2 are done; Phase 2 ran on 2026-10-25 (decisions an
 | Lint and format | selene, StyLua and Lune pinned in `aftman.toml`; `stylua.toml`; selene and StyLua both clean                                                                                                                                                     |
 | Tests and CI    | Lune unit tests for the pure modules (`tests/`). GitHub Actions runs selene, StyLua, the tests and a Rojo build. Studio checks through the MCP tools for the rest                                                                                |
 | Place file      | Git-ignored. `TerminalGui` (371 instances; Dashboard, Charts and Trade screens) is tracked as `src/gui/TerminalGui.rbxmx`                                                                                                                        |
-| Backend         | `StockDataFetcher`: Node, Express and `yahoo-finance2` v3 on Render. Candles, quote details, analyst, fundamentals, options, option chain, news, movers, profile, batch quotes and splits; every Yahoo call cached in memory. No auth, open CORS |
+| Backend         | `StockDataFetcher`: Node, Express and `yahoo-finance2` v3 on Render. Candles, quote details, analyst, fundamentals, options, option chain, news, movers, profile, batch quotes, splits and health; every Yahoo call cached in memory, with stale answers while Yahoo fails and chart-built quotes when it refuses crumbs (§3). No auth, open CORS |
 | Player data     | ProfileStore: one session-locked `PlayerData_v2` profile per player, autosaved every 60 s                                                                                                                                                        |
 
 
@@ -73,7 +73,7 @@ shelved, and Phases 0, 1 and 2 are done; Phase 2 ran on 2026-10-25 (decisions an
 
 ### Defects and risks in the current code, worst first
 
-Status after Phase 0: 1–3 and 5–9 are fixed. 4 is half done (cache and batching; no auth). 10 is open.
+Status after Phase 0: 1–3 and 5–9 are fixed. 4 is half done (cache, batching and a health route; no auth). 10 is open.
 
 1. **Player data loss.**
   - Saves happen only on leave and on shutdown, so a server crash loses the whole session.
@@ -377,11 +377,20 @@ limits, and it has already returned 429 errors. Secondary sources say Yahoo's te
 redistribution without a license; I couldn't read the terms themselves. It's fine for prototyping.
 Before a public launch, pick a licensed provider whose terms allow showing the data to players,
 possibly delayed data, which tends to cost less. That's a budget decision (§6).
+- **Yahoo refuses crumbs to Render** (seen 2026-10-25). Its quote, quote-summary, options and screener
+calls need a "crumb" token first, and Yahoo answers the crumb request from Render's shared IP with 429,
+while the same code works from a home connection. Charts and search need no crumb and keep working.
+The backend (`7a1bfbf`, deployed the same day) pauses crumb calls after a refusal (a minute, doubling to
+15 minutes), builds batch quotes from the chart endpoint (price, previous close, time and market state,
+but no bid or ask, so fills use the last price), answers other routes with their last good data up to
+six hours old, and reports the pause at `/api/health`. While the block lasts, quote details, analyst
+reports, fundamentals, options and movers work only from stale data. This is an IP problem that code
+can't fully solve: a licensed provider, or a host Yahoo trusts, is the real fix.
 - **Data situations the game must handle:** delayed vs. real-time quotes, pre-market and after-hours
 prices, trading halts, stock splits, dividends, option expiries, crypto trading 24/7, and holidays and
 early closes.
 - **Hosting:** a single Render instance. Whether it sleeps when idle depends on the plan, which I
-haven't checked. Every trade depends on it, so add health checks and timeouts. When quotes go stale,
+haven't checked. Every trade depends on it, so add health checks (`/api/health` exists) and timeouts. When quotes go stale,
 disable trading for the affected symbols rather than for everything.
 
 ### Roblox experience data (for the GDD §6 market)
@@ -411,8 +420,8 @@ and plan.
 4. ✅ **Remotes layer:** one registry, argument checks, per-player rate limits, and RemoteEvents for
   server pushes. (`ServerSetup` registry; `RemoteGuard` token buckets on every remote.)
 5. ◐ **Market data:**
-  - Backend cache, batch quotes, shared-secret auth, health route. (Cache and batch quotes done;
-  auth and the health route are not.)
+  - Backend cache, batch quotes, shared-secret auth, health route. (Cache, batch quotes and the health
+  route are done; auth isn't.)
   - Server quote table and price pump; fills at bid/ask; stale-quote check. (All but the price pump:
   prices are fetched in batches on demand, not pushed.)
 6. ✅ **Trading correctness:** trade log and realized P/L, option settlement at expiry, stock splits, and
