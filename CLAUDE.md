@@ -76,7 +76,8 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
   - `ServerSetup.server.luau` creates the `EventsFolder` in `ReplicatedStorage` and all `RemoteFunction`s the
     client calls (`RequestChartEvent`, `GetMarketDataEvent`, `GetOptionsDataEvent`, `GetPositionsEvent`,
     `GetPortfolioEvent`, `GetLeaderboardEvent`, `GetPublicProfileEvent`, `GetNewsFeedEvent`, `GetMarketMoversEvent`,
-    `PlayerOrderEvent`, `PlayerOptionOrderEvent`, `FollowPlayerEvent`, `SetShareTradesEvent`, `GetFeedEvent`,
+    `PlayerOrderEvent`, `PlaceLimitOrderEvent`, `PlaceStopOrderEvent`, `PlayerOptionOrderEvent`,
+    `FollowPlayerEvent`, `SetShareTradesEvent`, `GetFeedEvent`,
     `PublishThesisEvent`, `DeleteThesisEvent`, `GetTickerThesesEvent`, `MutePlayerEvent`, `SetRobloxBlocksEvent`,
     `ReportThesisEvent`, `ReactToFeedItemEvent`, `GetInboxEvent`, `MarkInboxSeenEvent`, `GetTrendingEvent`,
     `GetRobloxMarketEvent`, plus watchlist and research remotes; pushes go through RemoteEvents `OrderUpdateEvent` and `NotificationEvent`). This must run before other server scripts wire up
@@ -135,11 +136,14 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
   - `ProgressionService` — XP, levels, feature unlocks (`hasFeature(player, feature)`) and the getting-started
     tutorial. Mirrors `XP`, `Level`, `TutorialProgress` and `TutorialComplete` to player attributes, and handles
     `CompleteTutorialStepEvent` itself. `Achieved` fires `(player, "Milestone", name)` or `(player, "Level", n)`.
-  - `OrderService` — share execution: `fillShares` (market orders and limit fills share it) and level 2 limit
-    orders kept in `playerData.Orders`: checked every 15 s while the player is online, caught up at login
-    against candles since placement, expired after 30 days. `getFillPrice(ticker, side)` prices every share
-    fill (live quote through `FillPriceModule`). `notify(player, kind, message)` pushes fills, cancellations,
-    expiries and splits through the `OrderUpdateEvent` RemoteEvent (ShellController shows them as a toast).
+  - `OrderService` — share execution: `fillShares` (market orders and waiting orders' fills share it) and the
+    level 2 waiting orders kept in `playerData.Orders` — limit (`placeLimit`), stop and stop-limit
+    (`placeStop`; a stop must be beyond the price) — checked every 15 s while the player is online, caught up at
+    login against candles since placement, expired after 30 days. **When an order fills, and how it reads, is in
+    the pure, tested `Modules/Multi/OrderRules.luau`** (`checkLive`, `catchUp`, `describe`), shared with the
+    order lists and ticket. `getFillPrice(ticker, side)` prices every share fill (live quote through
+    `FillPriceModule`). `notify(player, kind, message)` pushes fills, triggered stops, cancellations, expiries
+    and splits through the `OrderUpdateEvent` RemoteEvent (ShellController shows them as a toast).
   - `SettlementService` — at login and every 10 minutes: settles expired options at intrinsic value from the
     underlying's close (logged with `settlement = "Expired"`, which counts in realized P/L but not trades),
     and applies stock splits to shares, average cost and open orders (cash in lieu for fractions), using

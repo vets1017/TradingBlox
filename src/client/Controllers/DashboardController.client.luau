@@ -15,6 +15,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Theme = require(ReplicatedStorage.Modules.Multi.Theme)
 local NumberModule = require(ReplicatedStorage.Modules.Multi.NumberModule)
 local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursModule)
+local OrderRules = require(ReplicatedStorage.Modules.Multi.OrderRules)
 local Navigation = require(ReplicatedStorage.Modules.Multi.Navigation)
 local LineChart = require(ReplicatedStorage.UI.LineChart)
 local UIKit = require(ReplicatedStorage.UI.UIKit)
@@ -444,12 +445,12 @@ local function renderAccountInfo(summary, orders)
 		AccountValues.optionPower.TextColor3 = Theme.Colors.TextDisabled
 	end
 
-	-- Cash already promised to open buy limits isn't available for new orders
+	-- Cash already promised to open buy orders isn't available for new ones
 	local committed = 0
 
 	for _, order in ipairs(lastOrders) do
 		if order.side == "Buy" then
-			committed += order.quantity * order.limitPrice
+			committed += order.quantity * OrderRules.reservedPrice(order)
 		end
 	end
 
@@ -544,11 +545,11 @@ local function renderOrders(orders, fills)
 			OpenOrdersList,
 			index,
 			string.format(
-				"%s %d %s @ %s",
+				"%s %d %s %s",
 				sideText(order.side),
 				order.quantity,
 				order.ticker,
-				NumberModule.format(order.limitPrice)
+				OrderRules.describeTerms(order, NumberModule.format)
 			)
 		)
 	end

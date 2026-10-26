@@ -13,6 +13,7 @@ local EVENTS = {
 	"GetNewsFeedEvent",
 	"PlayerOrderEvent",
 	"PlaceLimitOrderEvent",
+	"PlaceStopOrderEvent",
 	"CancelOrderEvent",
 	"GetOrdersEvent",
 	"PlayerOptionOrderEvent",

@@ -12,6 +12,7 @@ local TweenService = game:GetService("TweenService")
 
 local Theme = require(ReplicatedStorage.Modules.Multi.Theme)
 local NumberModule = require(ReplicatedStorage.Modules.Multi.NumberModule)
+local OrderRules = require(ReplicatedStorage.Modules.Multi.OrderRules)
 local LineChart = require(ReplicatedStorage.UI.LineChart)
 local UIKit = require(ReplicatedStorage.UI.UIKit)
 local Navigation = require(ReplicatedStorage.Modules.Multi.Navigation)
@@ -958,8 +959,11 @@ local function createOrderRow(index, order)
 	local detail = makeLabel("Detail", row, Theme.Fonts.Mono, Theme.TextSize.Caption, Theme.Colors.TextMuted)
 	detail.Position = UDim2.fromOffset(0, 18)
 	detail.Size = UDim2.new(1, -80, 0, 16)
-	detail.Text =
-		string.format("limit %s · %s", NumberModule.format(order.limitPrice), formatAge(os.time() - order.createdAt))
+	detail.Text = string.format(
+		"%s · %s",
+		OrderRules.describeLevels(order, NumberModule.format),
+		formatAge(os.time() - order.createdAt)
+	)
 
 	local cancel = Instance.new("TextButton")
 	cancel.Name = "Cancel"

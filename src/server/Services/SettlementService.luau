@@ -178,7 +178,15 @@ local function applySplit(player, data, ticker, split)
 				data.Orders[orderId] = nil
 			else
 				order.quantity = quantity
-				order.limitPrice = math.round(order.limitPrice / ratio * 100) / 100
+
+				-- Whichever prices the order has: a stop has no limit
+				if order.limitPrice then
+					order.limitPrice = math.round(order.limitPrice / ratio * 100) / 100
+				end
+
+				if order.stopPrice then
+					order.stopPrice = math.round(order.stopPrice / ratio * 100) / 100
+				end
 			end
 		end
 	end

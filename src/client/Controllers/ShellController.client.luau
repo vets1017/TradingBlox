@@ -400,6 +400,7 @@ task.spawn(function()
 
 	local TITLES = {
 		filled = "Order filled",
+		triggered = "Stop reached",
 		cancelled = "Order cancelled",
 		expired = "Option expired",
 		split = "Stock split",

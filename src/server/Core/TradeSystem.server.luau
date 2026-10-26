@@ -1,8 +1,8 @@
 -- TradeSystem.server.luau
 --
--- Share order remotes (market orders, and level 2 limit orders placed,
--- cancelled and listed) and positions reporting. Execution itself lives in
--- OrderService.
+-- Share order remotes (market orders, and level 2 limit, stop and
+-- stop-limit orders placed, cancelled and listed) and positions reporting.
+-- Execution itself lives in OrderService.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
@@ -17,6 +17,7 @@ local Instruments = require(ReplicatedStorage.Config.Instruments)
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
 local PlayerOrderEvent = EventsFolder:WaitForChild("PlayerOrderEvent")
 local PlaceLimitOrderEvent = EventsFolder:WaitForChild("PlaceLimitOrderEvent")
+local PlaceStopOrderEvent = EventsFolder:WaitForChild("PlaceStopOrderEvent")
 local CancelOrderEvent = EventsFolder:WaitForChild("CancelOrderEvent")
 local GetOrdersEvent = EventsFolder:WaitForChild("GetOrdersEvent")
 local GetPositionsEvent = EventsFolder:WaitForChild("GetPositionsEvent")
@@ -67,6 +68,18 @@ end, RemoteGuard.TOO_MANY_REQUESTS)
 RemoteGuard.handle(PlaceLimitOrderEvent, RemoteGuard.LIMITS.Order, function(player, action, ticker, shares, limitPrice)
 	return OrderService.placeLimit(player, action, ticker, shares, limitPrice)
 end, RemoteGuard.TOO_MANY_REQUESTS)
+
+-- PlaceStopOrderEvent
+-- A stop, or with a limit price a stop-limit; like a limit order it can be
+-- placed while the market is closed
+RemoteGuard.handle(
+	PlaceStopOrderEvent,
+	RemoteGuard.LIMITS.Order,
+	function(player, action, ticker, shares, stopPrice, limitPrice)
+		return OrderService.placeStop(player, action, ticker, shares, stopPrice, limitPrice)
+	end,
+	RemoteGuard.TOO_MANY_REQUESTS
+)
 
 -- CancelOrderEvent
 RemoteGuard.handle(CancelOrderEvent, RemoteGuard.LIMITS.Order, function(player, orderId)

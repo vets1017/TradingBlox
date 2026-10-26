@@ -1,11 +1,12 @@
 -- OrderTicketModule.luau
 --
--- The Trade screen's share order ticket. Pick Market or Limit, then one
+-- The Trade screen's share order ticket. Pick an order type, then one
 -- click on a preset - buy a dollar amount, or sell a share of the position -
 -- places the order straight away, the same one-click pattern as the Charts
--- screen's Active Trader. Limit mode (level 2) adds a limit price, typed or
--- nudged from the last price; a limit order can be placed while the market
--- is closed and fills once it opens and the price crosses.
+-- screen's Active Trader. Limit, Stop and Stop-limit (level 2) add their
+-- prices, typed or nudged from the last price; they can be placed while the
+-- market is closed and fill once it opens and the price gets there
+-- (OrderRules).
 --
 -- Client-only. TradeController owns the ticker, price and position and
 -- calls update() when any of them change.
@@ -23,12 +24,32 @@ local Instruments = require(ReplicatedStorage.Config.Instruments)
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
 local PlayerOrderEvent = EventsFolder:WaitForChild("PlayerOrderEvent")
 local PlaceLimitOrderEvent = EventsFolder:WaitForChild("PlaceLimitOrderEvent")
+local PlaceStopOrderEvent = EventsFolder:WaitForChild("PlaceStopOrderEvent")
 
 local Player = Players.LocalPlayer
 
 local BUY_PRESETS = { 100, 250, 500, 1000 } -- dollars, like Active Trader
 local SELL_PRESETS = { 0.25, 0.5, 0.75, 1 } -- of the position
 local PRICE_NUDGES = { -0.01, -0.005, 0, 0.005, 0.01 } -- from the last price; 0 resets to it
+
+-- The order types, in the ticket's order: their pill, the unlock they need,
+-- and which prices they take
+local MODES = {
+	{ id = "Market" },
+	{ id = "Limit", feature = "LimitOrders", limit = true },
+	{ id = "Stop", feature = "StopOrders", stop = true },
+	{ id = "StopLimit", label = "Stop-limit", feature = "StopOrders", stop = true, limit = true },
+}
+
+local function getMode(id)
+	for _, mode in ipairs(MODES) do
+		if mode.id == id then
+			return mode
+		end
+	end
+
+	return MODES[1]
+end
 
 local NO_TICKER_HINT = "Load a ticker to trade"
 local CONTROL_HEIGHT = 28
@@ -107,7 +128,7 @@ function OrderTicketModule.new(options)
 	self.options = options
 	self.mode = "Market"
 	self.isBusy = false
-	self.limitTicker = nil -- the ticker the limit price was last filled in for
+	self.pricesTicker = nil -- the ticker the price boxes were last filled in for
 
 	local frame = UIKit.makePanel("OrderTicket", options.parent)
 	frame.LayoutOrder = options.layoutOrder
@@ -135,64 +156,23 @@ function OrderTicketModule.new(options)
 	local typeGroup = makeGroup("Type", frame, 1)
 	self.typePills = {}
 
-	for index, mode in ipairs({ "Market", "Limit" }) do
-		local pill, stroke = makePill(mode, typeGroup, index, mode, Theme.Fonts.UISemibold)
+	for index, mode in ipairs(MODES) do
+		local pill, stroke = makePill(mode.id, typeGroup, index, mode.label or mode.id, Theme.Fonts.UISemibold)
 
-		self.typePills[mode] = { button = pill, stroke = stroke }
+		self.typePills[mode.id] = { button = pill, stroke = stroke }
 
 		pill.MouseButton1Click:Connect(function()
-			self:setMode(mode)
+			self:setMode(mode.id)
 		end)
 	end
 
-	-- Limit price
-	local limitGroup = makeGroup("Limit", frame, 2)
-	self.limitGroup = limitGroup
-
-	makeCaption("Caption", limitGroup, 1, "Limit $")
-
-	local limitBox = Instance.new("TextBox")
-	limitBox.Name = "LimitPrice"
-	limitBox.LayoutOrder = 2
-	limitBox.Size = UDim2.new(0, LIMIT_BOX_WIDTH, 1, 0)
-	limitBox.BackgroundColor3 = Theme.Colors.Raised
-	limitBox.BorderSizePixel = 0
-	limitBox.FontFace = Theme.Fonts.Mono
-	limitBox.TextSize = Theme.TextSize.Body
-	limitBox.TextColor3 = Theme.Colors.Text
-	limitBox.PlaceholderColor3 = Theme.Colors.TextMuted
-	limitBox.PlaceholderText = "0.00"
-	limitBox.ClearTextOnFocus = false
-	limitBox.Text = ""
-	limitBox.Parent = limitGroup
-	UIKit.addCorner(limitBox)
-	UIKit.addStroke(limitBox)
-	self.limitBox = limitBox
-
-	limitBox.FocusLost:Connect(function()
-		local price = self:getLimitPrice()
-
-		limitBox.Text = price and string.format("%.2f", price) or ""
-	end)
-
-	for index, nudge in ipairs(PRICE_NUDGES) do
-		local text = nudge == 0 and "Last" or string.format("%+g%%", nudge * 100)
-		local pill = makePill("Nudge_" .. index, limitGroup, 2 + index, text)
-
-		pill.TextSize = Theme.TextSize.Caption
-		pill.TextColor3 = Theme.Colors.TextMuted
-
-		pill.MouseButton1Click:Connect(function()
-			local lastPrice = options.getPrice()
-
-			if lastPrice and lastPrice > 0 then
-				limitBox.Text = string.format("%.2f", lastPrice * (1 + nudge))
-			end
-		end)
-	end
+	-- The prices the order types take: a stop first, then a limit (a
+	-- stop-limit reads "stop at, then limit")
+	self.stopGroup, self.stopBox = self:makePriceField("Stop", "Stop $", 2)
+	self.limitGroup, self.limitBox = self:makePriceField("Limit", "Limit $", 3)
 
 	-- Buy dollar amounts
-	local buyGroup = makeGroup("Buy", frame, 3)
+	local buyGroup = makeGroup("Buy", frame, 4)
 	makeCaption("Caption", buyGroup, 1, "Buy")
 	self.buyPills = {}
 
@@ -209,7 +189,7 @@ function OrderTicketModule.new(options)
 	end
 
 	-- Sell shares of the position
-	local sellGroup = makeGroup("Sell", frame, 4)
+	local sellGroup = makeGroup("Sell", frame, 5)
 	makeCaption("Caption", sellGroup, 1, "Sell")
 	self.sellPills = {}
 
@@ -224,7 +204,7 @@ function OrderTicketModule.new(options)
 	end
 
 	local status = UIKit.makeLabel("Status", frame, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.TextMuted)
-	status.LayoutOrder = 5
+	status.LayoutOrder = 6
 	status.AutomaticSize = Enum.AutomaticSize.X
 	status.Size = UDim2.fromOffset(0, CONTROL_HEIGHT)
 	status.TextTruncate = Enum.TextTruncate.None
@@ -239,15 +219,84 @@ function OrderTicketModule.new(options)
 	return self
 end
 
-function OrderTicketModule:isLimitUnlocked()
-	return Progression.isUnlocked(Player:GetAttribute("Level") or 1, "LimitOrders")
+-- A price box with its caption and nudges from the last price, in a group
+-- of its own. Returns the group and the box.
+function OrderTicketModule:makePriceField(name, caption, layoutOrder)
+	local group = makeGroup(name, self.frame, layoutOrder)
+
+	makeCaption("Caption", group, 1, caption)
+
+	local box = Instance.new("TextBox")
+	box.Name = name .. "Price"
+	box.LayoutOrder = 2
+	box.Size = UDim2.new(0, LIMIT_BOX_WIDTH, 1, 0)
+	box.BackgroundColor3 = Theme.Colors.Raised
+	box.BorderSizePixel = 0
+	box.FontFace = Theme.Fonts.Mono
+	box.TextSize = Theme.TextSize.Body
+	box.TextColor3 = Theme.Colors.Text
+	box.PlaceholderColor3 = Theme.Colors.TextMuted
+	box.PlaceholderText = "0.00"
+	box.ClearTextOnFocus = false
+	box.Text = ""
+	box.Parent = group
+	UIKit.addCorner(box)
+	UIKit.addStroke(box)
+
+	box.FocusLost:Connect(function()
+		local price = self:readPrice(box)
+
+		box.Text = price and string.format("%.2f", price) or ""
+	end)
+
+	for index, nudge in ipairs(PRICE_NUDGES) do
+		local text = nudge == 0 and "Last" or string.format("%+g%%", nudge * 100)
+		local pill = makePill("Nudge_" .. index, group, 2 + index, text)
+
+		pill.TextSize = Theme.TextSize.Caption
+		pill.TextColor3 = Theme.Colors.TextMuted
+
+		pill.MouseButton1Click:Connect(function()
+			local lastPrice = self.options.getPrice()
+
+			if lastPrice and lastPrice > 0 then
+				box.Text = string.format("%.2f", lastPrice * (1 + nudge))
+			end
+		end)
+	end
+
+	return group, box
 end
 
--- The typed limit price, ignoring "$" and commas; nil unless positive
-function OrderTicketModule:getLimitPrice()
-	local price = tonumber((string.gsub(self.limitBox.Text, "[^%d%.]", "")))
+function OrderTicketModule:isUnlocked(modeId)
+	local feature = getMode(modeId).feature
+
+	return not feature or Progression.isUnlocked(Player:GetAttribute("Level") or 1, feature)
+end
+
+-- A box's typed price, ignoring "$" and commas; nil unless positive
+function OrderTicketModule:readPrice(box)
+	local price = tonumber((string.gsub(box.Text, "[^%d%.]", "")))
 
 	return price and price > 0 and math.round(price * 100) / 100 or nil
+end
+
+-- The current mode's prices: { stop?, limit? }, and the name of the first
+-- one that's missing
+function OrderTicketModule:getPrices()
+	local mode = getMode(self.mode)
+	local prices = {
+		stop = mode.stop and self:readPrice(self.stopBox) or nil,
+		limit = mode.limit and self:readPrice(self.limitBox) or nil,
+	}
+
+	if mode.stop and not prices.stop then
+		return prices, "stop"
+	elseif mode.limit and not prices.limit then
+		return prices, "limit"
+	end
+
+	return prices, nil
 end
 
 function OrderTicketModule:setStatus(text, color)
@@ -255,14 +304,18 @@ function OrderTicketModule:setStatus(text, color)
 	self.status.TextColor3 = color or Theme.Colors.TextMuted
 end
 
-function OrderTicketModule:setMode(mode)
-	if mode == "Limit" and not self:isLimitUnlocked() then
-		self:setStatus("Limit orders: " .. Progression.getLockedMessage("LimitOrders"))
+function OrderTicketModule:setMode(modeId)
+	local mode = getMode(modeId)
+
+	if not self:isUnlocked(modeId) then
+		self:setStatus(
+			string.format("%s orders: %s", mode.label or mode.id, Progression.getLockedMessage(mode.feature))
+		)
 
 		return
 	end
 
-	self.mode = mode
+	self.mode = modeId
 	self:update()
 end
 
@@ -271,29 +324,35 @@ function OrderTicketModule:update()
 	local options = self.options
 	local ticker = options.getTicker()
 	local hasTicker = ticker ~= ""
-	local isLimitUnlocked = self:isLimitUnlocked()
 
-	if self.mode == "Limit" and not isLimitUnlocked then
+	if not self:isUnlocked(self.mode) then
 		self.mode = "Market"
 	end
 
-	for mode, pill in pairs(self.typePills) do
-		local isActive = mode == self.mode
+	for _, mode in ipairs(MODES) do
+		local pill = self.typePills[mode.id]
+		local isActive = mode.id == self.mode
+		local label = mode.label or mode.id
 
 		pill.button.BackgroundTransparency = isActive and 0 or 1
 		pill.button.TextColor3 = isActive and Theme.Colors.Text or Theme.Colors.TextMuted
+		pill.button.Text = self:isUnlocked(mode.id) and label
+			or string.format("%s · Lv %d", label, Progression.FEATURES[mode.feature])
 		pill.stroke.Enabled = isActive
 	end
 
-	self.typePills.Limit.button.Text = isLimitUnlocked and "Limit"
-		or string.format("Limit · Lv %d", Progression.FEATURES.LimitOrders)
+	local mode = getMode(self.mode)
 
-	self.limitGroup.Visible = self.mode == "Limit"
+	self.stopGroup.Visible = mode.stop == true
+	self.limitGroup.Visible = mode.limit == true
 
-	-- A new ticker starts its limit price at the last price
-	if self.mode == "Limit" and hasTicker and self.limitTicker ~= ticker and options.getPrice() > 0 then
-		self.limitBox.Text = string.format("%.2f", options.getPrice())
-		self.limitTicker = ticker
+	-- A new ticker starts its prices at the last price
+	if (mode.stop or mode.limit) and hasTicker and self.pricesTicker ~= ticker and options.getPrice() > 0 then
+		local lastPrice = string.format("%.2f", options.getPrice())
+
+		self.stopBox.Text = lastPrice
+		self.limitBox.Text = lastPrice
+		self.pricesTicker = ticker
 	end
 
 	for _, pill in ipairs(self.buyPills) do
@@ -316,32 +375,47 @@ function OrderTicketModule:update()
 end
 
 -- Market orders fill at the live price, so they need the market open
--- (crypto and the Roblox market trade around the clock); limit orders can
--- wait for it
+-- (crypto and the Roblox market trade around the clock); the other types
+-- can wait for it
 function OrderTicketModule:canTradeNow(ticker)
 	if
-		self.mode == "Limit"
+		self.mode ~= "Market"
 		or Instruments.tradesAroundTheClock(ticker)
 		or MarketHoursModule.getMarketStatus(os.time())
 	then
 		return true
 	end
 
-	local hint = self:isLimitUnlocked() and " Use a limit order to buy or sell once it opens." or ""
+	local hint = self:isUnlocked("Limit") and " Use a limit or stop order to trade once it opens." or ""
 
 	self:setStatus("The market is closed." .. hint, Theme.Colors.Down)
 
 	return false
 end
 
-function OrderTicketModule:submit(action, shares)
+-- The prices are there, or the status says which to enter
+function OrderTicketModule:checkPrices()
+	local prices, missing = self:getPrices()
+
+	if missing then
+		self:setStatus(string.format("Enter a %s price first.", missing), Theme.Colors.Down)
+
+		return nil
+	end
+
+	return prices
+end
+
+function OrderTicketModule:submit(action, shares, prices)
 	local ticker = self.options.getTicker()
 	local result
 
 	self.isBusy = true
 
 	if self.mode == "Limit" then
-		result = PlaceLimitOrderEvent:InvokeServer(action, ticker, shares, self:getLimitPrice())
+		result = PlaceLimitOrderEvent:InvokeServer(action, ticker, shares, prices.limit)
+	elseif self.mode == "Stop" or self.mode == "StopLimit" then
+		result = PlaceStopOrderEvent:InvokeServer(action, ticker, shares, prices.stop, prices.limit)
 	else
 		result = PlayerOrderEvent:InvokeServer(action, ticker, shares)
 	end
@@ -363,10 +437,17 @@ function OrderTicketModule:buy(dollarAmount)
 		return
 	end
 
-	local price = self.mode == "Limit" and self:getLimitPrice() or self.options.getPrice()
+	local prices = self:checkPrices()
+
+	if not prices then
+		return
+	end
+
+	-- Shares at the price it would fill at: the limit, else the stop, else the market
+	local price = prices.limit or prices.stop or self.options.getPrice()
 
 	if not price or price <= 0 then
-		self:setStatus("Enter a limit price first.", Theme.Colors.Down)
+		self:setStatus("Price unavailable. Try again.", Theme.Colors.Down)
 
 		return
 	end
@@ -382,7 +463,7 @@ function OrderTicketModule:buy(dollarAmount)
 		return
 	end
 
-	self:submit("Buy", shares)
+	self:submit("Buy", shares, prices)
 end
 
 function OrderTicketModule:sell(fraction)
@@ -393,16 +474,16 @@ function OrderTicketModule:sell(fraction)
 		return
 	end
 
-	if self.mode == "Limit" and not self:getLimitPrice() then
-		self:setStatus("Enter a limit price first.", Theme.Colors.Down)
+	local prices = self:checkPrices()
 
+	if not prices then
 		return
 	end
 
 	-- At least one share, and all of it at 100%
 	local shares = fraction >= 1 and position or math.max(1, math.floor(position * fraction))
 
-	self:submit("Sell", shares)
+	self:submit("Sell", shares, prices)
 end
 
 return OrderTicketModule

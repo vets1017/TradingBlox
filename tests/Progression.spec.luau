@@ -44,6 +44,7 @@ test("getUnlocksAt lists that level's features, sorted", function()
 		"fundamentals and analyst reports",
 		"limit orders",
 		"portfolio analytics",
+		"stop orders",
 	})
 	equal(Progression.getUnlocksAt(3), { "advanced chart indicators", "options trading" })
 end)

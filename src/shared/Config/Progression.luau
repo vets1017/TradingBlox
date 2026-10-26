@@ -21,6 +21,7 @@ Progression.FEATURES = {
 	ChartIndicators = 2, -- moving averages, RSI, MACD, Bollinger Bands
 	Analytics = 2, -- portfolio analytics beyond positions and value
 	LimitOrders = 2,
+	StopOrders = 2, -- stop and stop-limit
 	Options = 3, -- option chain, Option Stats tab, contract orders
 	AdvancedIndicators = 3, -- ATR, VWAP, volume profile
 }
@@ -32,6 +33,7 @@ Progression.FEATURE_NAMES = {
 	AdvancedIndicators = "advanced chart indicators",
 	Analytics = "portfolio analytics",
 	LimitOrders = "limit orders",
+	StopOrders = "stop orders",
 	Options = "options trading",
 }
 

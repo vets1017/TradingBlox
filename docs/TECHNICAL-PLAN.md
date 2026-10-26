@@ -695,8 +695,12 @@ Taken at the start of Phase 4 (2026-10-26); Kevin accepted each recommendation:
    restarts each UTC day with no line across the restart. Roblox games have no volume, so VWAP and
    the volume profile draw nothing for them. Seen while testing: in a window under ~700 px wide the
    Charts toolbar (market picker, timeframe, indicators) runs past the chart's edge.
-2. Stop and stop-limit orders (Level 2): order types in `OrderService`, checked live and caught up at
-   login against candles like limit orders; the Trade ticket offers them.
+2. ✅ Stop and stop-limit orders (Level 2, `StopOrders`): order types in `OrderService`, checked live and
+   caught up at login against candles like limit orders; the Trade ticket offers them. The rules are pure
+   and tested in `OrderRules`: a stop fills at the market once the price reaches it (a gap fills at the
+   worse open); a stop-limit's stop turns it into a limit order, and one that gaps past its limit waits
+   for it (`triggeredAt`, with a "Stop reached" toast). A stop must be beyond the price when placed. A
+   split adjusts stop prices too. Old orders without a type read as limits.
 3. Short selling (Level 2), cash-backed as decided.
 4. Risk analytics on the Portfolio tab (Level 2): volatility, Sharpe ratio, beta against SPY and
    concentration; leverage and options exposure once they exist.

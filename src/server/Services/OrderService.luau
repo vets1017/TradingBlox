@@ -1,16 +1,15 @@
 -- OrderService.luau
 --
--- Share order execution. Market orders and limit-order fills both go
+-- Share order execution. Market orders and waiting orders' fills both go
 -- through fillShares, which moves cash and shares, logs the fill, fires
 -- OrderEvents.Filled and reprices net worth.
 --
--- Limit orders (level 2) wait in playerData.Orders until the price crosses
--- their limit: a buy fills at or below it, a sell at or above, at the
--- market price of that moment. A player's data is only loaded while they're
--- online, so orders are checked live while they play and caught up at their
--- next login against the candles since each order was placed. Orders that
--- can't fill (no cash or shares left) are cancelled, and anything older
--- than MAX_ORDER_AGE expires.
+-- Limit, stop and stop-limit orders (level 2) wait in playerData.Orders;
+-- OrderRules says when each fills. A player's data is only loaded while
+-- they're online, so orders are checked live while they play and caught up
+-- at their next login against the candles since each order was placed.
+-- Orders that can't fill (no cash or shares left) are cancelled, and
+-- anything older than MAX_ORDER_AGE expires.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -26,6 +25,7 @@ local CalculatorModule = require(ServerScriptService.Modules.CalculatorModule)
 local TradeLogModule = require(ServerScriptService.Modules.TradeLogModule)
 local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursModule)
 local NumberModule = require(ReplicatedStorage.Modules.Multi.NumberModule)
+local OrderRules = require(ReplicatedStorage.Modules.Multi.OrderRules)
 local Progression = require(ReplicatedStorage.Config.Progression)
 local Instruments = require(ReplicatedStorage.Config.Instruments)
 
@@ -49,13 +49,16 @@ local function isTradeable(ticker, now)
 end
 
 local function describeOrder(order)
-	return string.format(
-		"%s %d %s @ %s limit",
-		order.side,
-		order.quantity,
-		order.ticker,
-		NumberModule.format(order.limitPrice)
-	)
+	return OrderRules.describe(order, NumberModule.format)
+end
+
+-- `price == price` rules out NaN
+local function isPrice(price)
+	return type(price) == "number" and price > 0 and price == price and price ~= math.huge
+end
+
+local function roundCents(price)
+	return math.round(price * 100) / 100
 end
 
 -- Tells the player's client about something that happened to their orders
@@ -121,31 +124,25 @@ function OrderService.fillShares(player, action, ticker, shares, price)
 	}
 end
 
-function OrderService.placeLimit(player, action, ticker, shares, limitPrice)
+local function isValidRequest(action, ticker, shares)
 	if action ~= "Buy" and action ~= "Sell" then
-		return { success = false, message = "Invalid order type." }
+		return false, "Invalid order type."
+	elseif not MarketDataModule.isValidTicker(ticker) then
+		return false, "Invalid ticker."
+	elseif not isPositiveInteger(shares) then
+		return false, "Invalid share quantity."
 	end
 
-	if not MarketDataModule.isValidTicker(ticker) then
-		return { success = false, message = "Invalid ticker." }
-	end
+	return true
+end
 
-	if not isPositiveInteger(shares) then
-		return { success = false, message = "Invalid share quantity." }
-	end
-
-	-- `limitPrice == limitPrice` rules out NaN
-	if type(limitPrice) ~= "number" or limitPrice <= 0 or limitPrice ~= limitPrice or limitPrice == math.huge then
-		return { success = false, message = "Invalid limit price." }
-	end
-
-	if not ProgressionService.hasFeature(player, "LimitOrders") then
-		return { success = false, message = "Limit orders: " .. Progression.getLockedMessage("LimitOrders") }
-	end
-
+-- What every waiting order checks before it's stored; the caller has
+-- checked the request and its prices. `terms` holds the order's type and
+-- prices ({ type?, limitPrice?, stopPrice? }).
+local function storeOrder(player, action, targetTicker, shares, terms)
 	-- A Roblox game warming up has candles but no trading, so no order may catch up against them
-	if Instruments.isRoblox(ticker) then
-		local reason = RobloxMarketService.getClosedReason(string.upper(ticker))
+	if Instruments.isRoblox(targetTicker) then
+		local reason = RobloxMarketService.getClosedReason(targetTicker)
 
 		if reason then
 			return { success = false, message = reason }
@@ -168,11 +165,8 @@ function OrderService.placeLimit(player, action, ticker, shares, limitPrice)
 		return { success = false, message = "You can have up to " .. MAX_OPEN_ORDERS .. " open orders." }
 	end
 
-	local targetTicker = string.upper(ticker)
-	local roundedLimit = math.round(limitPrice * 100) / 100
-
 	-- Checked again at fill time; this just stops orders that can't fill now
-	if action == "Buy" and data.Balance < roundedLimit * shares then
+	if action == "Buy" and data.Balance < OrderRules.reservedPrice(terms) * shares then
 		return { success = false, message = "Insufficient funds for this order." }
 	elseif action == "Sell" and (data.Portfolio.Shares[targetTicker] or 0) < shares then
 		return { success = false, message = "Not enough shares to sell." }
@@ -185,13 +179,79 @@ function OrderService.placeLimit(player, action, ticker, shares, limitPrice)
 		ticker = targetTicker,
 		side = action,
 		quantity = shares,
-		limitPrice = roundedLimit,
+		type = terms.type,
+		limitPrice = terms.limitPrice,
+		stopPrice = terms.stopPrice,
 		createdAt = os.time(),
 	}
 
 	data.Orders[order.id] = order
 
 	return { success = true, message = "Placed: " .. describeOrder(order), order = order }
+end
+
+function OrderService.placeLimit(player, action, ticker, shares, limitPrice)
+	local isValid, reason = isValidRequest(action, ticker, shares)
+
+	if not isValid then
+		return { success = false, message = reason }
+	elseif not isPrice(limitPrice) then
+		return { success = false, message = "Invalid limit price." }
+	elseif not ProgressionService.hasFeature(player, "LimitOrders") then
+		return { success = false, message = "Limit orders: " .. Progression.getLockedMessage("LimitOrders") }
+	end
+
+	return storeOrder(player, action, string.upper(ticker), shares, { limitPrice = roundCents(limitPrice) })
+end
+
+-- A stop (`limitPrice` nil: fills at the market once the stop is reached)
+-- or a stop-limit. The stop has to be on the far side of the price - above
+-- it to buy, below it to sell - or it would go off straight away.
+function OrderService.placeStop(player, action, ticker, shares, stopPrice, limitPrice)
+	local isValid, reason = isValidRequest(action, ticker, shares)
+
+	if not isValid then
+		return { success = false, message = reason }
+	elseif not isPrice(stopPrice) then
+		return { success = false, message = "Invalid stop price." }
+	elseif limitPrice ~= nil and not isPrice(limitPrice) then
+		return { success = false, message = "Invalid limit price." }
+	elseif not ProgressionService.hasFeature(player, "StopOrders") then
+		return { success = false, message = "Stop orders: " .. Progression.getLockedMessage("StopOrders") }
+	end
+
+	local targetTicker = string.upper(ticker)
+	local price, priceReason = OrderService.getFillPrice(targetTicker, action)
+
+	if not price then
+		return { success = false, message = priceReason }
+	end
+
+	local stop = roundCents(stopPrice)
+
+	if action == "Buy" and stop <= price then
+		return {
+			success = false,
+			message = string.format(
+				"A buy stop goes above the price (%s): it buys once the price rises to it.",
+				NumberModule.format(price)
+			),
+		}
+	elseif action == "Sell" and stop >= price then
+		return {
+			success = false,
+			message = string.format(
+				"A sell stop goes below the price (%s): it sells once the price falls to it.",
+				NumberModule.format(price)
+			),
+		}
+	end
+
+	return storeOrder(player, action, targetTicker, shares, {
+		type = limitPrice and "stopLimit" or "stop",
+		stopPrice = stop,
+		limitPrice = limitPrice and roundCents(limitPrice),
+	})
 end
 
 function OrderService.cancel(player, orderId)
@@ -231,14 +291,6 @@ function OrderService.getOrders(player)
 	end)
 
 	return orders
-end
-
-local function crossesLimit(order, low, high)
-	if order.side == "Buy" then
-		return low <= order.limitPrice
-	end
-
-	return high >= order.limitPrice
 end
 
 -- The live price an order on `ticker` fills at - the ask for a buy and the
@@ -288,7 +340,8 @@ local function settle(player, order, price)
 			player,
 			"filled",
 			string.format(
-				"Limit %s filled: %d %s @ %s",
+				"%s %s filled: %d %s @ %s",
+				OrderRules.TYPE_NAMES[OrderRules.typeOf(order)],
 				string.lower(order.side),
 				order.quantity,
 				order.ticker,
@@ -300,6 +353,29 @@ local function settle(player, order, price)
 	end
 end
 
+-- A stop-limit's stop was reached at `at` without its limit: from then on
+-- it waits on the limit, if it's still open
+local function trigger(player, order, at)
+	local data = PlayerDataService.get(player)
+
+	if not data or data.Orders[order.id] ~= order then
+		return
+	end
+
+	order.triggeredAt = at
+	notify(
+		player,
+		"triggered",
+		string.format(
+			"Stop reached: %s %d %s now waits on its %s limit",
+			order.side,
+			order.quantity,
+			order.ticker,
+			NumberModule.format(order.limitPrice)
+		)
+	)
+end
+
 local function expireOld(player, data, now)
 	for id, order in pairs(data.Orders) do
 		if now - order.createdAt > MAX_ORDER_AGE then
@@ -309,28 +385,23 @@ local function expireOld(player, data, now)
 	end
 end
 
--- Login catch-up: fills each order at the first candle after it was placed
--- whose range crossed the limit. A candle that opened past the limit (a gap)
--- fills at its open, the better price; otherwise at the limit itself, since
--- the path inside a candle is unknown.
+-- Login catch-up: replays each order against the candles since it was
+-- placed (OrderRules.catchUp), filling it - or triggering a stop-limit -
+-- as the price went while the player was away
 local function catchUp(player, data)
 	local now = os.time()
 
 	expireOld(player, data, now)
 
 	for _, order in pairs(table.clone(data.Orders)) do
-		local timeframe = now - order.createdAt <= FINE_CANDLE_REACH and "5M" or "H"
-		local candles = MarketDataModule.getCandles(order.ticker, timeframe)
+		local since = order.triggeredAt or order.createdAt
+		local timeframe = now - since <= FINE_CANDLE_REACH and "5M" or "H"
+		local outcome = OrderRules.catchUp(order, MarketDataModule.getCandles(order.ticker, timeframe) or {})
 
-		for _, candle in ipairs(candles or {}) do
-			if candle.Timestamp >= order.createdAt and crossesLimit(order, candle.Low, candle.High) then
-				local price = order.side == "Buy" and math.min(order.limitPrice, candle.Open)
-					or math.max(order.limitPrice, candle.Open)
-
-				settle(player, order, price)
-
-				break
-			end
+		if outcome and outcome.fill then
+			settle(player, order, outcome.fill)
+		elseif outcome and outcome.triggeredAt then
+			trigger(player, order, outcome.triggeredAt)
 		end
 	end
 end
@@ -365,12 +436,15 @@ local function checkOpenOrders()
 
 	MarketDataModule.getQuotes(tickerList) -- one batch request per pass
 
-	-- A buy limit triggers when the ask reaches it and a sell when the bid does
+	-- A buy goes by the ask and a sell by the bid
 	for _, entry in ipairs(pending) do
 		local price = OrderService.getFillPrice(entry.order.ticker, entry.order.side)
+		local outcome = price and OrderRules.checkLive(entry.order, price)
 
-		if price and crossesLimit(entry.order, price, price) then
-			task.spawn(settle, entry.player, entry.order, price)
+		if outcome and outcome.fill then
+			task.spawn(settle, entry.player, entry.order, outcome.fill)
+		elseif outcome and outcome.trigger then
+			trigger(entry.player, entry.order, now)
 		end
 	end
 end
