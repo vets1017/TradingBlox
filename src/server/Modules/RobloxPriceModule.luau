@@ -17,14 +17,25 @@
 -- never moving more than DAILY_MOVE_CAP of itself per 24 hours that pass -
 -- so after a gap with no ticks it may catch up further, in proportion.
 --
+-- That smooth path is the "fair" price. The traded price wanders around it:
+-- price = fair x e^noise, where the noise is jolted at random and drifts back
+-- to zero over about a day (keeping a spread of NOISE_SPREAD), so charts
+-- move like a market's, candles get wicks, and a minute's move is close to
+-- a coin flip - nothing to scalp. Each tick walks the noise in sub-steps and
+-- keeps the range it covered, which is the candle's high and low.
+--
 -- A newly listed experience warms up for WARMUP_SECONDS before it trades:
 -- until its average covers a full day, the time of day it was listed would
--- skew the price. While warming up the price simply follows the target.
+-- skew the price. While warming up the fair price simply follows the target.
 --
 -- One experience's saved state:
---   { price, prevClose, day, activity, hours = { { hour, mean } },
---     current = { hour, sum, count }, activityByDay = { [day] = activity },
---     target, listedAt, opensAt, lastSeenAt, missingSince?, stats }
+--   { price, high, low, fair, noise, prevClose, day, activity,
+--     hours = { { hour, mean } }, current = { hour, sum, count },
+--     activityByDay = { [day] = activity }, target, listedAt, opensAt,
+--     lastSeenAt, missingSince?, stats }
+-- where price is the last tick's close and high/low its range.
+--
+-- A price point, in `recent` and the history, is { time, close, high?, low? }.
 
 local RobloxPriceModule = {}
 
@@ -34,6 +45,8 @@ RobloxPriceModule.DELIST_AFTER = 86400 -- missing from Roblox's answers this lon
 RobloxPriceModule.WARMUP_SECONDS = 86400
 RobloxPriceModule.FLUSH_SECONDS = 300 -- how often recent price points are written to the history
 RobloxPriceModule.RECENT_SECONDS = 900 -- longer than a flush plus a reader's history cache
+RobloxPriceModule.NOISE_SPREAD = 0.025 -- typical distance of the price from its fair price
+RobloxPriceModule.NOISE_TAU = 86400 -- how long the noise takes to fade back, roughly
 
 local DAY = 86400
 local HOUR = 3600
@@ -44,6 +57,11 @@ local MOMENTUM_MIN, MOMENTUM_MAX = 0.5, 2
 local MOMENTUM_EXPONENT = 0.25
 local DEFAULT_LIKE_RATIO = 0.8 -- before an experience has any votes
 local ACTIVITY_DAYS_KEPT = MOMENTUM_DAYS + 1
+local NOISE_LIMIT = 3 * RobloxPriceModule.NOISE_SPREAD
+-- Steps the noise takes within a tick: with fewer, a minute's path often
+-- peaks at its open or close and the candle has no wick
+local SUBSTEP_SECONDS = 1
+local MAX_SUBSTEPS = 60
 
 -- Price history detail by age: every point for a day, then one per bucket
 local HISTORY_ZONES = {
@@ -159,6 +177,22 @@ function RobloxPriceModule.activityFrom(hours, current): number
 	return if count > 0 then total / count else 0
 end
 
+-- A standard normal number from two uniform ones in [0, 1) (Box-Muller)
+local function normal(random: () -> number): number
+	local u = math.max(random(), 1e-12)
+
+	return math.sqrt(-2 * math.log(u)) * math.cos(2 * math.pi * random())
+end
+
+-- The noise `elapsed` seconds on: it fades toward zero and gets a random
+-- jolt sized so its spread stays NOISE_SPREAD (an Ornstein-Uhlenbeck step)
+function RobloxPriceModule.stepNoise(noise: number, elapsed: number, random: () -> number): number
+	local decay = math.exp(-elapsed / RobloxPriceModule.NOISE_TAU)
+	local jolt = RobloxPriceModule.NOISE_SPREAD * math.sqrt(1 - decay * decay) * normal(random)
+
+	return math.clamp(noise * decay + jolt, -NOISE_LIMIT, NOISE_LIMIT)
+end
+
 function RobloxPriceModule.isOpen(state, now: number): boolean
 	return state.opensAt == nil or now >= state.opensAt
 end
@@ -166,8 +200,9 @@ end
 -- The next state of one experience after a tick at `now`, given its newly
 -- observed `stats` ({ playing, upVotes, downVotes, updated, ... }). A nil
 -- `state` - or one saved before the hourly average existed - lists it, and
--- it warms up before trading.
-function RobloxPriceModule.tick(state, stats, now: number)
+-- it warms up before trading. `random` (uniform in [0, 1)) drives the noise;
+-- without it the price is the fair price's smooth path, which tests use.
+function RobloxPriceModule.tick(state, stats, now: number, random: (() -> number)?)
 	local today = RobloxPriceModule.dayKey(now)
 	local isListing = not state or not state.hours
 	local prior = if isListing then nil else state
@@ -203,23 +238,63 @@ function RobloxPriceModule.tick(state, stats, now: number)
 		RobloxPriceModule.freshnessFactor(stats.updated, now)
 	)
 	local opensAt = if prior then prior.opensAt else now + RobloxPriceModule.WARMUP_SECONDS
-	local price, prevClose
+	local elapsed = if prior then math.max(now - prior.lastSeenAt, 0) else 0
+	-- States saved before the noise have only a price, which was the fair price
+	local priorFair = prior and (prior.fair or prior.price)
+	local fair
 
 	if not prior or now < opensAt then
 		-- Warming up: no trades yet, so the price can follow the target freely
-		price = target
-		prevClose = target
+		fair = target
 	else
-		price = RobloxPriceModule.step(prior.price, target, math.max(now - prior.lastSeenAt, 0))
+		fair = RobloxPriceModule.step(priorFair, target, elapsed)
+	end
+
+	-- The path since the last tick: the fair price moves evenly, the noise in
+	-- sub-steps, and the range they cover is this tick's high and low
+	local noise = prior and prior.noise or 0
+	local high, low = -math.huge, math.huge
+
+	if prior then
+		high, low = prior.price, prior.price
+	end
+
+	if random and prior and elapsed > 0 then
+		local steps = math.clamp(math.round(elapsed / SUBSTEP_SECONDS), 1, MAX_SUBSTEPS)
+
+		for index = 1, steps do
+			noise = RobloxPriceModule.stepNoise(noise, elapsed / steps, random)
+
+			local passing = priorFair * (fair / priorFair) ^ (index / steps) * math.exp(noise)
+
+			high = math.max(high, passing)
+			low = math.min(low, passing)
+		end
+	end
+
+	local price = fair * math.exp(noise)
+
+	high = math.max(high, price)
+	low = math.min(low, price)
+
+	local prevClose
+
+	if not prior or now < opensAt then
+		prevClose = price
+	else
 		-- The last price of the previous day is this day's close to compare with
 		prevClose = if prior.day ~= today then prior.price else prior.prevClose
 	end
 
-	-- The price is kept exact: a minute's move can be well under a cent, and
+	-- Prices are kept exact: a minute's move can be well under a cent, and
 	-- rounding every tick would stall a cheap price or speed up a dear one.
 	-- What players see (publicView, the history) is rounded to cents.
 	return {
 		price = price,
+		high = high,
+		low = low,
+		fair = fair,
+		noise = noise,
 		prevClose = prevClose,
 		day = today,
 		activity = activity,
@@ -239,6 +314,9 @@ end
 function RobloxPriceModule.hold(state, now: number)
 	local held = table.clone(state)
 
+	-- Nothing moved, so no range this tick
+	held.high = nil
+	held.low = nil
 	held.missingSince = state.missingSince or now
 
 	return held
@@ -261,7 +339,7 @@ end
 -- last RECENT_SECONDS of them, for charts to show before the history has
 -- them; every FLUSH_SECONDS the points since the last flush are due, so the
 -- history is written in batches rather than every minute.
-function RobloxPriceModule.tickMarket(market, listing, statsById, now: number)
+function RobloxPriceModule.tickMarket(market, listing, statsById, now: number, random: (() -> number)?)
 	local previous = market and market.experiences or {}
 	local experiences = {}
 
@@ -272,7 +350,7 @@ function RobloxPriceModule.tickMarket(market, listing, statsById, now: number)
 		if prior and prior.delisted then
 			experiences[listed.ticker] = prior
 		elseif stats then
-			experiences[listed.ticker] = RobloxPriceModule.tick(prior, stats, now)
+			experiences[listed.ticker] = RobloxPriceModule.tick(prior, stats, now, random)
 		elseif prior then
 			local held = RobloxPriceModule.hold(prior, now)
 
@@ -308,7 +386,12 @@ function RobloxPriceModule.tickMarket(market, listing, statsById, now: number)
 		end
 
 		if not experience.delisted then
-			table.insert(points, { now, roundCents(experience.price) })
+			local close = roundCents(experience.price)
+			local high = roundCents(experience.high or experience.price)
+			local low = roundCents(experience.low or experience.price)
+
+			-- A flat tick needs no range
+			table.insert(points, if high ~= close or low ~= close then { now, close, high, low } else { now, close })
 		end
 
 		if #points > 0 then
@@ -385,32 +468,56 @@ function RobloxPriceModule.withRecent(points, recent)
 	return merged
 end
 
--- Appends price points ({ time, price }, in time order) to a history kept
--- oldest first, and thins it by age: every point for a day, then the last
--- point of each five minutes to a week, of each hour to 90 days, of each day
--- to two years, and nothing older. Points merge by time, so a batch written
--- twice isn't doubled and one written late still lands in order.
+-- A point's range; points saved without one only have their close
+local function rangeOf(point)
+	return point[3] or point[2], point[4] or point[2]
+end
+
+-- Appends price points ({ time, close, high?, low? }, in time order) to a
+-- history kept oldest first, and thins it by age: every point for a day,
+-- then one per five minutes to a week, per hour to 90 days, per day to two
+-- years, and nothing older. A thinned point keeps its bucket's last time
+-- and close and the whole bucket's range. Points merge by time, so a batch
+-- written twice isn't doubled and one written late still lands in order.
 function RobloxPriceModule.addPoints(points, newPoints, now: number)
 	local all = table.clone(points)
-	local times = {}
-
-	for _, point in ipairs(points) do
-		times[point[1]] = true
-	end
+	local isAfter = true -- the usual case: every new point is later than the history
 
 	for _, point in ipairs(newPoints) do
-		if not times[point[1]] then
-			table.insert(all, point)
-			times[point[1]] = true
+		local last = all[#all]
+
+		if last and point[1] <= last[1] then
+			isAfter = false
+
+			break
 		end
+
+		table.insert(all, point)
 	end
 
-	table.sort(all, function(a, b)
-		return a[1] < b[1]
-	end)
+	if not isAfter then
+		all = table.clone(points)
+
+		local times = {}
+
+		for _, point in ipairs(points) do
+			times[point[1]] = true
+		end
+
+		for _, point in ipairs(newPoints) do
+			if not times[point[1]] then
+				table.insert(all, point)
+				times[point[1]] = true
+			end
+		end
+
+		table.sort(all, function(a, b)
+			return a[1] < b[1]
+		end)
+	end
 
 	local kept = {}
-	local lastBucket = nil
+	local lastZone, lastBucket = nil, nil
 
 	for _, point in ipairs(all) do
 		local age = now - point[1]
@@ -426,18 +533,23 @@ function RobloxPriceModule.addPoints(points, newPoints, now: number)
 
 		if zone and not zone.bucket then
 			table.insert(kept, point)
-			lastBucket = nil
+			lastZone = nil
 		elseif zone then
-			local bucket = zone.bucket .. ":" .. (point[1] // zone.bucket)
+			local bucket = point[1] // zone.bucket
 
-			-- In time order, a later point in the same bucket replaces it
-			if bucket == lastBucket then
-				kept[#kept] = point
+			-- In time order, a later point in the same bucket takes its place,
+			-- widened to the range of both
+			if zone == lastZone and bucket == lastBucket then
+				local previous = kept[#kept]
+				local high, low = rangeOf(point)
+				local previousHigh, previousLow = rangeOf(previous)
+
+				kept[#kept] = { point[1], point[2], math.max(high, previousHigh), math.min(low, previousLow) }
 			else
 				table.insert(kept, point)
 			end
 
-			lastBucket = bucket
+			lastZone, lastBucket = zone, bucket
 		end
 	end
 
@@ -453,22 +565,23 @@ function RobloxPriceModule.buildCandles(points, interval: number, since: number)
 
 	for _, point in ipairs(points) do
 		local time, price = point[1], point[2]
+		local high, low = rangeOf(point)
 		local bucketStart = (time // interval) * interval
 		local candle = candles[#candles]
 
 		if time >= since then
 			if candle and candle.Timestamp == bucketStart then
 				candle.Close = price
-				candle.High = math.max(candle.High, price)
-				candle.Low = math.min(candle.Low, price)
+				candle.High = math.max(candle.High, high, price)
+				candle.Low = math.min(candle.Low, low, price)
 			else
 				local open = previousClose or price
 
 				candle = {
 					Timestamp = bucketStart,
 					Open = open,
-					High = math.max(open, price),
-					Low = math.min(open, price),
+					High = math.max(open, high, price),
+					Low = math.min(open, low, price),
 					Close = price,
 					Volume = 0,
 				}

@@ -29,6 +29,32 @@ local function run(state, from, to, step, playingAt)
 	return state
 end
 
+-- A repeatable uniform source in (0, 1) for the noise (Park-Miller)
+local function seeded(seed)
+	local value = seed
+
+	return function()
+		value = value * 16807 % 2147483647
+
+		return value / 2147483647
+	end
+end
+
+-- Ticks every `step` seconds (a minute by default) with the noise on,
+-- `playing` players throughout; returns every state from `from` to `to`
+local function runNoisy(from, to, playing, seed, step)
+	local random = seeded(seed)
+	local states = {}
+	local state = nil
+
+	for t = from, to, step or 60 do
+		state = RobloxPriceModule.tick(state, stats(playing), t, random)
+		table.insert(states, state)
+	end
+
+	return states
+end
+
 test("the like factor runs from 0.5 to 1.5, and assumes 80% with no votes", function()
 	near(RobloxPriceModule.likeFactor(900, 100), 1.4, 1e-9)
 	equal(RobloxPriceModule.likeFactor(0, 0), 1.3)
@@ -329,6 +355,113 @@ test("a batch written to the history twice isn't doubled, and a late one lands i
 	points = RobloxPriceModule.addPoints(points, { { NOW - 180, 0 } }, NOW)
 	equal(points[1], { NOW - 180, 0 })
 	equal(#points, 4)
+end)
+
+test("noise gives each tick a range around its open and close, so candles get wicks", function()
+	local states = runNoisy(NOW, NOW + DAY, 10000, 7)
+	local wicks, rangeTotal = 0, 0
+
+	for index = 2, #states do
+		local previous, state = states[index - 1], states[index]
+		local bodyHigh = math.max(previous.price, state.price)
+		local bodyLow = math.min(previous.price, state.price)
+
+		equal(state.high >= bodyHigh - 1e-9 and state.low <= bodyLow + 1e-9, true, "range covers the body")
+
+		if state.high > bodyHigh + 1e-9 or state.low < bodyLow - 1e-9 then
+			wicks += 1
+		end
+
+		rangeTotal += (state.high - state.low) / state.price
+	end
+
+	local averageRange = rangeTotal / (#states - 1)
+
+	equal(wicks > (#states - 1) / 2, true, "most minutes have a wick: " .. wicks)
+	equal(
+		averageRange > 0.0003 and averageRange < 0.005,
+		true,
+		string.format("a minute's range is visible but small: %.3f%%", averageRange * 100)
+	)
+end)
+
+test("noise keeps its spread around the fair price, within bounds, and fades back", function()
+	local states = runNoisy(NOW, NOW + 30 * DAY, 10000, 11, 600)
+	local total, count, largest = 0, 0, 0
+
+	for _, state in ipairs(states) do
+		local deviation = math.log(state.price / state.fair)
+
+		total += deviation * deviation
+		count += 1
+		largest = math.max(largest, math.abs(deviation))
+	end
+
+	local spread = math.sqrt(total / count)
+
+	equal(
+		spread > RobloxPriceModule.NOISE_SPREAD * 0.5 and spread < RobloxPriceModule.NOISE_SPREAD * 1.5,
+		true,
+		string.format("spread %.2f%%", spread * 100)
+	)
+	equal(largest <= 3 * RobloxPriceModule.NOISE_SPREAD + 1e-9, true, "capped at three spreads")
+
+	-- cos(2π x 0.25) is 0, so this source gives no jolt: only the fade
+	local noJolt = function()
+		return 0.25
+	end
+
+	near(
+		RobloxPriceModule.stepNoise(0.02, RobloxPriceModule.NOISE_TAU, noJolt),
+		0.02 * math.exp(-1),
+		1e-9,
+		"fades by e in NOISE_TAU"
+	)
+end)
+
+test("a minute's move doesn't foretell the next, so the noise can't be scalped", function()
+	local states = runNoisy(NOW + WARMUP, NOW + WARMUP + 5 * DAY, 10000, 3)
+	local moves = {}
+
+	for index = 2, #states do
+		table.insert(moves, math.log(states[index].price / states[index - 1].price))
+	end
+
+	local mean = 0
+
+	for _, move in ipairs(moves) do
+		mean += move / #moves
+	end
+
+	local covariance, variance = 0, 0
+
+	for index = 2, #moves do
+		covariance += (moves[index] - mean) * (moves[index - 1] - mean)
+	end
+
+	for _, move in ipairs(moves) do
+		variance += (move - mean) ^ 2
+	end
+
+	local correlation = covariance / variance
+
+	equal(math.abs(correlation) < 0.05, true, string.format("correlation %.3f", correlation))
+end)
+
+test("thinning keeps a bucket's whole range, and candles use it", function()
+	local old = NOW - 2 * DAY -- five-minute buckets at this age
+	local bucket = (old // 300) * 300
+	local points = RobloxPriceModule.addPoints({}, {
+		{ bucket + 10, 10, 11, 9 },
+		{ bucket + 70, 10.5, 10.6, 8.5 },
+		{ bucket + 130, 10.2 },
+	}, NOW)
+
+	equal(points, { { bucket + 130, 10.2, 11, 8.5 } })
+
+	local candles = RobloxPriceModule.buildCandles({ { 1000, 10 }, { 1060, 10.2, 10.6, 9.5 } }, 300, 0)
+
+	equal(candles, { { Timestamp = 900, Open = 10, High = 10.6, Low = 9.5, Close = 10.2, Volume = 0 } })
 end)
 
 test("every listed experience has a unique RBX- ticker the game accepts", function()

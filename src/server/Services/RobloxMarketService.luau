@@ -12,8 +12,8 @@
 --   "state"            the whole market (RobloxPriceModule.tickMarket), read
 --                      and written only by the server ticking it
 --   "prices"           its publicView: small, and what every server reads
---   "history:<ticker>" price points { { time, price } }, oldest first, written
---                      in five-minute batches
+--   "history:<ticker>" price points { { time, close, high?, low? } }, oldest
+--                      first, written in five-minute batches
 --
 -- MarketDataModule routes Roblox tickers' quotes and candles here.
 
@@ -53,8 +53,13 @@ local isReading = false
 local isTicking = false
 local nextClaimAt = 0 -- os.time() before which another server has the tick
 local historyCache = {} -- [ticker] = { fetchedAt = os.clock(), points }
+local noiseRandom = Random.new() -- moves the prices' noise; saved prices make every server agree
 
 local RobloxMarketService = {}
+
+local function nextRandom(): number
+	return noiseRandom:NextNumber()
+end
 
 local function noteTick(lastTickAt: number)
 	nextClaimAt = math.max(nextClaimAt, lastTickAt + TICK_SECONDS)
@@ -175,7 +180,8 @@ local function runTick()
 
 	local flush = nil
 	local success, saved = pcall(Store.UpdateAsync, Store, "state", function(stored)
-		local nextMarket, due = RobloxPriceModule.tickMarket(stored, RobloxMarket.EXPERIENCES, statsById, os.time())
+		local nextMarket, due =
+			RobloxPriceModule.tickMarket(stored, RobloxMarket.EXPERIENCES, statsById, os.time(), nextRandom)
 
 		-- The last call's is the one saved
 		flush = due

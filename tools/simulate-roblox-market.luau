@@ -10,8 +10,11 @@
 --   open     the price when trading opens, after the warm-up
 --   range    the lowest and highest price once open
 --   day move the largest change between two daily closes
---   swing    the average gap between a day's high and low - what a player
---            could farm by buying every dip and selling every peak
+--   swing    the average gap between a day's high and low, noise included
+--   minute   the average 1-minute candle's range, wicks included
+--   fair     the day swing of the fair price alone - the part that follows
+--            a schedule, which a player could farm by buying every dip and
+--            selling every peak (the noise is random, so it can't be)
 
 local process = require("@lune/process")
 
@@ -115,12 +118,14 @@ local function run(scenario)
 	local low, high = math.huge, -math.huge
 	local closes = {}
 	local dayLow, dayHigh = math.huge, -math.huge
-	local swings = {}
+	local fairLow, fairHigh = math.huge, -math.huge
+	local swings, fairSwings = {}, {}
+	local minuteRanges, minuteCount = 0, 0
 
 	for t = start, start + DAYS * DAY, TICK_SECONDS do
 		local playing = scenario.playing(scenario.base, t) * (1 + (math.random() - 0.5) * 0.06)
 
-		state = RobloxPriceModule.tick(state, stats(playing, t), t)
+		state = RobloxPriceModule.tick(state, stats(playing, t), t, math.random)
 
 		local isOpen = RobloxPriceModule.isOpen(state, t)
 
@@ -128,8 +133,12 @@ local function run(scenario)
 			openPrice = openPrice or state.price
 			low = math.min(low, state.price)
 			high = math.max(high, state.price)
-			dayLow = math.min(dayLow, state.price)
-			dayHigh = math.max(dayHigh, state.price)
+			dayLow = math.min(dayLow, state.low)
+			dayHigh = math.max(dayHigh, state.high)
+			fairLow = math.min(fairLow, state.fair)
+			fairHigh = math.max(fairHigh, state.fair)
+			minuteRanges += (state.high - state.low) / state.price
+			minuteCount += 1
 		end
 
 		if (t - start) % (6 * HOUR) < TICK_SECONDS then
@@ -140,7 +149,9 @@ local function run(scenario)
 		if (t + TICK_SECONDS) // DAY ~= t // DAY and isOpen then
 			table.insert(closes, state.price)
 			table.insert(swings, (dayHigh - dayLow) / dayLow)
+			table.insert(fairSwings, (fairHigh - fairLow) / fairLow)
 			dayLow, dayHigh = math.huge, -math.huge
+			fairLow, fairHigh = math.huge, -math.huge
 		end
 	end
 
@@ -154,24 +165,34 @@ local function run(scenario)
 		end
 	end
 
-	local swingTotal = 0
+	local swingTotal, fairSwingTotal = 0, 0
 
 	-- The first day open is partial
 	for index = 2, #swings do
 		swingTotal += swings[index]
+		fairSwingTotal += fairSwings[index]
 	end
+
+	local days = math.max(#swings - 1, 1)
 
 	print(scenario.name)
 	print("  " .. sparkline(samples))
 	print(
 		string.format(
-			"  open $%.2f · range $%.2f-$%.2f · final $%.2f · day move %+.1f%% · swing %.2f%%",
+			"  open $%.2f · range $%.2f-$%.2f · final $%.2f · day move %+.1f%%",
 			openPrice or 0,
 			low,
 			high,
 			state.price,
-			largestMove * 100,
-			#swings > 1 and swingTotal / (#swings - 1) * 100 or 0
+			largestMove * 100
+		)
+	)
+	print(
+		string.format(
+			"  swing %.2f%% · minute %.3f%% · fair swing %.2f%%",
+			swingTotal / days * 100,
+			minuteRanges / math.max(minuteCount, 1) * 100,
+			fairSwingTotal / days * 100
 		)
 	)
 	print()

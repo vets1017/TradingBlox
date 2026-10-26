@@ -648,6 +648,15 @@ Taken at the start of Phase 3 (2026-10-25); Kevin accepted each recommendation:
    five-minute batches. The backend caches stats for 45 seconds. Charts get one-minute candles, and
    the Charts tab got the market picker too. Left as is: when a whole week first fills, the weekend's
    share shifts the price once, by about 2%.
+8. ✅ Wicks, after Kevin saw none: one smooth price a minute made every 1-minute candle a flat body.
+   The smooth path is now the "fair" price, and the traded price wanders around it with random noise
+   (an Ornstein-Uhlenbeck process: about 2.5% spread, fading back over a day, capped at three
+   spreads), walked in 1-second steps each tick (with 10-second ones, many minutes peaked at their
+   open or close and had no wick). The range covered is the point's high and low, which history
+   thinning and candles keep. The daily cap applies to the fair price. A minute's move doesn't
+   predict the next (tested), so the noise can't be scalped. Limit orders catch up against the
+   wicks, as they do for stocks' candles. The Charts tab opens on the hourly timeframe, so a market
+   only minutes old shows one candle there until 1M is picked.
 
 ## Sources
 

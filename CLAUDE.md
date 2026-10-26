@@ -29,7 +29,8 @@ Tooling is pinned in `aftman.toml` (Rojo, selene, StyLua, Lune) and installed wi
   for this). Everything else is checked in Studio through the MCP tools.
 - `lune run tools/simulate-roblox-market.luau` — runs the real `RobloxPriceModule` a tick a minute over
   made-up player counts (steady, growing, viral, fading, listing time) and prints each price as a sparkline
-  with its range, largest daily move and daily high-low swing. Run it after changing the price model.
+  with its range, largest daily move, daily high-low swing (with and without the noise) and average 1-minute
+  candle range. Run it after changing the price model.
 
 CI (`.github/workflows/ci.yml`) runs selene, `stylua --check`, the tests and `rojo build` on pushes to `main`
 and on pull requests. There's no package manager (no Wally).
@@ -181,7 +182,9 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     market in "state" (only the ticking server reads it) and publishes its small `publicView` to "prices", which
     every server reads (cached 20 s), so prices agree. "prices" carries each experience's last 15 minutes of
     points; the `history:<ticker>` keys get them in five-minute batches, and charts merge the two. The price
-    follows players online averaged over 7 days hour by hour (so day-night and weekend cycles cancel); a new
+    follows players online averaged over 7 days hour by hour (so day-night and weekend cycles cancel), and the
+    traded price wanders around that smooth "fair" price with random noise (about 2.5%, fading over a day),
+    walked in 1-second steps so each minute's point has a high and low and candles get wicks; a new
     listing warms up for 24 h before it trades (`getClosedReason`), its forming price still charted. State keeps
     exact prices — a minute's move can be under a cent — and only what players see is rounded. Prices move only
     while some server runs. `MarketDataModule` hands Roblox tickers' quotes and candles to it (`setRobloxProvider`)
