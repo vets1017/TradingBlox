@@ -23,4 +23,12 @@ test("formatCompact: abbreviates thousands and up", function()
 	equal(NumberModule.formatCompact(999.5), "$999.50")
 end)
 
+test("formatCount: abbreviates counts without currency", function()
+	equal(NumberModule.formatCount(1.234e9), "1.23B")
+	equal(NumberModule.formatCount(45.6e6), "45.60M")
+	equal(NumberModule.formatCount(7890), "7.89K")
+	equal(NumberModule.formatCount(999.9), "999")
+	equal(NumberModule.formatCount(0), "0")
+end)
+
 return nil

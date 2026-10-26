@@ -62,6 +62,7 @@ ChartRenderer.TimeframeFormats = {
 	["H"] = "%b %d, %H:%M",
 	["30M"] = "%b %d, %H:%M",
 	["5M"] = "%H:%M",
+	["1M"] = "%H:%M",
 	["M"] = "%H:%M",
 }
 

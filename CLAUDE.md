@@ -57,7 +57,9 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
 - **Client (`src/client/Controllers/`)** — one controller per screen/UI area (`ShellController` for the
   full-screen shell — nav bar, inbox bell, balance and level pills, status bar, toasts; `InboxController` for the
   bell's unread badge and the notification list it opens; `TerminalController` for tab
-  switching, the Dashboard greeting and countdown, and Charts; `DashboardController` for the Dashboard's widgets
+  switching, the Dashboard greeting and countdown, and Charts (opens on SPY; the legend shows the hovered or
+  latest candle's O/H/L/C, change and volume; Symbol Info falls back to chart data when quote details are
+  unavailable, and shows a Roblox game's own labeled fields); `DashboardController` for the Dashboard's widgets
   (account info, watchlist, orders, performance, market overview with Trending and Roblox views, and Social — followed
   players' posts, theses ranked by reactions, top traders), built in code inside the Studio widget frames; `TutorialController` for the "Getting started" checklist card; `TradeController` for the Trade screen; `PortfolioController` for the Portfolio screen, which it builds
   entirely in code inside the empty Studio `PortfolioScreen` frame; `SocialController` for the Social tab (the feed,

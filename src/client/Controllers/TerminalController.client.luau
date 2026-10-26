@@ -15,7 +15,9 @@ local DrawingModule = require(ReplicatedStorage.Modules.Multi.DrawingModule)
 local Theme = require(ReplicatedStorage.Modules.Multi.Theme)
 local Navigation = require(ReplicatedStorage.Modules.Multi.Navigation)
 local Progression = require(ReplicatedStorage.Config.Progression)
+local RobloxMarket = require(ReplicatedStorage.Config.RobloxMarket)
 local MarketPickerModule = require(ReplicatedStorage.Modules.Trade.MarketPickerModule)
+local UIKit = require(ReplicatedStorage.UI.UIKit)
 
 -- Remotes
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
@@ -80,17 +82,26 @@ local SymbolInfoTopBar = SymbolInfoPanel:WaitForChild("SymbolInfoTopBar")
 local SymbolInfoTickerLabel = SymbolInfoTopBar:WaitForChild("TickerNameLabel")
 local SymbolInfoContentArea = SymbolInfoPanel:WaitForChild("ContentArea")
 
-local SymbolInfoFields = {
-	MarketCap = SymbolInfoContentArea:WaitForChild("MarketCapRow"):WaitForChild("Value"),
-	PE = SymbolInfoContentArea:WaitForChild("PERow"):WaitForChild("Value"),
-	EPS = SymbolInfoContentArea:WaitForChild("EPSRow"):WaitForChild("Value"),
-	DayRange = SymbolInfoContentArea:WaitForChild("DayRangeRow"):WaitForChild("Value"),
-	FiftyTwoWeekRange = SymbolInfoContentArea:WaitForChild("FiftyTwoWeekRangeRow"):WaitForChild("Value"),
-	Volume = SymbolInfoContentArea:WaitForChild("VolumeRow"):WaitForChild("Value"),
-	AvgVolume = SymbolInfoContentArea:WaitForChild("AvgVolumeRow"):WaitForChild("Value"),
-	Beta = SymbolInfoContentArea:WaitForChild("BetaRow"):WaitForChild("Value"),
-	DividendYield = SymbolInfoContentArea:WaitForChild("DividendYieldRow"):WaitForChild("Value"),
-}
+-- Symbol Info's rows top to bottom, with their Studio labels (a stock's
+-- fields). A Roblox game shows its own fields in them, under its own labels.
+local SymbolInfoRows = {}
+
+for _, rowName in ipairs({
+	"MarketCapRow",
+	"PERow",
+	"EPSRow",
+	"DayRangeRow",
+	"FiftyTwoWeekRangeRow",
+	"VolumeRow",
+	"AvgVolumeRow",
+	"BetaRow",
+	"DividendYieldRow",
+}) do
+	local row = SymbolInfoContentArea:WaitForChild(rowName)
+	local label = row:WaitForChild("Label")
+
+	table.insert(SymbolInfoRows, { label = label, value = row:WaitForChild("Value"), stockLabel = label.Text })
+end
 
 local ToggleWatchlistButton = Sidebar:WaitForChild("ToggleWatchlistButton")
 local WatchlistPanel = ChartsScreen:WaitForChild("WatchlistPanel")
@@ -233,13 +244,31 @@ local Tabs = {
 	},
 }
 
+-- `option` is how the dropdown lists a timeframe, `short` how the button
+-- and the legend show the chosen one
 local TimeDropdownOptions = {
-	[TimeDropdownList:WaitForChild("1MinuteButton")] = { query = "1M" },
-	[TimeDropdownList:WaitForChild("5MinuteButton")] = { query = "5M" },
-	[TimeDropdownList:WaitForChild("30MinuteButton")] = { query = "30M" },
-	[TimeDropdownList:WaitForChild("1HourButton")] = { query = "H" },
-	[TimeDropdownList:WaitForChild("1DayButton")] = { query = "D" },
+	[TimeDropdownList:WaitForChild("1MinuteButton")] = { query = "1M", option = "1 min", short = "1m" },
+	[TimeDropdownList:WaitForChild("5MinuteButton")] = { query = "5M", option = "5 min", short = "5m" },
+	[TimeDropdownList:WaitForChild("30MinuteButton")] = { query = "30M", option = "30 min", short = "30m" },
+	[TimeDropdownList:WaitForChild("1HourButton")] = { query = "H", option = "1 hour", short = "1H" },
+	[TimeDropdownList:WaitForChild("1DayButton")] = { query = "D", option = "1 day", short = "1D" },
 }
+
+local function getTimeframeShort(query)
+	for _, data in pairs(TimeDropdownOptions) do
+		if data.query == query then
+			return data.short
+		end
+	end
+
+	return query
+end
+
+for button, data in pairs(TimeDropdownOptions) do
+	button.Text = data.option
+end
+
+local DEFAULT_CHART_TICKER = "SPY" -- what the Charts tab opens on
 
 local function movingAverage(average, period)
 	return function(_, closes)
@@ -535,6 +564,124 @@ local function refreshTerminal()
 	-- continue after stock-list is done
 end
 
+-- The legend: the chart's title, then a candle's open, high, low, close,
+-- change on the previous close and volume - the hovered candle's, or the
+-- latest's
+local UP_HEX = Theme.Colors.Up:ToHex()
+local DOWN_HEX = Theme.Colors.Down:ToHex()
+local MUTED_HEX = Theme.Colors.TextMuted:ToHex()
+local TEXT_HEX = Theme.Colors.Text:ToHex()
+
+local hoveredIndex = nil -- the candle under the crosshair, in currentChartData
+
+do
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.VerticalAlignment = Enum.VerticalAlignment.Center
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0, 12)
+	layout.Parent = ChartLegend
+
+	ChartTickerLabel.LayoutOrder = 1
+	ChartTickerLabel.Size = UDim2.fromScale(0, 1)
+	ChartTickerLabel.AutomaticSize = Enum.AutomaticSize.X
+end
+
+local ChartValuesLabel =
+	UIKit.makeLabel("ChartValuesLabel", ChartLegend, Theme.Fonts.Mono, Theme.TextSize.Caption, Theme.Colors.TextMuted)
+ChartValuesLabel.LayoutOrder = 2
+ChartValuesLabel.Size = UDim2.fromScale(0, 1)
+ChartValuesLabel.AutomaticSize = Enum.AutomaticSize.X
+ChartValuesLabel.RichText = true
+ChartValuesLabel.Text = ""
+
+local EmptyChartHint =
+	UIKit.makeLabel("EmptyChartHint", ChartCanvas, Theme.Fonts.UI, Theme.TextSize.Body, Theme.Colors.TextMuted)
+EmptyChartHint.AnchorPoint = Vector2.new(0.5, 0.5)
+EmptyChartHint.Position = UDim2.fromScale(0.5, 0.5)
+EmptyChartHint.Size = UDim2.new(1, -40, 0, 40)
+EmptyChartHint.TextWrapped = true
+EmptyChartHint.TextXAlignment = Enum.TextXAlignment.Center
+EmptyChartHint.Text = "Search a stock, crypto or Roblox game above to chart it"
+
+-- What's charted: the ticker, or a Roblox game by its name
+local function getChartName()
+	local listed = RobloxMarket.getExperience(currentDisplayedTicker)
+
+	return listed and listed.name or currentDisplayedTicker
+end
+
+-- "AAPL · 1H"
+local function getChartTitle()
+	if currentDisplayedTicker == "" then
+		return "—"
+	end
+
+	return string.format("%s · %s", getChartName(), getTimeframeShort(currentTimeframe))
+end
+
+local function legendField(name, value)
+	return string.format('<font color="#%s">%s</font> <font color="#%s">%.2f</font>', MUTED_HEX, name, TEXT_HEX, value)
+end
+
+local function showCandleValues(index)
+	local candle = currentChartData[index]
+
+	if not candle then
+		ChartValuesLabel.Text = ""
+
+		return
+	end
+
+	local parts = {
+		legendField("O", candle.Open),
+		legendField("H", candle.High),
+		legendField("L", candle.Low),
+		legendField("C", candle.Close),
+	}
+	local previous = masterChartData[currentStartIndex + index - 2]
+
+	if previous and previous.Close ~= 0 then
+		local change = candle.Close - previous.Close
+
+		table.insert(
+			parts,
+			string.format(
+				'<font color="#%s">%+.2f (%+.2f%%)</font>',
+				change >= 0 and UP_HEX or DOWN_HEX,
+				change,
+				change / previous.Close * 100
+			)
+		)
+	end
+
+	if (candle.Volume or 0) > 0 then
+		table.insert(
+			parts,
+			string.format(
+				'<font color="#%s">Vol</font> <font color="#%s">%s</font>',
+				MUTED_HEX,
+				TEXT_HEX,
+				NumberModule.formatCount(candle.Volume)
+			)
+		)
+	end
+
+	ChartValuesLabel.Text = table.concat(parts, "  ")
+end
+
+local function refreshLegend()
+	ChartTickerLabel.Text = getChartTitle()
+	showCandleValues(hoveredIndex or #currentChartData)
+end
+
+-- A short message in the legend's place, then the legend again
+local function flashLegend(message)
+	ChartTickerLabel.Text = message
+	ChartValuesLabel.Text = ""
+	task.delay(2.5, refreshLegend)
+end
+
 -- The active indicators for the candles in view: overlays for the price
 -- chart, and panes for under it
 local function getActiveIndicators(chartData)
@@ -570,11 +717,14 @@ local function renderChart(ticker, chartData)
 		IndicatorsContainer = IndicatorsContainer,
 		RightAxis = RightAxis,
 		BottomAxis = BottomAxis,
-	}, ticker, chartData, currentTimeframe, liveCandle, overlays)
+	}, getChartTitle(), chartData, currentTimeframe, liveCandle, overlays)
 
 	for index, pane in ipairs(panes) do
 		ChartRenderer.renderPane(paneContents[index], pane, #chartData)
 	end
+
+	EmptyChartHint.Visible = #chartData == 0
+	showCandleValues(hoveredIndex or #chartData)
 
 	if minPrice and maxPrice then
 		currentMinPrice = minPrice
@@ -593,15 +743,100 @@ local DRAWING_TOOL_BUTTONS = {
 	horizontal = HorizontalLineToolButton,
 }
 
+-- The drawing tools show small drawn icons in their text color (the Studio
+-- buttons had a letter each) and their name beside them on hover. Their
+-- list sorted by name, which put Clear first.
+LeftToolbar:FindFirstChildWhichIsA("UIListLayout").SortOrder = Enum.SortOrder.LayoutOrder
+
+local toolIcons = {} -- [button] = { icon parts }
+
+local function addIconPart(button, size, position, rotation)
+	local part = Instance.new("Frame")
+	part.Name = "Icon"
+	part.AnchorPoint = Vector2.new(0.5, 0.5)
+	part.BorderSizePixel = 0
+	part.Position = UDim2.new(0.5, position.X, 0.5, position.Y)
+	part.Size = UDim2.fromOffset(size.X, size.Y)
+	part.Rotation = rotation or 0
+	part.ZIndex = button.ZIndex + 1
+	part.Parent = button
+
+	toolIcons[button] = toolIcons[button] or {}
+	table.insert(toolIcons[button], part)
+end
+
+local function colorIcon(button, color)
+	for _, part in ipairs(toolIcons[button] or {}) do
+		part.BackgroundColor3 = color
+	end
+end
+
+-- Cursor: a crosshair
+addIconPart(CursorToolButton, Vector2.new(16, 2), Vector2.zero)
+addIconPart(CursorToolButton, Vector2.new(2, 16), Vector2.zero)
+-- Trend line: a slanted line between two points
+addIconPart(TrendLineToolButton, Vector2.new(20, 2), Vector2.zero, -35)
+addIconPart(TrendLineToolButton, Vector2.new(5, 5), Vector2.new(-8, 6))
+addIconPart(TrendLineToolButton, Vector2.new(5, 5), Vector2.new(8, -6))
+-- Horizontal line: a level with a point on it
+addIconPart(HorizontalLineToolButton, Vector2.new(20, 2), Vector2.zero)
+addIconPart(HorizontalLineToolButton, Vector2.new(5, 5), Vector2.new(-6, 0))
+-- Clear: a cross
+addIconPart(ClearDrawingsButton, Vector2.new(16, 2), Vector2.zero, 45)
+addIconPart(ClearDrawingsButton, Vector2.new(16, 2), Vector2.zero, -45)
+
+-- One tooltip, moved into whichever tool is hovered and shown beside it
+local ToolTip = UIKit.makeLabel("ToolTip", MainChart, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.Text)
+ToolTip.AnchorPoint = Vector2.new(0, 0.5)
+ToolTip.Position = UDim2.new(1, 6, 0.5, 0)
+ToolTip.AutomaticSize = Enum.AutomaticSize.X
+ToolTip.Size = UDim2.fromOffset(0, 22)
+ToolTip.BackgroundTransparency = 0
+ToolTip.BackgroundColor3 = Theme.Colors.Raised
+ToolTip.ZIndex = 20
+ToolTip.Visible = false
+UIKit.addCorner(ToolTip)
+UIKit.addStroke(ToolTip)
+
+do
+	local padding = Instance.new("UIPadding")
+	padding.PaddingLeft = UDim.new(0, 8)
+	padding.PaddingRight = UDim.new(0, 8)
+	padding.Parent = ToolTip
+end
+
+for button, name in pairs({
+	[CursorToolButton] = "Cursor",
+	[TrendLineToolButton] = "Trend line",
+	[HorizontalLineToolButton] = "Horizontal line",
+	[ClearDrawingsButton] = "Clear drawings",
+}) do
+	button.Text = ""
+
+	button.MouseEnter:Connect(function()
+		ToolTip.Text = name
+		ToolTip.Parent = button
+		ToolTip.Visible = true
+	end)
+
+	button.MouseLeave:Connect(function()
+		ToolTip.Visible = false
+	end)
+end
+
+colorIcon(ClearDrawingsButton, COLOR_INACTIVE_TEXT)
+
 local function setDrawingTool(tool)
 	currentDrawingTool = tool
 	pendingTrendLineStart = nil
 
 	for toolName, button in pairs(DRAWING_TOOL_BUTTONS) do
 		local isActive = toolName == tool
+		local color = isActive and COLOR_ACTIVE_TEXT or COLOR_INACTIVE_TEXT
 
 		button.BackgroundColor3 = isActive and COLOR_ACTIVE_BACKGROUND or COLOR_INACTIVE_BACKGROUND
-		button.TextColor3 = isActive and COLOR_ACTIVE_TEXT or COLOR_INACTIVE_TEXT
+		button.TextColor3 = color
+		colorIcon(button, color)
 	end
 end
 
@@ -683,6 +918,8 @@ local function handleDrawingClick(mousePosition)
 	return false
 end
 
+local loadTicker -- defined further down; switchTab loads the Charts tab's first chart
+
 -- Switching tab function
 local function switchTab(tabName)
 	for _, data in pairs(Tabs) do
@@ -698,6 +935,11 @@ local function switchTab(tabName)
 
 		local sweepTween = TweenService:Create(AccentGradient, SWEEP_INFO, { Offset = Vector2.new(1, 0) })
 		sweepTween:Play() -- Gradient effect in TopBar when switching tab
+	end
+
+	-- The Charts tab opens on a chart rather than an empty canvas
+	if tabName == "Charts" and currentDisplayedTicker == "" and not isFetchingData then
+		task.spawn(loadTicker, DEFAULT_CHART_TICKER)
 	end
 end
 
@@ -754,7 +996,6 @@ local toggleActiveTrader
 local toggleSymbolInfo
 local toggleWatchlist
 local refreshWatchlist
-local loadTicker
 local marketPicker = nil -- built once the ticker input is wired, further down
 
 -- The ticker box shows what's loaded on the chart - a Roblox game by its name
@@ -928,6 +1169,129 @@ local function updateSellPresetsEnabled()
 	end
 end
 
+local DAILY_CANDLES_SECONDS = 600
+local dailyCandles = {} -- [ticker] = { fetchedAt, candles }, for Symbol Info's year
+
+-- The latest UTC day's range and volume in the loaded candles
+local function getDayFromCandles()
+	local last = masterChartData[#masterChartData]
+
+	if not last then
+		return nil
+	elseif currentTimeframe == "D" then
+		return { low = last.Low, high = last.High, volume = last.Volume or 0 }
+	end
+
+	local day = last.Timestamp // 86400
+	local low, high, volume = math.huge, -math.huge, 0
+
+	for index = #masterChartData, 1, -1 do
+		local candle = masterChartData[index]
+
+		if candle.Timestamp // 86400 ~= day then
+			break
+		end
+
+		low = math.min(low, candle.Low)
+		high = math.max(high, candle.High)
+		volume += candle.Volume or 0
+	end
+
+	return { low = low, high = high, volume = volume }
+end
+
+-- The last year's range and the average daily volume over about three
+-- months, from daily candles (fetched once per ticker every few minutes)
+local function getYearFromCandles(ticker)
+	local candles = currentTimeframe == "D" and masterChartData or nil
+	local cached = dailyCandles[ticker]
+
+	if not candles and cached and os.clock() - cached.fetchedAt < DAILY_CANDLES_SECONDS then
+		candles = cached.candles
+	elseif not candles then
+		candles = RequestChartEvent:InvokeServer(ticker, "D") or {}
+		dailyCandles[ticker] = { fetchedAt = os.clock(), candles = candles }
+	end
+
+	local last = candles[#candles]
+
+	if not last then
+		return nil
+	end
+
+	local low, high = math.huge, -math.huge
+	local volumeTotal, volumeDays = 0, 0
+
+	for index = #candles, 1, -1 do
+		local candle = candles[index]
+
+		if candle.Timestamp < last.Timestamp - 365 * 86400 then
+			break
+		end
+
+		low = math.min(low, candle.Low)
+		high = math.max(high, candle.High)
+
+		if volumeDays < 63 and (candle.Volume or 0) > 0 then
+			volumeTotal += candle.Volume
+			volumeDays += 1
+		end
+	end
+
+	return { low = low, high = high, averageVolume = volumeDays > 0 and volumeTotal / volumeDays or nil }
+end
+
+local function formatRange(low, high)
+	return (low and high) and string.format("%.2f - %.2f", low, high) or "—"
+end
+
+-- Symbol Info for a stock, ETF or crypto, under the Studio labels. When the
+-- quote has no details (the data provider refuses them at times), the day,
+-- the year and volume come from candles instead.
+local function getSecurityInfo(quote)
+	local day = (not quote.dayLow or not quote.volume) and getDayFromCandles() or nil
+	local year = (not quote.fiftyTwoWeekLow or not quote.avgVolume) and getYearFromCandles(currentDisplayedTicker)
+		or nil
+	local volume = quote.volume or (day and day.volume > 0 and day.volume)
+	local averageVolume = quote.avgVolume or (year and year.averageVolume)
+
+	return {
+		quote.marketCap and NumberModule.formatCompact(quote.marketCap) or "—",
+		quote.trailingPE and string.format("%.2f", quote.trailingPE) or "—",
+		quote.eps and string.format("%.2f", quote.eps) or "—",
+		quote.dayLow and formatRange(quote.dayLow, quote.dayHigh) or formatRange(day and day.low, day and day.high),
+		quote.fiftyTwoWeekLow and formatRange(quote.fiftyTwoWeekLow, quote.fiftyTwoWeekHigh)
+			or formatRange(year and year.low, year and year.high),
+		volume and NumberModule.formatCount(volume) or "—",
+		averageVolume and NumberModule.formatCount(averageVolume) or "—",
+		quote.beta and string.format("%.2f", quote.beta) or "—",
+		quote.dividendYield and string.format("%.2f%%", quote.dividendYield) or "—",
+	}
+end
+
+-- Symbol Info for a Roblox game: its own fields, each labeled observed,
+-- estimated or simulated (GDD §6)
+local function getRobloxInfo(data)
+	local observed = data.observed or {}
+	local votes = (observed.upVotes or 0) + (observed.downVotes or 0)
+
+	local function count(value)
+		return value and NumberModule.formatCount(value) or "—"
+	end
+
+	return {
+		{ "Players now · observed", count(observed.playing) },
+		{ "7-day avg players · estimated", count(data.averagePlaying) },
+		{ "Players vs usual · estimated", data.vsUsual and string.format("%+.0f%%", data.vsUsual * 100) or "—" },
+		{ "Like ratio · observed", votes > 0 and string.format("%.1f%%", observed.upVotes / votes * 100) or "—" },
+		{ "Visits · observed", count(observed.visits) },
+		{ "Favorites · observed", count(observed.favorites) },
+		{ "Target price · simulated", data.target and string.format("%.2f", data.target) or "—" },
+		{ "Updated · observed", observed.updated and os.date("!%Y-%m-%d", observed.updated) or "—" },
+		{ "Genre · observed", observed.genre or "—" },
+	}
+end
+
 -- Refreshes live data for the ticker currently loaded on the chart: the
 -- Active Trader ask price (Active Trader always trades that ticker - there
 -- is no separate ticker input on the panel itself) and the Symbol Info
@@ -954,24 +1318,21 @@ updateSymbolData = function()
 		ActiveTraderAskPriceLabel.Text = string.format("Price %.2f", quote.price)
 	end
 
-	SymbolInfoTickerLabel.Text = currentDisplayedTicker
+	if quote.assetClass == "roblox" then
+		SymbolInfoTickerLabel.Text = quote.name or currentDisplayedTicker
 
-	SymbolInfoFields.MarketCap.Text = quote.marketCap and NumberModule.formatCompact(quote.marketCap) or "—"
-	SymbolInfoFields.PE.Text = quote.trailingPE and string.format("%.2f", quote.trailingPE) or "—"
-	SymbolInfoFields.EPS.Text = quote.eps and string.format("%.2f", quote.eps) or "—"
+		for index, field in ipairs(getRobloxInfo(quote)) do
+			SymbolInfoRows[index].label.Text = field[1]
+			SymbolInfoRows[index].value.Text = field[2]
+		end
+	else
+		SymbolInfoTickerLabel.Text = currentDisplayedTicker
 
-	SymbolInfoFields.DayRange.Text = (quote.dayLow and quote.dayHigh)
-			and string.format("%.2f - %.2f", quote.dayLow, quote.dayHigh)
-		or "—"
-
-	SymbolInfoFields.FiftyTwoWeekRange.Text = (quote.fiftyTwoWeekLow and quote.fiftyTwoWeekHigh)
-			and string.format("%.2f - %.2f", quote.fiftyTwoWeekLow, quote.fiftyTwoWeekHigh)
-		or "—"
-
-	SymbolInfoFields.Volume.Text = quote.volume and NumberModule.formatShares(quote.volume) or "—"
-	SymbolInfoFields.AvgVolume.Text = quote.avgVolume and NumberModule.formatShares(quote.avgVolume) or "—"
-	SymbolInfoFields.Beta.Text = quote.beta and string.format("%.2f", quote.beta) or "—"
-	SymbolInfoFields.DividendYield.Text = quote.dividendYield and string.format("%.2f%%", quote.dividendYield) or "—"
+		for index, value in ipairs(getSecurityInfo(quote)) do
+			SymbolInfoRows[index].label.Text = SymbolInfoRows[index].stockLabel
+			SymbolInfoRows[index].value.Text = value
+		end
+	end
 end
 
 -- Refreshes the held share count for the current ticker, which Sell
@@ -1180,7 +1541,7 @@ loadTicker = function(ticker)
 		updateActiveTraderPosition()
 	else
 		TickerInput.Text = " . . . "
-		ChartTickerLabel.Text = "Error"
+		flashLegend("Couldn't load " .. targetTicker)
 		task.delay(2, showLoadedTicker)
 	end
 
@@ -1199,35 +1560,45 @@ local function updateTimeframeUI(activeTime)
 	end
 end
 
+local function setTimeframe(query)
+	currentTimeframe = query
+	updateTimeframeUI(query)
+	MainTimeframeButton.Text = getTimeframeShort(query) .. " ▾"
+end
+
 for button, data in pairs(TimeDropdownOptions) do
 	button.MouseButton1Click:Connect(function()
 		isDropdownOpen = false
 		TimeDropdownList.Visible = false
 
-		if isFetchingData then
+		if isFetchingData or data.query == currentTimeframe then
+			return
+		end
+
+		local previousTimeframe = currentTimeframe
+
+		setTimeframe(data.query)
+		pendingTrendLineStart = nil
+
+		if currentDisplayedTicker == "" then
 			return
 		end
 
 		isFetchingData = true
-		print(data.query)
-		currentTimeframe = data.query
-		updateTimeframeUI(data.query)
-		pendingTrendLineStart = nil
+		ChartTickerLabel.Text = "Loading"
+		ChartValuesLabel.Text = ""
+		updateScrollBarUI()
 
-		if currentDisplayedTicker ~= "" then
-			ChartTickerLabel.Text = "Loading"
+		local chartData = RequestChartEvent:InvokeServer(currentDisplayedTicker, data.query)
 
-			updateScrollBarUI()
-
-			local chartData = RequestChartEvent:InvokeServer(currentDisplayedTicker, data.query)
-
-			if chartData then
-				masterChartData = chartData
-				rightOffset = 0
-
-				updateViewport()
-				MainTimeframeButton.Text = data.query
-			end
+		if chartData and #chartData > 0 then
+			masterChartData = chartData
+			rightOffset = 0
+			updateViewport()
+		else
+			-- Stay on the chart that's showing
+			setTimeframe(previousTimeframe)
+			flashLegend(string.format("No %s chart for %s", data.option, getChartName()))
 		end
 
 		isFetchingData = false
@@ -1430,6 +1801,22 @@ UserInputService.InputChanged:Connect(function(input)
 	end
 end)
 
+-- Hides the crosshair and its price and time tags, and the legend goes back
+-- to the latest candle
+local function hideCrosshair()
+	CrosshairX.Visible = false
+	CrosshairY.Visible = false
+	HoverPriceTag.Visible = false
+	HoverTimeTag.Visible = false
+
+	if hoveredIndex then
+		hoveredIndex = nil
+		showCandleValues(#currentChartData)
+	end
+end
+
+hideCrosshair() -- the Studio tags start shown, reading "Label"
+
 ChartCanvas.InputBegan:Connect(function(input)
 	if isDraggingScroll then
 		return
@@ -1443,10 +1830,7 @@ ChartCanvas.InputBegan:Connect(function(input)
 		isDraggingChart = true
 		lastMouseDragX = input.Position.X
 
-		CrosshairX.Visible = false
-		CrosshairY.Visible = false
-		HoverPriceTag.Visible = false
-		HoverTimeTag.Visible = false
+		hideCrosshair()
 	end
 end)
 
@@ -1545,21 +1929,20 @@ ChartCanvas.InputChanged:Connect(function(input)
 				HoverTimeTag.Text = os.date(formatString, timestamp)
 
 				HoverTimeTag.Position = UDim2.new(snapXScale, 0, 1, -25)
+
+				if hoveredIndex ~= index then
+					hoveredIndex = index
+					showCandleValues(index)
+				end
 			else
-				CrosshairX.Visible = false
-				CrosshairY.Visible = false
-				HoverPriceTag.Visible = false
-				HoverTimeTag.Visible = false
+				hideCrosshair()
 			end
 		end
 	end
 end)
 
 ChartCanvas.InputEnded:Connect(function()
-	CrosshairX.Visible = false
-	CrosshairY.Visible = false
-	HoverPriceTag.Visible = false
-	HoverTimeTag.Visible = false
+	hideCrosshair()
 	isDraggingChart = false
 end)
 
@@ -1724,6 +2107,17 @@ ToggleActiveTraderButton.MouseButton1Click:Connect(toggleActiveTrader)
 ToggleSymbolInfoButton.MouseButton1Click:Connect(toggleSymbolInfo)
 ToggleWatchlistButton.MouseButton1Click:Connect(toggleWatchlist)
 
+-- The Sidebar's fourth button (a placeholder in Studio) opens what's charted
+-- on the Trade tab, for the order ticket and research
+local OpenInTradeButton = Sidebar:WaitForChild("PlaceholderButton")
+
+OpenInTradeButton.Text = "Trade"
+OpenInTradeButton.MouseButton1Click:Connect(function()
+	if currentDisplayedTicker ~= "" then
+		Navigation.openTicker(currentDisplayedTicker)
+	end
+end)
+
 CursorToolButton.MouseButton1Click:Connect(function()
 	setDrawingTool("cursor")
 end)
@@ -1810,7 +2204,7 @@ Player:GetAttributeChangedSignal("Level"):Connect(updateIndicatorLock)
 switchTab("Dashboard")
 updateIndicatorLock()
 setDrawingTool(currentDrawingTool) -- the Studio defaults no longer show which tool is active
-updateTimeframeUI(currentTimeframe)
+setTimeframe(currentTimeframe) -- the Studio button reads the bare query, "H"
 updateGreeting()
 updateActiveTraderPosition() -- grays out Sell presets until a position exists
 ChartTickerLabel.Text = "—" -- otherwise this shows Studio's literal default "Label" until a ticker loads

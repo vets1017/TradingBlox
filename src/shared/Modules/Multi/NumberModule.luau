@@ -47,4 +47,21 @@ function NumberModule.formatCompact(amount)
 	return sign .. "$" .. addCommas(string.format("%.2f", magnitude))
 end
 
+-- Abbreviated count, no currency - for volume and players: 1.23B, 45.60M,
+-- 7.89K, and whole numbers under 1,000
+function NumberModule.formatCount(amount)
+	local magnitude = math.abs(amount)
+	local sign = amount < 0 and "-" or ""
+
+	if magnitude >= 1e9 then
+		return sign .. string.format("%.2fB", magnitude / 1e9)
+	elseif magnitude >= 1e6 then
+		return sign .. string.format("%.2fM", magnitude / 1e6)
+	elseif magnitude >= 1e3 then
+		return sign .. string.format("%.2fK", magnitude / 1e3)
+	end
+
+	return sign .. string.format("%d", math.floor(magnitude))
+end
+
 return NumberModule
