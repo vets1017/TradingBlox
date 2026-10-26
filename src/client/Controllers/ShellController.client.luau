@@ -403,6 +403,7 @@ task.spawn(function()
 		cancelled = "Order cancelled",
 		expired = "Option expired",
 		split = "Stock split",
+		delisted = "Delisted",
 	}
 
 	OrderUpdateEvent.OnClientEvent:Connect(function(update)

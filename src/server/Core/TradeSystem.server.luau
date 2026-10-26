@@ -12,6 +12,7 @@ local OrderService = require(ServerScriptService.Services.OrderService)
 local PlayerDataService = require(ServerScriptService.Services.PlayerDataService)
 local RemoteGuard = require(ServerScriptService.Modules.RemoteGuard)
 local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursModule)
+local Instruments = require(ReplicatedStorage.Config.Instruments)
 
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
 local PlayerOrderEvent = EventsFolder:WaitForChild("PlayerOrderEvent")
@@ -43,7 +44,7 @@ RemoteGuard.handle(PlayerOrderEvent, RemoteGuard.LIMITS.Order, function(player, 
 
 	local targetTicker = string.upper(ticker)
 
-	if not MarketDataModule.isCryptoTicker(targetTicker) and not MarketHoursModule.getMarketStatus(os.time()) then
+	if not Instruments.tradesAroundTheClock(targetTicker) and not MarketHoursModule.getMarketStatus(os.time()) then
 		return { success = false, message = "Market is closed." }
 	end
 

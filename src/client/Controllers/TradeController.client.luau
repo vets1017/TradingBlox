@@ -8,6 +8,7 @@ local TweenService = game:GetService("TweenService")
 
 local NumberModule = require(ReplicatedStorage.Modules.Multi.NumberModule)
 local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursModule)
+local Instruments = require(ReplicatedStorage.Config.Instruments)
 local Theme = require(ReplicatedStorage.Modules.Multi.Theme)
 local Navigation = require(ReplicatedStorage.Modules.Multi.Navigation)
 local OrderTicketModule = require(ReplicatedStorage.Modules.Trade.OrderTicketModule)
@@ -119,6 +120,23 @@ local ANALYST_FIELDS = {
 	{ label = "Hold", key = "holdCount", format = "count" },
 	{ label = "Sell", key = "sellCount", format = "count" },
 	{ label = "Strong Sell", key = "strongSellCount", format = "count" },
+}
+
+-- A Roblox-market experience's Quote Details: every label says where its
+-- number comes from, since the GDD (§6) asks that observed stats, estimates
+-- and the simulated price never be confused
+local ROBLOX_FIELDS = {
+	{ label = "Players now · observed", key = "playing", format = "count" },
+	{ label = "24h avg players · estimated", key = "averagePlaying", format = "count" },
+	{ label = "Visits · observed", key = "visits", format = "count" },
+	{ label = "Favorites · observed", key = "favorites", format = "count" },
+	{ label = "Like ratio · observed", key = "likeRatio", format = "percent" },
+	{ label = "Updated · observed", key = "updated", format = "date" },
+	{ label = "Created · observed", key = "created", format = "date" },
+	{ label = "Genre · observed", key = "genre", format = "auto" },
+	{ label = "Creator · observed", key = "creator", format = "auto" },
+	{ label = "Target price · simulated", key = "target", format = "price" },
+	{ label = "Listed since", key = "listedAt", format = "date" },
 }
 
 local FUNDAMENTALS_FIELDS = {
@@ -317,6 +335,11 @@ local function updateHeader(data, livePrice)
 
 	TickerLabel.Text = (data and data.ticker) or currentTicker or "—"
 	CompanyLabel.Text = (data and data.companyName) or "—"
+
+	-- A Roblox-market price is the game's simulation, and says so beside it
+	if data and data.assetClass == "roblox" then
+		CompanyLabel.Text ..= data.delisted and " · Delisted" or " · Simulated price"
+	end
 
 	local priceLabel = HeaderRow:FindFirstChild("PriceLabel")
 	local changeLabel = HeaderRow:FindFirstChild("ChangeLabel")
@@ -665,7 +688,33 @@ local function fetchOptionStats()
 	renderOptionStats(data)
 end
 
+-- Roblox sends times as unix seconds; the grid shows the day
+local function toDay(seconds)
+	return seconds and os.date("!%Y-%m-%d", seconds)
+end
+
 local function renderQuoteDetails(data)
+	if data and data.assetClass == "roblox" then
+		local observed = data.observed or {}
+		local votes = (observed.upVotes or 0) + (observed.downVotes or 0)
+
+		renderFieldGrid(ContentQuoteDetails, ROBLOX_FIELDS, {
+			playing = observed.playing,
+			averagePlaying = data.averagePlaying,
+			visits = observed.visits,
+			favorites = observed.favorites,
+			likeRatio = votes > 0 and observed.upVotes / votes * 100 or nil,
+			updated = toDay(observed.updated),
+			created = toDay(observed.created),
+			genre = observed.genre,
+			creator = observed.creator,
+			target = data.target,
+			listedAt = toDay(data.listedAt),
+		}, "QF_")
+
+		return
+	end
+
 	renderFieldGrid(ContentQuoteDetails, QUOTE_FIELDS, data, "QF_")
 end
 
@@ -1022,12 +1071,13 @@ end
 local function renderOptionChain(optionData)
 	clearOptionChain()
 
-	local isLocked = optionData ~= nil and optionData.locked == true
+	-- Below the unlock level the server sends the unlock message instead of
+	-- a chain, and for an asset with no options (a Roblox experience) why not;
+	-- a Strike_ frame so clearOptionChain removes it like a row
+	local isLocked = optionData ~= nil
+		and (optionData.locked == true or (optionData.available == false and optionData.message ~= nil))
 
 	ColumnHeaders.Visible = not isLocked
-
-	-- Below the unlock level the server sends the unlock message instead of
-	-- a chain; a Strike_ frame so clearOptionChain removes it like a row
 	if isLocked then
 		local row = Instance.new("Frame")
 
@@ -1363,8 +1413,9 @@ task.spawn(function()
 end)
 
 -- Buy/Sell
+-- Crypto and the Roblox market trade around the clock
 local function isMarketOpen()
-	return MarketHoursModule.getMarketStatus(os.time())
+	return Instruments.tradesAroundTheClock(currentTicker) or MarketHoursModule.getMarketStatus(os.time())
 end
 
 local function placeOrder(action)

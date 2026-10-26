@@ -1,8 +1,9 @@
 -- DashboardController.client.luau
 --
 -- Fills the Dashboard's Studio-built widgets (GDD §3): Account Info, the
--- watchlist, orders, performance, a market overview, and Social: activity
--- from followed players, theses ranked by reactions, and top traders. The
+-- watchlist, orders, performance, a market overview (with Trending and the
+-- Roblox market), and Social: activity from followed players, theses ranked
+-- by reactions, and top traders. The
 -- widget frames come from Studio; their contents are built here from Theme
 -- tokens. TerminalController still owns the greeting and NYSE countdown.
 -- Everything refreshes when the Dashboard opens, after a trade, and once a
@@ -32,6 +33,7 @@ local GetWatchlistEvent = EventsFolder:WaitForChild("GetWatchlistEvent")
 local GetMarketOverviewEvent = EventsFolder:WaitForChild("GetMarketOverviewEvent")
 local GetMarketMoversEvent = EventsFolder:WaitForChild("GetMarketMoversEvent")
 local GetTrendingEvent = EventsFolder:WaitForChild("GetTrendingEvent")
+local GetRobloxMarketEvent = EventsFolder:WaitForChild("GetRobloxMarketEvent")
 local GetLeaderboardEvent = EventsFolder:WaitForChild("GetLeaderboardEvent")
 local GetFeedEvent = EventsFolder:WaitForChild("GetFeedEvent")
 local OrderUpdateEvent = EventsFolder:WaitForChild("OrderUpdateEvent")
@@ -95,6 +97,8 @@ local marketView = "Overview" -- or a movers list: "gainers", "losers", "active"
 local lastTrending = nil -- GetTrendingEvent's { traded, watched }
 local lastOverview = nil
 local lastMovers = nil
+local lastRoblox = nil -- GetRobloxMarketEvent's listing
+local marketUpdatedText = "" -- the overview's "Updated ..." line, kept while another view shows
 
 local makeFrame = UIKit.makeFrame
 local makeLabel = UIKit.makeLabel
@@ -313,13 +317,34 @@ local MoversList = makeList("Movers", MarketContent)
 MoversList.Size = UDim2.new(1, 0, 1, -LINE_HEIGHT)
 MoversList.Visible = false
 
+-- Every Roblox-market experience; scrolls, since there are about 50
+local RobloxList = Instance.new("ScrollingFrame")
+RobloxList.Name = "RobloxMarket"
+RobloxList.Size = UDim2.new(1, 0, 1, -LINE_HEIGHT)
+RobloxList.BackgroundTransparency = 1
+RobloxList.BorderSizePixel = 0
+RobloxList.ScrollBarThickness = 4
+RobloxList.ScrollBarImageColor3 = Theme.Colors.TextDisabled
+RobloxList.ScrollingDirection = Enum.ScrollingDirection.Y
+RobloxList.CanvasSize = UDim2.new()
+RobloxList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+RobloxList.Visible = false
+RobloxList.Parent = MarketContent
+
+local RobloxListLayout = Instance.new("UIListLayout")
+RobloxListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+RobloxListLayout.Parent = RobloxList
+
 local MARKET_VIEWS = {
 	{ id = "Overview", label = "Overview" },
 	{ id = "gainers", label = "Gainers" },
 	{ id = "losers", label = "Losers" },
 	{ id = "active", label = "Active" },
 	{ id = "trending", label = "Trending" }, -- most traded by TradingBlox players
+	{ id = "roblox", label = "Roblox" }, -- the Roblox market's experiences
 }
+
+local ROBLOX_NOTE = "Roblox market: simulated prices from public Roblox stats, not real valuations"
 
 -- Pills on the right of the widget's title row
 local MarketViewPills = makeFrame("Views", HeatmapWidget)
@@ -666,7 +691,77 @@ local function renderMarketOverview(overview)
 		end)
 	end
 
-	MarketUpdated.Text = "Updated " .. os.date("%I:%M %p", overview.updatedAt):gsub("^0", "")
+	marketUpdatedText = "Updated " .. os.date("%I:%M %p", overview.updatedAt):gsub("^0", "")
+	MarketUpdated.Text = marketUpdatedText
+end
+
+-- Every experience on the Roblox market, most players first
+local function renderRobloxMarket(rows)
+	clearList(RobloxList)
+
+	if not rows or #rows == 0 then
+		addLine(
+			RobloxList,
+			1,
+			rows and "The Roblox market opens within a few minutes" or "Roblox market unavailable right now",
+			Theme.Colors.TextMuted
+		)
+
+		return
+	end
+
+	for index, entry in ipairs(rows) do
+		local change = entry.prevClose
+			and entry.prevClose ~= 0
+			and (entry.price - entry.prevClose) / entry.prevClose * 100
+
+		local row = Instance.new("TextButton")
+		row.Name = "Roblox_" .. entry.ticker
+		row.LayoutOrder = index
+		row.Size = UDim2.new(1, -6, 0, 24)
+		row.AutoButtonColor = false
+		row.BorderSizePixel = 0
+		row.BackgroundColor3 = Theme.Colors.Raised
+		row.BackgroundTransparency = 1
+		row.Text = ""
+		row.Parent = RobloxList
+
+		local symbol = makeLabel("Symbol", row, Theme.Fonts.UISemibold, Theme.TextSize.Caption, Theme.Colors.Text)
+		symbol.Size = UDim2.new(0, 76, 1, 0)
+		symbol.Text = entry.ticker
+
+		local name = makeLabel("Name", row, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.TextMuted)
+		name.Position = UDim2.fromOffset(80, 0)
+		name.Size = UDim2.new(1, -(80 + 170), 1, 0)
+		name.Text = entry.name
+
+		local price = makeLabel("Price", row, Theme.Fonts.Mono, Theme.TextSize.Body, Theme.Colors.Text)
+		price.AnchorPoint = Vector2.new(1, 0)
+		price.Position = UDim2.new(1, -74, 0, 0)
+		price.Size = UDim2.new(0, 90, 1, 0)
+		price.TextXAlignment = Enum.TextXAlignment.Right
+		price.Text = NumberModule.format(entry.price)
+
+		local changeLabel = makeLabel("Change", row, Theme.Fonts.MonoBold, Theme.TextSize.Body, Theme.Colors.Text)
+		changeLabel.AnchorPoint = Vector2.new(1, 0)
+		changeLabel.Position = UDim2.fromScale(1, 0)
+		changeLabel.Size = UDim2.new(0, 70, 1, 0)
+		changeLabel.TextXAlignment = Enum.TextXAlignment.Right
+		changeLabel.Text = change and string.format("%+.2f%%", change) or "—"
+		changeLabel.TextColor3 = change and getChangeColor(change) or Theme.Colors.TextMuted
+
+		row.MouseEnter:Connect(function()
+			row.BackgroundTransparency = 0
+		end)
+
+		row.MouseLeave:Connect(function()
+			row.BackgroundTransparency = 1
+		end)
+
+		row.MouseButton1Click:Connect(function()
+			Navigation.openTicker(entry.ticker)
+		end)
+	end
 end
 
 local function renderMovers(quotes)
@@ -794,12 +889,16 @@ local function renderMarket()
 	end
 
 	MarketGrid.Visible = isOverview
-	MoversList.Visible = not isOverview
+	MoversList.Visible = not isOverview and marketView ~= "roblox"
+	RobloxList.Visible = marketView == "roblox"
+	MarketUpdated.Text = marketView == "roblox" and ROBLOX_NOTE or marketUpdatedText
 
 	if isOverview and lastOverview then
 		renderMarketOverview(lastOverview)
 	elseif marketView == "trending" then
 		renderTrending(lastTrending)
+	elseif marketView == "roblox" then
+		renderRobloxMarket(lastRoblox)
 	elseif not isOverview then
 		if lastMovers then
 			renderMovers(lastMovers[marketView] or {})
@@ -1038,6 +1137,7 @@ local function refresh()
 		overview = { GetMarketOverviewEvent },
 		movers = { GetMarketMoversEvent },
 		trending = { GetTrendingEvent },
+		roblox = { GetRobloxMarketEvent },
 		traders = { GetLeaderboardEvent, "NetWorth" },
 		following = { GetFeedEvent, "Following" },
 		allFeed = { GetFeedEvent, "All" },
@@ -1081,6 +1181,10 @@ local function refresh()
 
 	if results.trending then
 		lastTrending = results.trending
+	end
+
+	if results.roblox then
+		lastRoblox = results.roblox
 	end
 
 	renderMarket()

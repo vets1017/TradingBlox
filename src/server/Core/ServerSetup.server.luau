@@ -35,6 +35,7 @@ local EVENTS = {
 	"GetInboxEvent",
 	"MarkInboxSeenEvent",
 	"GetTrendingEvent",
+	"GetRobloxMarketEvent",
 }
 
 -- Server-to-client pushes (RemoteEvents rather than RemoteFunctions)

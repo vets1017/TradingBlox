@@ -14,6 +14,10 @@
 -- broker does. A fraction of a share left over (a reverse split) is paid out
 -- in cash at the current price, and open limit orders on the ticker are
 -- adjusted the same way. Options on a split stock aren't adjusted yet.
+--
+-- Delisting: shares of an experience that left the Roblox market pay out at
+-- its last simulated price, logged as a sale ("Delisted") so realized P/L
+-- counts it.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -21,9 +25,12 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local PlayerDataService = require(ServerScriptService.Services.PlayerDataService)
 local OrderService = require(ServerScriptService.Services.OrderService)
+local RobloxMarketService = require(ServerScriptService.Services.RobloxMarketService)
 local MarketDataModule = require(ServerScriptService.Modules.MarketDataModule)
 local TradeLogModule = require(ServerScriptService.Modules.TradeLogModule)
 local NumberModule = require(ReplicatedStorage.Modules.Multi.NumberModule)
+local Instruments = require(ReplicatedStorage.Config.Instruments)
+local RobloxMarket = require(ReplicatedStorage.Config.RobloxMarket)
 
 local CHECK_INTERVAL = 600
 -- An expiration day's close is final by 21:00 UTC: the 16:00 New York close
@@ -230,6 +237,44 @@ local function applySplits(player, data, now)
 	end
 end
 
+local function settleDelisted(player, data, now)
+	for ticker in pairs(table.clone(data.Portfolio.Shares)) do
+		if Instruments.isRoblox(ticker) then
+			local experience = RobloxMarketService.getExperienceState(ticker)
+			local shares = data.Portfolio.Shares[ticker]
+
+			-- Re-read after the market read, which can yield
+			if experience and experience.delisted and shares and PlayerDataService.get(player) == data then
+				local price = experience.price
+				local proceeds = shares * price
+				local listed = RobloxMarket.getExperience(ticker)
+
+				TradeLogModule.record(data, {
+					ticker = ticker,
+					side = "Sell",
+					quantity = shares,
+					price = price,
+					costBasis = data.Portfolio.AvgCost[ticker] or price,
+					settlement = "Delisted",
+				}, now)
+
+				PlayerDataService.setStat(player, "Balance", data.Balance + proceeds)
+				PlayerDataService.updateShares(player, ticker, -shares)
+				OrderService.notify(
+					player,
+					"delisted",
+					string.format(
+						"%s left the Roblox market: %s shares paid %s",
+						listed and listed.name or ticker,
+						NumberModule.formatShares(shares),
+						NumberModule.format(proceeds)
+					)
+				)
+			end
+		end
+	end
+end
+
 function SettlementService.settlePlayer(player)
 	local data = PlayerDataService.get(player)
 
@@ -241,6 +286,7 @@ function SettlementService.settlePlayer(player)
 
 	settleExpiredOptions(player, data, now)
 	applySplits(player, data, now)
+	settleDelisted(player, data, now)
 end
 
 -- Must run before PlayerDataService.start so no PlayerLoaded is missed

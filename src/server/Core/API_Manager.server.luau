@@ -8,8 +8,10 @@ local TextService = game:GetService("TextService")
 
 local MarketDataModule = require(ServerScriptService.Modules.MarketDataModule)
 local ProgressionService = require(ServerScriptService.Services.ProgressionService)
+local RobloxMarketService = require(ServerScriptService.Services.RobloxMarketService)
 local RemoteGuard = require(ServerScriptService.Modules.RemoteGuard)
 local Progression = require(ReplicatedStorage.Config.Progression)
+local Instruments = require(ReplicatedStorage.Config.Instruments)
 
 -- Remotes
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
@@ -22,6 +24,7 @@ local GetAnalystReportEvent = EventsFolder:WaitForChild("GetAnalystReportEvent")
 local GetFundamentalsEvent = EventsFolder:WaitForChild("GetFundamentalsEvent")
 local GetOptionStatsEvent = EventsFolder:WaitForChild("GetOptionStatsEvent")
 local GetOptionsDataEvent = EventsFolder:WaitForChild("GetOptionsDataEvent")
+local GetRobloxMarketEvent = EventsFolder:WaitForChild("GetRobloxMarketEvent")
 
 -- Config
 local VALID_TIMEFRAMES = { ["1M"] = true, ["5M"] = true, ["30M"] = true, ["H"] = true, ["D"] = true }
@@ -64,9 +67,69 @@ RemoteGuard.handle(RequestChartEvent, RemoteGuard.LIMITS.Poll, function(player, 
 	return data
 end)
 
+-- Text from outside Roblox (headlines, company names) has to pass Roblox's
+-- filter before a player sees it. It reads the same for everyone, so each
+-- string is filtered once per server and the result reused.
+local FILTER_CACHE_LIMIT = 2000
+
+local filteredText = {} -- [original] = filtered
+local filteredTextCount = 0
+
+-- The filtered string, or nil if it can't be filtered: unfiltered external
+-- text is never shown
+local function filterExternalText(text, player)
+	if type(text) ~= "string" or text == "" then
+		return nil
+	end
+
+	if filteredText[text] then
+		return filteredText[text]
+	end
+
+	local success, result = pcall(function()
+		return TextService:FilterStringAsync(text, player.UserId):GetNonChatStringForBroadcastAsync()
+	end)
+
+	if not success then
+		warn("[API_Manager] Couldn't filter external text: " .. tostring(result))
+
+		return nil
+	end
+
+	if filteredTextCount >= FILTER_CACHE_LIMIT then
+		table.clear(filteredText)
+		filteredTextCount = 0
+	end
+
+	filteredText[text] = result
+	filteredTextCount += 1
+
+	return result
+end
+
+-- A Roblox-market experience for the Trade screen: RobloxMarketService's
+-- research ({ name, price, prevClose, observed, averagePlaying, target, ... })
+-- plus { ticker, assetClass = "roblox", companyName }, or nil if it isn't on
+-- the market (yet). The creator's name comes from Roblox, so it's filtered.
+local function getRobloxMarketData(player, ticker)
+	local research = RobloxMarketService.getResearch(ticker)
+
+	if not research then
+		return nil
+	end
+
+	research.ticker = ticker
+	research.assetClass = "roblox"
+	research.companyName = research.name
+	research.observed.creator = filterExternalText(research.observed.creator, player)
+
+	return research
+end
+
 -- GetMarketDataEvent
 -- Returns a quote ({ ticker, price, prevClose }) for the given ticker, merged
 -- with quote-details fields (bid/ask, volume, market cap, etc.) when available.
+-- A Roblox-market ticker gets its research instead (getRobloxMarketData).
 RemoteGuard.handle(GetMarketDataEvent, RemoteGuard.LIMITS.Read, function(player, ticker)
 	if not ticker then
 		return nil
@@ -76,6 +139,10 @@ RemoteGuard.handle(GetMarketDataEvent, RemoteGuard.LIMITS.Read, function(player,
 		warn(string.format("[API_Manager] Invalid ticker from %s: %s", player.Name, tostring(ticker)))
 
 		return nil
+	end
+
+	if Instruments.isRoblox(ticker) then
+		return getRobloxMarketData(player, string.upper(ticker))
 	end
 
 	local quote = MarketDataModule.getQuote(ticker)
@@ -199,46 +266,6 @@ RemoteGuard.handle(GetOptionStatsEvent, RemoteGuard.LIMITS.Research, function(pl
 	return stats
 end)
 
--- Text from outside Roblox (headlines, company names) has to pass Roblox's
--- filter before a player sees it. It reads the same for everyone, so each
--- string is filtered once per server and the result reused.
-local FILTER_CACHE_LIMIT = 2000
-
-local filteredText = {} -- [original] = filtered
-local filteredTextCount = 0
-
--- The filtered string, or nil if it can't be filtered: unfiltered external
--- text is never shown
-local function filterExternalText(text, player)
-	if type(text) ~= "string" or text == "" then
-		return nil
-	end
-
-	if filteredText[text] then
-		return filteredText[text]
-	end
-
-	local success, result = pcall(function()
-		return TextService:FilterStringAsync(text, player.UserId):GetNonChatStringForBroadcastAsync()
-	end)
-
-	if not success then
-		warn("[API_Manager] Couldn't filter external text: " .. tostring(result))
-
-		return nil
-	end
-
-	if filteredTextCount >= FILTER_CACHE_LIMIT then
-		table.clear(filteredText)
-		filteredTextCount = 0
-	end
-
-	filteredText[text] = result
-	filteredTextCount += 1
-
-	return result
-end
-
 -- GetNewsFeedEvent
 -- Up to 10 recent headlines for a ticker: { { title, publisher, publishedAt } }.
 -- Links are dropped: players can't open outside links from a game.
@@ -361,4 +388,11 @@ RemoteGuard.handle(GetMarketOverviewEvent, RemoteGuard.LIMITS.Research, function
 	end
 
 	return { quotes = marketOverview.quotes, updatedAt = marketOverview.updatedAt }
+end)
+
+-- GetRobloxMarketEvent
+-- Every listed experience for browsing: { { ticker, name, price, prevClose,
+-- playing } }, most players first. Names are the game's own, not Roblox's.
+RemoteGuard.handle(GetRobloxMarketEvent, RemoteGuard.LIMITS.Research, function()
+	return RobloxMarketService.getListing()
 end)

@@ -8,6 +8,7 @@ local UserInputService = game:GetService("UserInputService")
 -- Modules
 local NumberModule = require(ReplicatedStorage.Modules.Multi.NumberModule)
 local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursModule)
+local Instruments = require(ReplicatedStorage.Config.Instruments)
 local ChartRenderer = require(ReplicatedStorage.Modules.Multi.ChartRenderer)
 local DrawingModule = require(ReplicatedStorage.Modules.Multi.DrawingModule)
 local Theme = require(ReplicatedStorage.Modules.Multi.Theme)
@@ -715,7 +716,11 @@ local function placeActiveTraderBuy(dollarAmount)
 		return
 	end
 
-	if not MarketHoursModule.getMarketStatus(os.time()) then
+	-- Crypto and the Roblox market trade around the clock
+	if
+		not Instruments.tradesAroundTheClock(currentDisplayedTicker)
+		and not MarketHoursModule.getMarketStatus(os.time())
+	then
 		ActiveTraderStatusLabel.TextColor3 = GRAY
 		ActiveTraderStatusLabel.Text = "Market is closed."
 
@@ -762,7 +767,11 @@ local function placeActiveTraderSell(fraction)
 		return
 	end
 
-	if not MarketHoursModule.getMarketStatus(os.time()) then
+	-- Crypto and the Roblox market trade around the clock
+	if
+		not Instruments.tradesAroundTheClock(currentDisplayedTicker)
+		and not MarketHoursModule.getMarketStatus(os.time())
+	then
 		ActiveTraderStatusLabel.TextColor3 = GRAY
 		ActiveTraderStatusLabel.Text = "Market is closed."
 

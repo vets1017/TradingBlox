@@ -595,6 +595,44 @@ Phase 2's "done when" holds: following someone shows their verified trades and t
 server (feed items reach other servers at their next five-second refresh), popular assets show under
 Trending, and every typed text is filtered for broadcast before it's stored.
 
+### Phase 3 decisions
+
+Taken at the start of Phase 3 (2026-10-25); Kevin accepted each recommendation:
+
+- **Prices and history live in Roblox storage, not on the backend.** Render's free disk is wiped on every
+  restart and deploy, so a backend-side model would need an outside database. Instead the backend only
+  fetches experience stats (stateless, cached), and every five minutes one game server, whichever claims
+  the tick first, computes the new prices and saves them to a DataStore that every server reads. Prices
+  agree across servers because there's one saved state. The cost: prices advance only while some game
+  server is running; after a gap the daily move cap scales with the time that passed.
+- **The Roblox market is open from Level 1**, like crypto: it trades 24/7, so new players have
+  something to trade on weekends. The GDD's §8 doesn't place it at a level.
+- **The allowlist is drafted, then reviewed by Kevin.** Candidates come from Roblox's Top Playing Now,
+  Top Revisited and Top Trending sorts, rated Minimal or Mild, at least six months old; display names
+  are ours (live names carry emoji and event tags).
+- **Roblox-market leaderboard filters wait for Phase 4**, with the other new boards.
+
+### Phase 3 build order
+
+1. ✅ Data: the backend's `/api/roblox/experiences` route (stateless, cached four minutes) and
+   `Config/RobloxMarket` (50 experiences: ticker `RBX-…`, universe id, display name; awaiting Kevin's
+   review). The route deploys with the backend's next push.
+2. ✅ Price engine: `RobloxPriceModule`, pure and tested: players online averaged over about a day, like
+   ratio, a week's momentum and update freshness make a target on a square-root scale; the price closes
+   in over about half a day, at most 10% per 24 hours elapsed; candles come from price points.
+3. ✅ `RobloxMarketService`: the five-minute tick (claimed with `UpdateAsync` on `RobloxMarket_v1`'s
+   "state" key), a history key per experience (full detail for a week, hourly to 90 days, daily to two
+   years), per-server caches, and delisting (missing from Roblox for a day, or dropped from the list),
+   which pays holdings out at the last price.
+4. ✅ Wiring: `MarketDataModule` hands Roblox tickers to the service and answers the research routes with
+   "not available"; `Config/Instruments` lets crypto and Roblox tickers trade 24/7 everywhere (it also
+   fixed the Trade header's Buy/Sell and Active Trader refusing crypto on weekends); fills use
+   FillPriceModule's existing 15-minute stale rule; holdings group as "Roblox market".
+5. ✅ Research on the Trade screen: "Simulated price" beside the price, and Quote Details showing observed
+   stats, the estimated 24-hour average and the simulated target, each labeled.
+6. ✅ Browsing: a Roblox view in Market overview, every experience by players online, with a "simulated
+   prices, not real valuations" note.
+
 ## Sources
 
 - [In-experience HTTP requests (Roblox docs)](https://create.roblox.com/docs/cloud-services/http-service)

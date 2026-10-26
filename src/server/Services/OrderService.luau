@@ -26,6 +26,7 @@ local TradeLogModule = require(ServerScriptService.Modules.TradeLogModule)
 local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursModule)
 local NumberModule = require(ReplicatedStorage.Modules.Multi.NumberModule)
 local Progression = require(ReplicatedStorage.Config.Progression)
+local Instruments = require(ReplicatedStorage.Config.Instruments)
 
 local OrderUpdateEvent = ReplicatedStorage:WaitForChild("EventsFolder"):WaitForChild("OrderUpdateEvent")
 
@@ -43,7 +44,7 @@ local function isPositiveInteger(value)
 end
 
 local function isTradeable(ticker, now)
-	return MarketDataModule.isCryptoTicker(ticker) or MarketHoursModule.getMarketStatus(now)
+	return Instruments.tradesAroundTheClock(ticker) or MarketHoursModule.getMarketStatus(now)
 end
 
 local function describeOrder(order)

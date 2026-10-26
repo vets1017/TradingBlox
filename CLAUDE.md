@@ -54,7 +54,7 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
   full-screen shell — nav bar, inbox bell, balance and level pills, status bar, toasts; `InboxController` for the
   bell's unread badge and the notification list it opens; `TerminalController` for tab
   switching, the Dashboard greeting and countdown, and Charts; `DashboardController` for the Dashboard's widgets
-  (account info, watchlist, orders, performance, market overview with a Trending view, and Social — followed
+  (account info, watchlist, orders, performance, market overview with Trending and Roblox views, and Social — followed
   players' posts, theses ranked by reactions, top traders), built in code inside the Studio widget frames; `TutorialController` for the "Getting started" checklist card; `TradeController` for the Trade screen; `PortfolioController` for the Portfolio screen, which it builds
   entirely in code inside the empty Studio `PortfolioScreen` frame; `SocialController` for the Social tab (the feed,
   All or Following, polled every 5 s while open, with reaction chips, plus a Trending view; it also sends the server the player's
@@ -72,8 +72,8 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     `GetPortfolioEvent`, `GetLeaderboardEvent`, `GetPublicProfileEvent`, `GetNewsFeedEvent`, `GetMarketMoversEvent`,
     `PlayerOrderEvent`, `PlayerOptionOrderEvent`, `FollowPlayerEvent`, `SetShareTradesEvent`, `GetFeedEvent`,
     `PublishThesisEvent`, `DeleteThesisEvent`, `GetTickerThesesEvent`, `MutePlayerEvent`, `SetRobloxBlocksEvent`,
-    `ReportThesisEvent`, `ReactToFeedItemEvent`, `GetInboxEvent`, `MarkInboxSeenEvent`, `GetTrendingEvent`, plus
-    watchlist and research remotes; pushes go through RemoteEvents `OrderUpdateEvent` and `NotificationEvent`). This must run before other server scripts wire up
+    `ReportThesisEvent`, `ReactToFeedItemEvent`, `GetInboxEvent`, `MarkInboxSeenEvent`, `GetTrendingEvent`,
+    `GetRobloxMarketEvent`, plus watchlist and research remotes; pushes go through RemoteEvents `OrderUpdateEvent` and `NotificationEvent`). This must run before other server scripts wire up
     `OnServerInvoke` handlers.
   - `API_Manager.server.luau` wires the market-data remotes. `Modules/MarketDataModule.luau` is the sole
     bridge to the external HTTP backend (`SERVER_URL`, a Render-hosted service): ticker validation, a
@@ -92,8 +92,8 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     localhost). Remove it after testing; live servers always use the deployed backend.
   - `Data_Manager.server.luau` is the bootstrap for the player services: it starts the services that listen
     for players (`ProgressionService`, `LeaderboardService`, `PublicProfileService`, `SocialService`, `FeedService`,
-    `ThesisService`, `NotificationService`, `DiscoveryService`, `OrderService`, `SettlementService`) before
-    `PlayerDataService`, so none misses a player who loads straight away.
+    `ThesisService`, `NotificationService`, `DiscoveryService`, `RobloxMarketService`, `OrderService`,
+    `SettlementService`) before `PlayerDataService`, so none misses a player who loads straight away.
   - `API_Manager`'s option and research remotes check level unlocks; a locked request gets
     `{ available = false, locked = true, message = "Unlocks at Level N · Name" }`, the shape the Trade screen
     already renders as "no data".
@@ -171,6 +171,14 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     sends a ProfileStore message (the inbox entry) and a MessagingService broadcast on `Notifications_v1` (the live
     toast); `notifyOnce` limits a sender to once a session per key. Notifications carry fields, not text — the
     client words them with `Social.describeNotification`. Pure rules: `Modules/InboxModule.luau`.
+  - `RobloxMarketService` — the Roblox market (Phase 3): about 50 experiences (`Config/RobloxMarket`, tickers
+    `RBX-…`) with prices *simulated* from public Roblox stats by `Modules/RobloxPriceModule.luau` (pure, tested).
+    Every five minutes one game server claims the tick with `UpdateAsync` on DataStore `RobloxMarket_v1` "state",
+    fetches stats through the backend's `/api/roblox/experiences` (game servers can't call roblox.com), and saves
+    prices plus a `history:<ticker>` key each; every server reads the same state, so prices agree. Prices move only
+    while some server runs. `MarketDataModule` hands Roblox tickers' quotes and candles to it (`setRobloxProvider`)
+    and answers their research routes "not available". Delisted experiences settle in `SettlementService`.
+    **The UI must label Roblox numbers observed, estimated or simulated** (GDD §6).
   - `DiscoveryService` — asset discovery: watchers per ticker (OrderedDataStore `Watchers_v1`, synced from
     watchlists with `playerData.Social.CountedWatches` so nothing counts twice) and daily trade counts
     (`TickerTrades_<UTC day>`, batched and written once a minute per server). `getTickerStats` (cached 60 s) and
@@ -184,7 +192,9 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
 - **Shared config (`src/shared/Config/`)** — read by both sides: the server enforces it, the client explains it.
   `Progression` (levels, unlocks, XP rules), `Leaderboards` (boards, periods, eligibility, score encoding),
   `Economy` (starting cash), `Social` (follow cap, recent trades per profile, feed views and milestone wording,
-  thesis directions, horizons and limits, reactions, safety limits).
+  thesis directions, horizons and limits, reactions, safety limits), `RobloxMarket` (the listed experiences and
+  the observed/simulated wording), `Instruments` (a ticker's asset class: `roblox`, `crypto` or `security`, and
+  whether it trades 24/7 — use it for any market-hours check).
 - **Shared UI (`src/shared/UI/`)** — the in-house kit for UI built in code: `UIKit` (frame/label/panel/pill/
   dot/avatar builders on Theme tokens), `FeedText` (how feed items read, shared by the Social tab and Dashboard) and `LineChart` (the gradient line + fill used by the Portfolio chart and
   profile panel). New code-built screens should use these instead of copying builders.

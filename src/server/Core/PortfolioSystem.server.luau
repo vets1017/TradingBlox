@@ -45,6 +45,7 @@ local QUOTE_TYPE_GROUPS = {
 	ETF = "ETFs",
 	CRYPTOCURRENCY = "Crypto",
 	MUTUALFUND = "Funds",
+	ROBLOX = "Roblox market", -- MarketDataModule.getProfile's type for RBX- tickers
 }
 
 -- Option contracts priced off the cached chain, so this adds no HTTP calls

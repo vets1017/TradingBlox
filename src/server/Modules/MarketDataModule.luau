@@ -6,12 +6,25 @@
 -- profile). Used by API_Manager
 -- (chart/quote remotes) and TradeSystem (trade pricing + positions) so
 -- neither duplicates the HTTP fetch/cache logic.
+--
+-- Roblox-market tickers (Config/Instruments) never reach Yahoo: their quotes
+-- and candles come from RobloxMarketService, which registers itself with
+-- setRobloxProvider, and the research routes answer "not available".
 
 local HttpService = game:GetService("HttpService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
 
+local Instruments = require(ReplicatedStorage.Config.Instruments)
+
 local MarketDataModule = {}
+
+-- Set by RobloxMarketService.start (it requires this module, so it can't be
+-- required back): getQuote(ticker) and getCandles(ticker, timeframe, mode)
+local robloxProvider = nil
+
+local NOT_FOR_ROBLOX = { available = false, message = "Not available for Roblox experiences" }
 
 -- Config
 -- In Studio only, a "BackendUrl" attribute on ServerScriptService points the
@@ -30,6 +43,7 @@ local MOVERS_ENDPOINT = SERVER_URL .. "/api/movers"
 local PROFILE_ENDPOINT = SERVER_URL .. "/api/profile/"
 local QUOTES_ENDPOINT = SERVER_URL .. "/api/quotes?symbols="
 local SPLITS_ENDPOINT = SERVER_URL .. "/api/splits/"
+local ROBLOX_EXPERIENCES_ENDPOINT = SERVER_URL .. "/api/roblox/experiences?ids="
 
 local CHART_CACHE_DURATION = 300
 local QUOTE_DETAILS_CACHE_DURATION = 60
@@ -230,6 +244,15 @@ function MarketDataModule.getCandles(ticker, timeframe, mode)
 	end
 
 	local targetTicker = string.upper(ticker)
+
+	if Instruments.isRoblox(targetTicker) then
+		if not robloxProvider then
+			return nil, "The Roblox market isn't ready yet"
+		end
+
+		return robloxProvider.getCandles(targetTicker, timeframe, mode)
+	end
+
 	local isLiveRequest = (mode == "live")
 	local cacheKey = buildCacheKey(targetTicker, timeframe, mode)
 	local now = os.time()
@@ -284,6 +307,11 @@ function MarketDataModule.getQuotes(tickers)
 		if MarketDataModule.isValidTicker(targetTicker) and not seen[targetTicker] then
 			seen[targetTicker] = true
 
+			-- Roblox-market quotes are local; see the loop at the end
+			if Instruments.isRoblox(targetTicker) then
+				continue
+			end
+
 			if not cached or now - cached.lastUpdated >= QUOTE_CACHE_DURATION then
 				table.insert(missing, targetTicker)
 			end
@@ -306,10 +334,32 @@ function MarketDataModule.getQuotes(tickers)
 	local quotes = {}
 
 	for targetTicker in pairs(seen) do
-		quotes[targetTicker] = QuoteCache[targetTicker] and QuoteCache[targetTicker].data
+		if Instruments.isRoblox(targetTicker) then
+			quotes[targetTicker] = robloxProvider and robloxProvider.getQuote(targetTicker)
+		else
+			quotes[targetTicker] = QuoteCache[targetTicker] and QuoteCache[targetTicker].data
+		end
 	end
 
 	return quotes
+end
+
+-- Public stats of Roblox experiences by universe id, through the backend
+-- (game servers can't call roblox.com): { [universeId string] = { creator,
+-- playing, visits, favorites, upVotes, downVotes, created, updated, genre } }.
+-- Up to 50 ids. Not cached here: RobloxMarketService asks once per tick.
+function MarketDataModule.getRobloxExperiences(universeIds)
+	local data, err = fetchJSON(ROBLOX_EXPERIENCES_ENDPOINT .. table.concat(universeIds, ","))
+
+	if data and data.error then
+		return nil, tostring(data.error)
+	end
+
+	return data, err
+end
+
+function MarketDataModule.setRobloxProvider(provider)
+	robloxProvider = provider
 end
 
 function MarketDataModule.getLiveQuote(ticker)
@@ -347,6 +397,10 @@ function MarketDataModule.getSplits(ticker)
 	end
 
 	local targetTicker = string.upper(ticker)
+
+	if Instruments.isRoblox(targetTicker) then
+		return {}
+	end
 	local data = cachedRoute(
 		SplitsCache,
 		targetTicker,
@@ -399,6 +453,10 @@ function MarketDataModule.getQuoteDetails(ticker)
 
 	local targetTicker = string.upper(ticker)
 
+	if Instruments.isRoblox(targetTicker) then
+		return table.clone(NOT_FOR_ROBLOX), nil
+	end
+
 	return cachedFetch(QuoteDetailsCache, targetTicker, QUOTE_DETAILS_CACHE_DURATION, function()
 		local data, err = fetchJSON(QUOTE_DETAILS_ENDPOINT .. HttpService:UrlEncode(targetTicker))
 
@@ -418,6 +476,10 @@ function MarketDataModule.getAnalystReport(ticker)
 	end
 
 	local targetTicker = string.upper(ticker)
+
+	if Instruments.isRoblox(targetTicker) then
+		return table.clone(NOT_FOR_ROBLOX), nil
+	end
 
 	return cachedFetch(AnalystCache, targetTicker, ANALYST_CACHE_DURATION, function()
 		local data, err = fetchJSON(ANALYST_ENDPOINT .. HttpService:UrlEncode(targetTicker))
@@ -439,6 +501,10 @@ function MarketDataModule.getFundamentals(ticker)
 
 	local targetTicker = string.upper(ticker)
 
+	if Instruments.isRoblox(targetTicker) then
+		return table.clone(NOT_FOR_ROBLOX), nil
+	end
+
 	return cachedFetch(FundamentalsCache, targetTicker, FUNDAMENTALS_CACHE_DURATION, function()
 		local data, err = fetchJSON(FUNDAMENTALS_ENDPOINT .. HttpService:UrlEncode(targetTicker))
 
@@ -458,6 +524,10 @@ function MarketDataModule.getOptionStats(ticker)
 	end
 
 	local targetTicker = string.upper(ticker)
+
+	if Instruments.isRoblox(targetTicker) then
+		return table.clone(NOT_FOR_ROBLOX), nil
+	end
 
 	return cachedFetch(OptionStatsCache, targetTicker, OPTION_STATS_CACHE_DURATION, function()
 		local data, err = fetchJSON(OPTIONS_ENDPOINT .. HttpService:UrlEncode(targetTicker))
@@ -479,6 +549,10 @@ function MarketDataModule.getOptionChain(ticker)
 	end
 
 	local targetTicker = string.upper(ticker)
+
+	if Instruments.isRoblox(targetTicker) then
+		return table.clone(NOT_FOR_ROBLOX), nil
+	end
 
 	return cachedFetch(OptionChainCache, targetTicker, OPTION_CHAIN_CACHE_DURATION, function()
 		local data, err = fetchJSON(OPTIONS_CHAIN_ENDPOINT .. HttpService:UrlEncode(targetTicker))
@@ -523,6 +597,10 @@ function MarketDataModule.getNews(ticker)
 
 	local targetTicker = string.upper(ticker)
 
+	if Instruments.isRoblox(targetTicker) then
+		return { available = false, items = {} }, nil
+	end
+
 	return cachedRoute(
 		NewsCache,
 		targetTicker,
@@ -544,6 +622,10 @@ function MarketDataModule.getProfile(ticker)
 	end
 
 	local targetTicker = string.upper(ticker)
+
+	if Instruments.isRoblox(targetTicker) then
+		return { quoteType = "ROBLOX" }, nil
+	end
 
 	return cachedRoute(
 		ProfileCache,

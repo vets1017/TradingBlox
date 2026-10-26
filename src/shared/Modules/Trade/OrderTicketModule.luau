@@ -18,6 +18,7 @@ local NumberModule = require(ReplicatedStorage.Modules.Multi.NumberModule)
 local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursModule)
 local UIKit = require(ReplicatedStorage.UI.UIKit)
 local Progression = require(ReplicatedStorage.Config.Progression)
+local Instruments = require(ReplicatedStorage.Config.Instruments)
 
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
 local PlayerOrderEvent = EventsFolder:WaitForChild("PlayerOrderEvent")
@@ -36,10 +37,6 @@ local LIMIT_BOX_WIDTH = 90
 
 local OrderTicketModule = {}
 OrderTicketModule.__index = OrderTicketModule
-
-local function isCryptoTicker(ticker)
-	return string.match(ticker, "^%a+%-USD$") ~= nil
-end
 
 local function formatPreset(amount)
 	return amount >= 1000 and string.format("$%dK", amount / 1000) or "$" .. amount
@@ -319,9 +316,14 @@ function OrderTicketModule:update()
 end
 
 -- Market orders fill at the live price, so they need the market open
--- (crypto trades around the clock); limit orders can wait for it
+-- (crypto and the Roblox market trade around the clock); limit orders can
+-- wait for it
 function OrderTicketModule:canTradeNow(ticker)
-	if self.mode == "Limit" or isCryptoTicker(ticker) or MarketHoursModule.getMarketStatus(os.time()) then
+	if
+		self.mode == "Limit"
+		or Instruments.tradesAroundTheClock(ticker)
+		or MarketHoursModule.getMarketStatus(os.time())
+	then
 		return true
 	end
 
