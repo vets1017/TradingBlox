@@ -601,10 +601,11 @@ Taken at the start of Phase 3 (2026-10-25); Kevin accepted each recommendation:
 
 - **Prices and history live in Roblox storage, not on the backend.** Render's free disk is wiped on every
   restart and deploy, so a backend-side model would need an outside database. Instead the backend only
-  fetches experience stats (stateless, cached), and every five minutes one game server, whichever claims
-  the tick first, computes the new prices and saves them to a DataStore that every server reads. Prices
-  agree across servers because there's one saved state. The cost: prices advance only while some game
-  server is running; after a gap the daily move cap scales with the time that passed.
+  fetches experience stats (stateless, cached), and every minute (five at first; see step 7) one game
+  server, whichever claims the tick first, computes the new prices and saves them to a DataStore that
+  every server reads. Prices agree across servers because there's one saved state. The cost: prices
+  advance only while some game server is running; after a gap the daily move cap scales with the time
+  that passed.
 - **The Roblox market is open from Level 1**, like crypto: it trades 24/7, so new players have
   something to trade on weekends. The GDD's §8 doesn't place it at a level.
 - **The allowlist is drafted, then reviewed by Kevin.** Candidates come from Roblox's Top Playing Now,
@@ -635,6 +636,18 @@ Taken at the start of Phase 3 (2026-10-25); Kevin accepted each recommendation:
    icon, genre, creator, players and the simulated-price note.
 6. ✅ Browsing: a Roblox view in Market overview, every experience by players online, with a "simulated
    prices, not real valuations" note.
+7. ✅ Minute prices, a weekly average and a warm-up, after Kevin asked how prices move. A simulation
+   (`tools/simulate-roblox-market.luau`) showed the 24-hour average let a steady game swing 2–3% a day
+   and 3–4% over weekends, a schedule players could farm, and that the listing time skewed the price.
+   Now activity is players online averaged over 7 days hour by hour, so day-night and weekend cycles
+   cancel (a steady game's daily swing is about 0.15%); momentum compares two full weeks; a new listing
+   warms up for 24 hours before it trades, its forming price charted; state keeps exact prices, since a
+   minute's move can be under a cent. The tick is every minute, claimed on a tiny "tick" key. Only
+   the ticking server touches the full "state"; every server reads a small "prices" key with each
+   experience's last 15 minutes of points. History keeps every minute for a day and is written in
+   five-minute batches. The backend caches stats for 45 seconds. Charts get one-minute candles, and
+   the Charts tab got the market picker too. Left as is: when a whole week first fills, the weekend's
+   share shifts the price once, by about 2%.
 
 ## Sources
 

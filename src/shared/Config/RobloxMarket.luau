@@ -68,10 +68,12 @@ RobloxMarket.EXPERIENCES = {
 
 -- How the research view words the two kinds of number (GDD §6 asks they
 -- never be confused)
-RobloxMarket.OBSERVED_NOTE = "Observed: public stats from Roblox, refreshed every 5 minutes."
-RobloxMarket.SIMULATED_NOTE = "Simulated price: modeled from players online (a 24-hour average), the like "
-	.. "ratio, a week's growth and how recently it was updated. Not a real valuation of the experience "
+RobloxMarket.OBSERVED_NOTE = "Observed: public stats from Roblox, refreshed every minute."
+RobloxMarket.SIMULATED_NOTE = "Simulated price: modeled from players online (averaged over 7 days), the "
+	.. "like ratio, a week's growth and how recently it was updated. Not a real valuation of the experience "
 	.. "or its developer."
+RobloxMarket.WARMUP_NOTE = "New listing: trading opens once a full day of player counts is in, so the "
+	.. "time of day it was listed can't skew its price. Until then the price is still forming."
 
 local byTicker = {}
 

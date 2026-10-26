@@ -14,6 +14,7 @@ local DrawingModule = require(ReplicatedStorage.Modules.Multi.DrawingModule)
 local Theme = require(ReplicatedStorage.Modules.Multi.Theme)
 local Navigation = require(ReplicatedStorage.Modules.Multi.Navigation)
 local Progression = require(ReplicatedStorage.Config.Progression)
+local MarketPickerModule = require(ReplicatedStorage.Modules.Trade.MarketPickerModule)
 
 -- Remotes
 local EventsFolder = ReplicatedStorage:WaitForChild("EventsFolder")
@@ -486,6 +487,16 @@ local toggleSymbolInfo
 local toggleWatchlist
 local refreshWatchlist
 local loadTicker
+local marketPicker = nil -- built once the ticker input is wired, further down
+
+-- The ticker box shows what's loaded on the chart - a Roblox game by its name
+local function showLoadedTicker()
+	if marketPicker and currentDisplayedTicker ~= "" then
+		marketPicker:showLoaded(currentDisplayedTicker)
+	else
+		TickerInput.Text = currentDisplayedTicker
+	end
+end
 
 local ACTIVE_TRADER_DISABLED_COLOR = Theme.Colors.TextDisabled
 
@@ -664,9 +675,15 @@ updateSymbolData = function()
 		return
 	end
 
+	-- Presets turn dollars into shares at the ask, or at the price where
+	-- there's no ask (a Roblox game, or a quote without bid/ask); the server
+	-- prices the fill either way
 	if quote.ask then
 		activeTraderAsk = quote.ask
 		ActiveTraderAskPriceLabel.Text = string.format("Ask %.2f", quote.ask)
+	elseif quote.price then
+		activeTraderAsk = quote.price
+		ActiveTraderAskPriceLabel.Text = string.format("Price %.2f", quote.price)
 	end
 
 	SymbolInfoTickerLabel.Text = currentDisplayedTicker
@@ -827,7 +844,8 @@ local function updateViewport()
 		return
 	end
 
-	visibleCandles = math.clamp(visibleCandles, 10, #masterChartData)
+	-- At least 10 candles, unless the series is shorter (a new Roblox listing)
+	visibleCandles = math.clamp(visibleCandles, math.min(10, #masterChartData), #masterChartData)
 	rightOffset = math.clamp(rightOffset, 0, #masterChartData - visibleCandles)
 
 	local startIndex = #masterChartData - rightOffset - visibleCandles + 1
@@ -865,7 +883,7 @@ loadTicker = function(ticker)
 	local targetTicker = string.gsub(string.upper(ticker or ""), "%s+", "")
 
 	if targetTicker == "" then
-		TickerInput.Text = currentDisplayedTicker
+		showLoadedTicker()
 		return
 	end
 
@@ -884,7 +902,8 @@ loadTicker = function(ticker)
 		masterChartData = chartData
 		currentDisplayedTicker = targetTicker
 		rightOffset = 0
-		TickerInput.Text = targetTicker
+		activeTraderAsk = nil -- the last ticker's; updateSymbolData fetches this one's
+		showLoadedTicker()
 		ActiveTraderTickerLabel.Text = targetTicker
 		ActiveTraderStatusLabel.Text = ""
 		updateViewport()
@@ -893,9 +912,7 @@ loadTicker = function(ticker)
 	else
 		TickerInput.Text = " . . . "
 		ChartTickerLabel.Text = "Error"
-		task.delay(2, function()
-			TickerInput.Text = currentDisplayedTicker
-		end)
+		task.delay(2, showLoadedTicker)
 	end
 
 	isFetchingData = false
@@ -1272,7 +1289,12 @@ ChartCanvas.InputEnded:Connect(function()
 	isDraggingChart = false
 end)
 
+-- Ticker input (real-world market; the picker handles Roblox searches)
 TickerInput.FocusLost:Connect(function(enterPressed)
+	if marketPicker:getMarket() == "Roblox" then
+		return
+	end
+
 	if enterPressed then
 		loadTicker(TickerInput.Text)
 		return
@@ -1280,8 +1302,29 @@ TickerInput.FocusLost:Connect(function(enterPressed)
 
 	-- Clicked/tabbed away without pressing Enter - discard whatever was
 	-- typed instead of leaving stale text sitting in the box forever.
-	TickerInput.Text = currentDisplayedTicker
+	showLoadedTicker()
 end)
+
+-- The market picker takes the ticker box's place in the toolbar: a market
+-- dropdown, then the box, which searches games in the Roblox market
+local PickerRow = Instance.new("Frame")
+PickerRow.Name = "MarketPickerRow"
+PickerRow.BackgroundTransparency = 1
+PickerRow.LayoutOrder = TickerInputBox.LayoutOrder
+PickerRow.Size = UDim2.new(0, MarketPickerModule.ROW_WIDTH, 1, 0)
+PickerRow.Parent = TopToolbar
+TickerInputBox.Parent = PickerRow
+
+marketPicker = MarketPickerModule.new({
+	inputRow = PickerRow,
+	input = TickerInput,
+	inputFrame = TickerInputBox,
+	overlayParent = MainBackground,
+	screen = ChartsScreen,
+	onSelect = function(ticker)
+		task.spawn(loadTicker, ticker)
+	end,
+})
 
 ScrollThumb.InputBegan:Connect(function(input)
 	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
@@ -1307,7 +1350,7 @@ UserInputService.InputChanged:Connect(function(input)
 
 		local trackWidth = ScrollTrack.AbsoluteSize.X
 		local thumbWidth = ScrollThumb.AbsoluteSize.X
-		local maxOffset = #masterChartData - visibleCandles
+		local maxOffset = math.max(#masterChartData - visibleCandles, 0)
 
 		if trackWidth > thumbWidth then
 			local candlesPerPixel = maxOffset / (trackWidth - thumbWidth)

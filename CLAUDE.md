@@ -21,12 +21,15 @@ Tooling is pinned in `aftman.toml` (Rojo, selene, StyLua, Lune) and installed wi
   `src/` live into a place for playtesting. This is the primary "run" loop for this project.
 - `rojo build -o RobloxProjects.rbxlx` — build a standalone `.rbxlx` place file from `default.project.json`
   (git-ignored, along with `.lock` files).
-- `selene src tests` — lint against `selene.toml` (`std = "roblox"`; vendored code excluded).
-- `stylua src tests` — format with `stylua.toml` (Luau, 120 columns, tabs); `.styluaignore` skips vendored code.
+- `selene src tests tools` — lint against `selene.toml` (`std = "roblox"`; vendored code excluded).
+- `stylua src tests tools` — format with `stylua.toml` (Luau, 120 columns, tabs); `.styluaignore` skips vendored code.
 - `lune run tests/run.luau` — unit tests: every `tests/*.spec.luau`, with the asserts in `tests/TestKit.luau`.
   Specs `require` game modules by relative path, so only modules that don't touch Roblox services can be
   tested; keep logic worth testing in such a module (`FillPriceModule` was split out of `MarketDataModule`
   for this). Everything else is checked in Studio through the MCP tools.
+- `lune run tools/simulate-roblox-market.luau` — runs the real `RobloxPriceModule` a tick a minute over
+  made-up player counts (steady, growing, viral, fading, listing time) and prints each price as a sparkline
+  with its range, largest daily move and daily high-low swing. Run it after changing the price model.
 
 CI (`.github/workflows/ci.yml`) runs selene, `stylua --check`, the tests and `rojo build` on pushes to `main`
 and on pull requests. There's no package manager (no Wally).
@@ -173,9 +176,14 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     client words them with `Social.describeNotification`. Pure rules: `Modules/InboxModule.luau`.
   - `RobloxMarketService` — the Roblox market (Phase 3): about 50 experiences (`Config/RobloxMarket`, tickers
     `RBX-…`) with prices *simulated* from public Roblox stats by `Modules/RobloxPriceModule.luau` (pure, tested).
-    Every five minutes one game server claims the tick with `UpdateAsync` on DataStore `RobloxMarket_v1` "state",
-    fetches stats through the backend's `/api/roblox/experiences` (game servers can't call roblox.com), and saves
-    prices plus a `history:<ticker>` key each; every server reads the same state, so prices agree. Prices move only
+    Every minute one game server claims the tick (`UpdateAsync` on DataStore `RobloxMarket_v1` "tick"), fetches
+    stats through the backend's `/api/roblox/experiences` (game servers can't call roblox.com), steps the whole
+    market in "state" (only the ticking server reads it) and publishes its small `publicView` to "prices", which
+    every server reads (cached 20 s), so prices agree. "prices" carries each experience's last 15 minutes of
+    points; the `history:<ticker>` keys get them in five-minute batches, and charts merge the two. The price
+    follows players online averaged over 7 days hour by hour (so day-night and weekend cycles cancel); a new
+    listing warms up for 24 h before it trades (`getClosedReason`), its forming price still charted. State keeps
+    exact prices — a minute's move can be under a cent — and only what players see is rounded. Prices move only
     while some server runs. `MarketDataModule` hands Roblox tickers' quotes and candles to it (`setRobloxProvider`)
     and answers their research routes "not available". Delisted experiences settle in `SettlementService`.
     **The UI must label Roblox numbers observed, estimated or simulated** (GDD §6).
@@ -210,9 +218,9 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     grow. `Trade/OrderTicketModule` is the Trade screen's Market/Limit preset ticket (one-click presets, the
     house style for order entry); `Trade/ThesisPanelModule` is its Community section (the ticker's watchers,
     trades and theses, and a thesis composer), after the news. `Trade/MarketPickerModule` is the ticker row's
-    market dropdown ("Stocks & crypto": type a ticker; "Roblox market": search games by name in a list with
-    icons, prices and players) — players never type `RBX-` tickers — and `Trade/GameBannerModule` the banner
-    a Roblox game gets under the header. Game icons use `rbxthumb://type=GameIcon&id=<universe id>` (a place
+    market dropdown on the Trade and Charts screens ("Stocks & crypto": type a ticker; "Roblox market": search
+    games by name in a list with icons, prices and players) — players never type `RBX-` tickers — and
+    `Trade/GameBannerModule` the banner a Roblox game gets under the header. Game icons use `rbxthumb://type=GameIcon&id=<universe id>` (a place
     id fails). The other files there are still empty placeholders.
 
 ### Cross-script state sharing

@@ -6,7 +6,9 @@ local Instruments = require("../src/shared/Config/Instruments")
 local test, equal, near = TestKit.test, TestKit.equal, TestKit.near
 
 local DAY = 86400
+local HOUR = 3600
 local NOW = TestKit.utc(2026, 10, 25, 12)
+local WARMUP = RobloxPriceModule.WARMUP_SECONDS
 
 local function stats(playing, overrides)
 	local base = { playing = playing, upVotes = 900, downVotes = 100, updated = NOW - 30 * DAY }
@@ -16,6 +18,15 @@ local function stats(playing, overrides)
 	end
 
 	return base
+end
+
+-- Ticks every `step` seconds from `from` to `to`, with players online from `playingAt(t)`
+local function run(state, from, to, step, playingAt)
+	for t = from, to, step do
+		state = RobloxPriceModule.tick(state, stats(playingAt(t)), t)
+	end
+
+	return state
 end
 
 test("the like factor runs from 0.5 to 1.5, and assumes 80% with no votes", function()
@@ -48,59 +59,115 @@ end)
 
 test("a step closes in on the target but moves at most 10% per day passed", function()
 	local fiveMinutes = 300
-	local up = RobloxPriceModule.step(100, 200, fiveMinutes)
 
-	near(up, 100 + 100 * 0.10 * fiveMinutes / DAY, 1e-9, "capped")
+	near(RobloxPriceModule.step(100, 200, fiveMinutes), 100 + 100 * 0.10 * fiveMinutes / DAY, 1e-9, "capped")
 	near(RobloxPriceModule.step(100, 100.01, fiveMinutes), 100 + 0.01 * (1 - math.exp(-300 / 43200)), 1e-9, "uncapped")
-
-	local afterGap = RobloxPriceModule.step(100, 200, 2 * DAY)
-
-	near(afterGap, 120, 1e-9, "two days with no ticks allow 20%")
+	near(RobloxPriceModule.step(100, 200, 2 * DAY), 120, 1e-9, "two days with no ticks allow 20%")
 end)
 
-test("listing starts the price at its target", function()
+test("hours keep their mean, and drop off after a week", function()
+	local hours, current = RobloxPriceModule.addSample(nil, nil, 100, NOW)
+
+	hours, current = RobloxPriceModule.addSample(hours, current, 300, NOW + 60)
+	equal(#hours, 0, "still the first hour")
+	equal(RobloxPriceModule.activityFrom(hours, current), 200)
+
+	hours, current = RobloxPriceModule.addSample(hours, current, 50, NOW + HOUR)
+	equal(hours, { { NOW // HOUR, 200 } }, "the finished hour keeps its mean")
+	equal(RobloxPriceModule.activityFrom(hours, current), 125, "a mean of hourly means")
+
+	hours, current = RobloxPriceModule.addSample(hours, current, 50, NOW + 7 * DAY + HOUR)
+	equal(#hours, 0, "older than a week is gone")
+end)
+
+test("a steady day-night cycle and weekends leave the weekly average flat", function()
+	local function playingAt(t)
+		local hour = (t % DAY) / HOUR
+		local weekday = tonumber(os.date("!%w", t))
+
+		return 10000 * (1 + 0.35 * math.cos(hour / 24 * 2 * math.pi)) * ((weekday == 0 or weekday == 6) and 1.15 or 1)
+	end
+
+	local state = run(nil, NOW, NOW + 7 * DAY, 300, playingAt)
+	local low, high = math.huge, -math.huge
+
+	for t = NOW + 7 * DAY + 300, NOW + 9 * DAY, 300 do
+		state = RobloxPriceModule.tick(state, stats(playingAt(t)), t)
+		low = math.min(low, state.activity)
+		high = math.max(high, state.activity)
+	end
+
+	equal((high - low) / low < 0.01, true, string.format("activity moved %.2f%%", (high - low) / low * 100))
+end)
+
+test("a new listing warms up for a day: the price follows the target, then trades", function()
 	local state = RobloxPriceModule.tick(nil, stats(10000), NOW)
 
 	equal(state.price, 140) -- 100 x 1.4 like x 1 momentum x 1 freshness
-	equal(state.prevClose, 140)
-	equal(state.listedAt, NOW)
-	equal(state.activity, 10000)
-	equal(state.day, "2026-10-25")
+	equal(state.opensAt, NOW + WARMUP)
+	equal(RobloxPriceModule.isOpen(state, NOW + WARMUP - 1), false)
+	equal(RobloxPriceModule.isOpen(state, NOW + WARMUP), true)
+
+	state = RobloxPriceModule.tick(state, stats(40000), NOW + 60)
+	near(state.price, state.target, 0.005, "warming up: no cap")
+
+	state = run(state, NOW + 120, NOW + WARMUP, HOUR, function()
+		return 40000
+	end)
+	state = RobloxPriceModule.tick(state, stats(40000), NOW + WARMUP)
+
+	local before = state.price
+
+	state = RobloxPriceModule.tick(state, stats(400000), NOW + WARMUP + 60)
+	equal(state.price <= before * (1 + 0.10 * 60 / DAY) + 0.01, true, "open: capped")
 end)
 
-test("activity is a smoothed average, so one quiet tick barely moves it", function()
-	local state = RobloxPriceModule.tick(nil, stats(10000), NOW)
+test("a cheap price still moves a minute at a time", function()
+	-- One player online: $1.40, so the most it may move in a minute is a
+	-- hundredth of a cent
+	local state = run(nil, NOW, NOW + WARMUP, 60, function()
+		return 1
+	end)
+	local opening = state.price
 
-	state = RobloxPriceModule.tick(state, stats(0), NOW + 300)
+	state = run(state, NOW + WARMUP + 60, NOW + WARMUP + DAY, 60, function()
+		return 4
+	end)
 
-	near(state.activity, 10000 * math.exp(-300 / DAY), 1e-6)
-	equal(state.price >= 140 * (1 - 0.10 * 300 / DAY) - 0.01, true, "the price can't fall faster than the cap")
+	equal(state.price > opening * 1.05, true, string.format("$%.4f -> $%.4f", opening, state.price))
+	equal(state.price <= opening * math.exp(0.10) + 1e-9, true, "within the daily cap")
 end)
 
-test("a new day makes the last price the day's previous close", function()
-	local state = RobloxPriceModule.tick(nil, stats(10000), NOW)
+test("momentum waits for a full week's average from a week before", function()
+	local state = run(nil, NOW, NOW + 10 * DAY, HOUR, function()
+		return 10000
+	end)
 
-	state = RobloxPriceModule.tick(state, stats(40000), NOW + 300)
+	for day in pairs(state.activityByDay) do
+		equal(day >= RobloxPriceModule.dayKey(NOW + 7 * DAY - HOUR), true, "kept a partial week: " .. day)
+	end
+end)
+
+test("a state saved before the weekly average is listed again", function()
+	local old =
+		{ price = 555, prevClose = 555, day = "2026-10-25", activity = 150000, listedAt = NOW - DAY, lastSeenAt = NOW }
+	local state = RobloxPriceModule.tick(old, stats(10000), NOW + 60)
+
+	equal(state.opensAt, NOW + 60 + WARMUP)
+	equal(state.listedAt, NOW + 60)
+end)
+
+test("once open, a new day makes the last price the day's previous close", function()
+	local state = run(nil, NOW, NOW + WARMUP, HOUR, function()
+		return 10000
+	end)
+
+	state = RobloxPriceModule.tick(state, stats(40000), NOW + WARMUP + 300)
 
 	local lastPriceOfDay = state.price
 
-	equal(state.prevClose, 140, "same day")
-
-	state = RobloxPriceModule.tick(state, stats(40000), NOW + 13 * 3600)
-
+	state = RobloxPriceModule.tick(state, stats(40000), NOW + WARMUP + 13 * HOUR)
 	equal(state.prevClose, lastPriceOfDay)
-	equal(state.day, "2026-10-26")
-end)
-
-test("a week of growth adds momentum", function()
-	local state = RobloxPriceModule.tick(nil, stats(10000), NOW)
-
-	for day = 1, 7 do
-		state = RobloxPriceModule.tick(state, stats(40000), NOW + day * DAY)
-	end
-
-	equal(state.activityByDay[RobloxPriceModule.dayKey(NOW)] ~= nil, true, "a week back is still kept")
-	equal(state.target > RobloxPriceModule.targetPrice(state.activity, 1.4, 1, 1), true)
 end)
 
 test("a missing experience holds its price and delists after a day", function()
@@ -115,26 +182,36 @@ test("a missing experience holds its price and delists after a day", function()
 	equal(RobloxPriceModule.tick(held, stats(10000), NOW + 900).missingSince, nil, "found again")
 end)
 
-test("history keeps a week in full, then hourly, then daily", function()
+test("history keeps a day in full, then five-minute, then hourly points", function()
 	local points = {}
-	local start = NOW - 100 * DAY
+	local batch = {}
 
-	for time = start, NOW, 1800 do
-		points = RobloxPriceModule.addPoint(points, time, 1)
+	for time = NOW - 30 * DAY, NOW, 60 do
+		table.insert(batch, { time, 1 })
+
+		if #batch == 5 then
+			points = RobloxPriceModule.addPoints(points, batch, time)
+			batch = {}
+		end
 	end
 
-	local lastWeek, older = 0, 0
+	local lastDay, lastWeek, older = 0, 0, 0
 
 	for _, point in ipairs(points) do
-		if NOW - point[1] <= 7 * DAY then
+		local age = NOW - point[1]
+
+		if age <= DAY then
+			lastDay += 1
+		elseif age <= 7 * DAY then
 			lastWeek += 1
 		else
 			older += 1
 		end
 	end
 
-	equal(lastWeek, 7 * 48 + 1, "every half-hour point of the last week")
-	equal(older < (100 - 7) * 24 + 10, true, "at most one an hour before that")
+	equal(lastDay >= 1430 and lastDay <= 1441, true, "about every minute of the last day: " .. lastDay)
+	equal(lastWeek <= 6 * 288 + 2, true, "at most one per five minutes before that: " .. lastWeek)
+	equal(older <= 23 * 24 + 2, true, "at most one an hour before that: " .. older)
 end)
 
 test("candles open at the previous close and span their bucket", function()
@@ -144,6 +221,114 @@ test("candles open at the previous close and span their bucket", function()
 	equal(#candles, 2)
 	equal(candles[1], { Timestamp = 1200, Open = 10, High = 12, Low = 9, Close = 9, Volume = 0 })
 	equal(candles[2], { Timestamp = 1800, Open = 9, High = 11, Low = 9, Close = 11, Volume = 0 })
+end)
+
+test("a market tick lists, holds and delists experiences", function()
+	local listing = {
+		{ ticker = "RBX-AAAA", universeId = 1 },
+		{ ticker = "RBX-BBBB", universeId = 2 },
+	}
+	local market = RobloxPriceModule.tickMarket(nil, listing, { ["1"] = stats(10000) }, NOW)
+
+	equal(market.lastTickAt, NOW)
+	equal(market.experiences["RBX-AAAA"].price, 140)
+	equal(market.experiences["RBX-BBBB"], nil, "never seen, not listed yet")
+
+	market = RobloxPriceModule.tickMarket(market, listing, {}, NOW + 300)
+
+	equal(market.experiences["RBX-AAAA"].missingSince, NOW + 300, "Roblox didn't answer: held")
+
+	market = RobloxPriceModule.tickMarket(market, listing, {}, NOW + 300 + DAY)
+
+	equal(market.experiences["RBX-AAAA"].delisted, true, "missing a day: delisted")
+	equal(market.experiences["RBX-AAAA"].price, 140, "at its last price")
+
+	market = RobloxPriceModule.tickMarket(market, listing, { ["1"] = stats(10000) }, NOW + 600 + DAY)
+
+	equal(market.experiences["RBX-AAAA"].delisted, true, "delisting is final")
+end)
+
+test("an experience dropped from the listing delists at once", function()
+	local listing = { { ticker = "RBX-AAAA", universeId = 1 } }
+	local market = RobloxPriceModule.tickMarket(nil, listing, { ["1"] = stats(10000) }, NOW)
+
+	market = RobloxPriceModule.tickMarket(market, {}, { ["1"] = stats(10000) }, NOW + 300)
+
+	equal(market.experiences["RBX-AAAA"].delisted, true)
+	equal(market.experiences["RBX-AAAA"].delistedAt, NOW + 300)
+end)
+
+test("each tick adds a price point; 15 minutes are kept, and sent to the history every five", function()
+	local listing = { { ticker = "RBX-AAAA", universeId = 1 } }
+	local statsById = { ["1"] = stats(10000) }
+	local market, flush = nil, nil
+	local sent, flushes = {}, 0
+
+	for t = NOW, NOW + 1800, 60 do
+		market, flush = RobloxPriceModule.tickMarket(market, listing, statsById, t)
+
+		if flush then
+			flushes += 1
+
+			for _, point in ipairs(flush["RBX-AAAA"]) do
+				table.insert(sent, point[1])
+			end
+		end
+	end
+
+	local expected = {}
+
+	for t = NOW, NOW + 1800, 60 do
+		table.insert(expected, t)
+	end
+
+	equal(sent, expected, "every point once, in order - warming up too")
+	equal(flushes, 7, "the first tick, then one flush per five minutes")
+	equal(#market.recent["RBX-AAAA"], 15)
+	equal(market.recent["RBX-AAAA"][15][1], NOW + 1800)
+
+	market = RobloxPriceModule.tickMarket(market, {}, statsById, NOW + 1860)
+	equal(#market.recent["RBX-AAAA"], 14, "a delisted experience gets no new points")
+end)
+
+test("the public view leaves out the averaging internals", function()
+	local listing = { { ticker = "RBX-AAAA", universeId = 1 } }
+	local statsById = { ["1"] = stats(10000) }
+	local market = RobloxPriceModule.tickMarket(nil, listing, statsById, NOW)
+	local view = RobloxPriceModule.publicView(market)
+	local experience = view.experiences["RBX-AAAA"]
+
+	equal(view.lastTickAt, NOW)
+	equal(experience.price, 140)
+	equal(experience.opensAt, NOW + WARMUP)
+	equal(experience.hours, nil)
+	equal(experience.current, nil)
+	equal(experience.activityByDay, nil)
+	equal(experience.recent, { { NOW, 140 } })
+end)
+
+test("recent points replace the saved history's from the same stretch", function()
+	local saved = { { 100, 1 }, { 160, 2 }, { 220, 3 } }
+
+	equal(RobloxPriceModule.withRecent(saved, { { 160, 5 }, { 220, 6 }, { 280, 7 } }), {
+		{ 100, 1 },
+		{ 160, 5 },
+		{ 220, 6 },
+		{ 280, 7 },
+	})
+	equal(RobloxPriceModule.withRecent(saved, nil), saved)
+	equal(RobloxPriceModule.withRecent({}, { { 280, 7 } }), { { 280, 7 } })
+end)
+
+test("a batch written to the history twice isn't doubled, and a late one lands in order", function()
+	local points = RobloxPriceModule.addPoints({}, { { NOW - 120, 1 }, { NOW - 60, 2 } }, NOW)
+
+	points = RobloxPriceModule.addPoints(points, { { NOW - 120, 1 }, { NOW - 60, 2 }, { NOW, 3 } }, NOW)
+	equal(points, { { NOW - 120, 1 }, { NOW - 60, 2 }, { NOW, 3 } })
+
+	points = RobloxPriceModule.addPoints(points, { { NOW - 180, 0 } }, NOW)
+	equal(points[1], { NOW - 180, 0 })
+	equal(#points, 4)
 end)
 
 test("every listed experience has a unique RBX- ticker the game accepts", function()
@@ -173,40 +358,4 @@ test("asset classes", function()
 	equal(Instruments.tradesAroundTheClock("RBX-ADPT"), true)
 	equal(Instruments.tradesAroundTheClock("ETH-USD"), true)
 	equal(Instruments.tradesAroundTheClock("SPY"), false)
-end)
-
-test("a market tick lists, holds and delists experiences", function()
-	local listing = {
-		{ ticker = "RBX-AAAA", universeId = 1 },
-		{ ticker = "RBX-BBBB", universeId = 2 },
-	}
-	local market = RobloxPriceModule.tickMarket(nil, listing, { ["1"] = stats(10000) }, NOW)
-
-	equal(market.lastTickAt, NOW)
-	equal(market.experiences["RBX-AAAA"].price, 140)
-	equal(market.experiences["RBX-BBBB"], nil, "never seen, not listed yet")
-
-	market = RobloxPriceModule.tickMarket(market, listing, {}, NOW + 300)
-
-	equal(market.experiences["RBX-AAAA"].missingSince, NOW + 300, "Roblox didn't answer: held")
-	equal(market.experiences["RBX-AAAA"].delisted, nil)
-
-	market = RobloxPriceModule.tickMarket(market, listing, {}, NOW + 300 + DAY)
-
-	equal(market.experiences["RBX-AAAA"].delisted, true, "missing a day: delisted")
-	equal(market.experiences["RBX-AAAA"].price, 140, "at its last price")
-
-	market = RobloxPriceModule.tickMarket(market, listing, { ["1"] = stats(10000) }, NOW + 600 + DAY)
-
-	equal(market.experiences["RBX-AAAA"].delisted, true, "delisting is final")
-end)
-
-test("an experience dropped from the listing delists at once", function()
-	local listing = { { ticker = "RBX-AAAA", universeId = 1 } }
-	local market = RobloxPriceModule.tickMarket(nil, listing, { ["1"] = stats(10000) }, NOW)
-
-	market = RobloxPriceModule.tickMarket(market, {}, { ["1"] = stats(10000) }, NOW + 300)
-
-	equal(market.experiences["RBX-AAAA"].delisted, true)
-	equal(market.experiences["RBX-AAAA"].delistedAt, NOW + 300)
 end)

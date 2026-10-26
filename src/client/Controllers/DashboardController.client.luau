@@ -14,6 +14,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Theme = require(ReplicatedStorage.Modules.Multi.Theme)
 local NumberModule = require(ReplicatedStorage.Modules.Multi.NumberModule)
+local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursModule)
 local Navigation = require(ReplicatedStorage.Modules.Multi.Navigation)
 local LineChart = require(ReplicatedStorage.UI.LineChart)
 local UIKit = require(ReplicatedStorage.UI.UIKit)
@@ -703,7 +704,7 @@ local function renderRobloxMarket(rows)
 		addLine(
 			RobloxList,
 			1,
-			rows and "The Roblox market opens within a few minutes" or "Roblox market unavailable right now",
+			rows and "The Roblox market opens within a minute" or "Roblox market unavailable right now",
 			Theme.Colors.TextMuted
 		)
 
@@ -733,7 +734,13 @@ local function renderRobloxMarket(rows)
 		local name = makeLabel("Name", row, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.TextMuted)
 		name.Position = UDim2.fromOffset(80, 0)
 		name.Size = UDim2.new(1, -(80 + 170), 1, 0)
-		name.Text = entry.name
+		name.Text = entry.opensAt
+				and string.format(
+					"%s · opens in %s",
+					entry.name,
+					MarketHoursModule.formatCountdown(entry.opensAt - os.time())
+				)
+			or entry.name
 
 		local price = makeLabel("Price", row, Theme.Fonts.Mono, Theme.TextSize.Body, Theme.Colors.Text)
 		price.AnchorPoint = Vector2.new(1, 0)
@@ -747,8 +754,11 @@ local function renderRobloxMarket(rows)
 		changeLabel.Position = UDim2.fromScale(1, 0)
 		changeLabel.Size = UDim2.new(0, 70, 1, 0)
 		changeLabel.TextXAlignment = Enum.TextXAlignment.Right
-		changeLabel.Text = change and string.format("%+.2f%%", change) or "—"
-		changeLabel.TextColor3 = change and getChangeColor(change) or Theme.Colors.TextMuted
+		-- No change to show before it opens: the price is still forming
+		local showsChange = change and not entry.opensAt
+
+		changeLabel.Text = showsChange and string.format("%+.2f%%", change) or "—"
+		changeLabel.TextColor3 = showsChange and getChangeColor(change) or Theme.Colors.TextMuted
 
 		row.MouseEnter:Connect(function()
 			row.BackgroundTransparency = 0

@@ -1,15 +1,19 @@
 -- RobloxMarketService.luau
 --
--- The Roblox market (GDD §6). Every five minutes one game server - whichever
+-- The Roblox market (GDD §6). Every minute one game server - whichever
 -- claims the tick first - fetches the listed experiences' public stats
 -- through the backend, steps every simulated price (RobloxPriceModule) and
--- saves the result. Every server reads that one saved state, so prices agree
+-- saves the result. Every server reads the same saved prices, so they agree
 -- everywhere; they move only while some game server is running
 -- (TECHNICAL-PLAN "Phase 3 decisions").
 --
 -- DataStore RobloxMarket_v1:
---   "state"            { lastTickAt, experiences = { [ticker] = state } }
---   "history:<ticker>" price points { { time, price } }, oldest first
+--   "tick"             when the last tick was claimed; moving it claims the next
+--   "state"            the whole market (RobloxPriceModule.tickMarket), read
+--                      and written only by the server ticking it
+--   "prices"           its publicView: small, and what every server reads
+--   "history:<ticker>" price points { { time, price } }, oldest first, written
+--                      in five-minute batches
 --
 -- MarketDataModule routes Roblox tickers' quotes and candles here.
 
@@ -18,57 +22,69 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local RobloxMarket = require(ReplicatedStorage.Config.RobloxMarket)
+local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursModule)
 local MarketDataModule = require(ServerScriptService.Modules.MarketDataModule)
 local RobloxPriceModule = require(ServerScriptService.Modules.RobloxPriceModule)
 
 local Store = DataStoreService:GetDataStore("RobloxMarket_v1")
 
-local TICK_SECONDS = 300
-local CHECK_INTERVAL = 60 -- how often each server looks for a due tick
-local STATE_CACHE_SECONDS = 60
+local TICK_SECONDS = 60
+local CHECK_INTERVAL = 5 -- how often each server looks for a due tick
+local PRICES_CACHE_SECONDS = 20
+-- A chart's history may be this stale; the prices' recent points (15
+-- minutes) cover it plus the five minutes between history writes
 local HISTORY_CACHE_SECONDS = 300
 local LIVE_CANDLES = 5 -- what a "live" candle request returns, like the backend's
+local BUDGET_RESERVE = 10 -- UpdateAsync requests history writes leave for player data
 
--- Chart timeframes: candle size and how far back, like the backend's
--- Yahoo candles. History has five-minute points at most, so 1M charts get
--- five-minute candles.
+-- Chart timeframes: candle size and how far back. History keeps every
+-- minute for a day, five-minute points for a week, hourly ones for 90 days.
 local TIMEFRAMES = {
-	["1M"] = { interval = 300, lookback = 7 * 86400 },
+	["1M"] = { interval = 60, lookback = 86400 },
 	["5M"] = { interval = 300, lookback = 7 * 86400 },
 	["30M"] = { interval = 1800, lookback = 7 * 86400 },
 	["H"] = { interval = 3600, lookback = 60 * 86400 },
 	["D"] = { interval = 86400, lookback = 730 * 86400 },
 }
 
-local market = nil -- the saved state as last read or written
+local market = nil -- the "prices" view as last read or written
 local marketReadAt = -math.huge
 local isReading = false
 local isTicking = false
+local nextClaimAt = 0 -- os.time() before which another server has the tick
 local historyCache = {} -- [ticker] = { fetchedAt = os.clock(), points }
 
 local RobloxMarketService = {}
 
-local function readMarket()
+local function noteTick(lastTickAt: number)
+	nextClaimAt = math.max(nextClaimAt, lastTickAt + TICK_SECONDS)
+end
+
+local function readPrices()
 	isReading = true
 
-	local success, saved = pcall(Store.GetAsync, Store, "state")
+	local success, saved = pcall(Store.GetAsync, Store, "prices")
 
 	isReading = false
 
 	if not success then
-		warn("[RobloxMarketService] Couldn't read the market: " .. tostring(saved))
+		warn("[RobloxMarketService] Couldn't read the prices: " .. tostring(saved))
 
 		return
 	end
 
 	market = saved
 	marketReadAt = os.clock()
+
+	if saved then
+		noteTick(saved.lastTickAt)
+	end
 end
 
--- The saved state, re-read at most once a minute; nil before the first tick
+-- The prices, re-read every PRICES_CACHE_SECONDS; nil before the first tick
 local function getMarket()
-	if os.clock() - marketReadAt >= STATE_CACHE_SECONDS and not isReading then
-		readMarket()
+	if os.clock() - marketReadAt >= PRICES_CACHE_SECONDS and not isReading then
+		readPrices()
 	end
 
 	return market
@@ -84,23 +100,68 @@ local function getUniverseIds()
 	return ids
 end
 
-local function appendHistory(ticker: string, time: number, price: number)
-	local success, points = pcall(Store.UpdateAsync, Store, "history:" .. ticker, function(stored)
-		return RobloxPriceModule.addPoint(stored or {}, time, price)
-	end)
-
-	if success then
-		historyCache[ticker] = { fetchedAt = os.clock(), points = points }
-	else
-		warn("[RobloxMarketService] Couldn't save the history of " .. ticker .. ": " .. tostring(points))
+local function waitForBudget()
+	while DataStoreService:GetRequestBudgetForRequestType(Enum.DataStoreRequestType.UpdateAsync) < BUDGET_RESERVE do
+		task.wait(1)
 	end
 end
 
--- Steps the market if a tick is due and no other server has claimed it
-local function runTick()
-	local current = getMarket()
+-- Adds a flush's points to each ticker's history. Runs on its own thread:
+-- fifty writes can take a while when the request budget is low.
+local function writeHistory(flush)
+	for ticker, points in pairs(flush) do
+		waitForBudget()
 
-	if current and os.time() - current.lastTickAt < TICK_SECONDS then
+		local success, saved = pcall(Store.UpdateAsync, Store, "history:" .. ticker, function(stored)
+			return RobloxPriceModule.addPoints(stored or {}, points, os.time())
+		end)
+
+		if success then
+			historyCache[ticker] = { fetchedAt = os.clock(), points = saved }
+		else
+			warn("[RobloxMarketService] Couldn't save the history of " .. ticker .. ": " .. tostring(saved))
+		end
+	end
+end
+
+-- Moves "tick" to now if the last tick is a minute old; true if this
+-- server got it
+local function claimTick(): boolean
+	local claimed = false
+	local success, result = pcall(Store.UpdateAsync, Store, "tick", function(lastTickAt)
+		local now = os.time()
+
+		if lastTickAt and now - lastTickAt < TICK_SECONDS then
+			claimed = false
+			noteTick(lastTickAt)
+
+			-- nil leaves it as it is
+			return nil
+		end
+
+		claimed = true
+
+		return now
+	end)
+
+	if not success then
+		warn("[RobloxMarketService] Couldn't claim a tick: " .. tostring(result))
+
+		return false
+	end
+
+	if claimed then
+		noteTick(result)
+	end
+
+	return claimed
+end
+
+-- Steps the market if a tick is due and this server claims it
+local function runTick()
+	getMarket()
+
+	if os.time() < nextClaimAt or not claimTick() then
 		return
 	end
 
@@ -112,20 +173,14 @@ local function runTick()
 		return
 	end
 
-	local claimed = false
+	local flush = nil
 	local success, saved = pcall(Store.UpdateAsync, Store, "state", function(stored)
-		local now = os.time()
+		local nextMarket, due = RobloxPriceModule.tickMarket(stored, RobloxMarket.EXPERIENCES, statsById, os.time())
 
-		-- Another server ticked while this one fetched; nil leaves its state
-		if stored and now - stored.lastTickAt < TICK_SECONDS then
-			claimed = false
+		-- The last call's is the one saved
+		flush = due
 
-			return nil
-		end
-
-		claimed = true
-
-		return RobloxPriceModule.tickMarket(stored, RobloxMarket.EXPERIENCES, statsById, now)
+		return nextMarket
 	end)
 
 	if not success then
@@ -134,20 +189,18 @@ local function runTick()
 		return
 	end
 
-	if not claimed or not saved then
-		-- Pick up the other server's tick
-		marketReadAt = -math.huge
+	local view = RobloxPriceModule.publicView(saved)
+	local published, publishErr = pcall(Store.SetAsync, Store, "prices", view)
 
-		return
+	if not published then
+		warn("[RobloxMarketService] Couldn't publish the prices: " .. tostring(publishErr))
 	end
 
-	market = saved
+	market = view
 	marketReadAt = os.clock()
 
-	for ticker, experience in pairs(saved.experiences) do
-		if not experience.delisted then
-			appendHistory(ticker, saved.lastTickAt, experience.price)
-		end
+	if flush then
+		task.spawn(writeHistory, flush)
 	end
 end
 
@@ -171,20 +224,57 @@ local function getHistory(ticker: string)
 	return points or {}
 end
 
--- One experience's saved state, or nil if it isn't (or isn't yet) on the market
+-- One experience's published state ({ price, prevClose, target, activity,
+-- listedAt, opensAt, delisted, stats, recent }), or nil if it isn't (or
+-- isn't yet) on the market
 function RobloxMarketService.getExperienceState(ticker: string)
 	local current = getMarket()
 
 	return current and current.experiences[ticker]
 end
 
--- A quote in MarketDataModule's shape, or nil for a delisted or unknown
--- ticker. No bid or ask, so fills use the price; `time` is the last tick,
--- so FillPriceModule refuses a price that's stopped updating.
+-- When a listed experience that's still warming up opens for trading, or nil
+local function getOpensAt(experience): number?
+	if experience.delisted or RobloxPriceModule.isOpen(experience, os.time()) then
+		return nil
+	end
+
+	return experience.opensAt
+end
+
+-- Why `ticker` can't be traded right now, or nil if it can
+function RobloxMarketService.getClosedReason(ticker: string): string?
+	local experience = RobloxMarketService.getExperienceState(ticker)
+	local listed = RobloxMarket.getExperience(ticker)
+	local name = listed and listed.name or ticker
+
+	if not experience then
+		return name .. " isn't on the market yet."
+	elseif experience.delisted then
+		return name .. " was delisted."
+	end
+
+	local opensAt = getOpensAt(experience)
+
+	if opensAt then
+		return string.format(
+			"%s opens for trading in %s.",
+			name,
+			MarketHoursModule.formatCountdown(opensAt - os.time())
+		)
+	end
+
+	return nil
+end
+
+-- A quote in MarketDataModule's shape, or nil while it can't be traded
+-- (warming up, delisted or unknown). No bid or ask, so fills use the price;
+-- `time` is the last tick, so FillPriceModule refuses a price that's
+-- stopped updating.
 function RobloxMarketService.getQuote(ticker: string)
 	local experience = RobloxMarketService.getExperienceState(ticker)
 
-	if not experience or experience.delisted then
+	if not experience or RobloxMarketService.getClosedReason(ticker) then
 		return nil
 	end
 
@@ -196,8 +286,8 @@ function RobloxMarketService.getQuote(ticker: string)
 	}
 end
 
--- Candles in the chart's shape from the price history; a "live" request gets
--- the last few, like the backend's
+-- Candles in the chart's shape from the price history and the latest
+-- minutes' points; a "live" request gets the last few, like the backend's
 function RobloxMarketService.getCandles(ticker: string, timeframe: string, mode: string?)
 	local frame = TIMEFRAMES[timeframe]
 
@@ -205,7 +295,9 @@ function RobloxMarketService.getCandles(ticker: string, timeframe: string, mode:
 		return nil, "Invalid timeframe"
 	end
 
-	if not RobloxMarketService.getExperienceState(ticker) then
+	local experience = RobloxMarketService.getExperienceState(ticker)
+
+	if not experience then
 		return nil, "Not on the Roblox market"
 	end
 
@@ -214,6 +306,8 @@ function RobloxMarketService.getCandles(ticker: string, timeframe: string, mode:
 	if not points then
 		return nil, "Price history unavailable"
 	end
+
+	points = RobloxPriceModule.withRecent(points, experience.recent)
 
 	local candles = RobloxPriceModule.buildCandles(points, frame.interval, os.time() - frame.lookback)
 
@@ -225,11 +319,11 @@ function RobloxMarketService.getCandles(ticker: string, timeframe: string, mode:
 end
 
 -- What the research view shows, or nil if the ticker isn't on the market:
--- { name, price, prevClose, delisted, lastTickAt, listedAt, target,
--- averagePlaying, observed = { playing, visits, favorites, upVotes,
--- downVotes, created, updated, genre, creator } }. `observed` is Roblox's
--- own numbers (the creator's name still needs filtering); the price, target
--- and average are ours.
+-- { name, price, prevClose, delisted, opensAt?, lastTickAt, listedAt,
+-- target, averagePlaying, observed = { playing, visits, favorites, upVotes,
+-- downVotes, created, updated, genre, creator } }. `opensAt` is set while it
+-- warms up. `observed` is Roblox's own numbers (the creator's name still
+-- needs filtering); the price, target and average are ours.
 function RobloxMarketService.getResearch(ticker: string)
 	local experience = RobloxMarketService.getExperienceState(ticker)
 
@@ -245,10 +339,11 @@ function RobloxMarketService.getResearch(ticker: string)
 		price = experience.price,
 		prevClose = experience.prevClose,
 		delisted = experience.delisted == true,
+		opensAt = getOpensAt(experience),
 		lastTickAt = market.lastTickAt,
 		listedAt = experience.listedAt,
 		target = experience.target,
-		averagePlaying = math.round(experience.activity),
+		averagePlaying = experience.activity,
 		observed = {
 			playing = stats.playing,
 			visits = stats.visits,
@@ -264,7 +359,8 @@ function RobloxMarketService.getResearch(ticker: string)
 end
 
 -- Every listed experience's price for browsing:
--- { { ticker, name, price, prevClose, playing } }, most players first
+-- { { ticker, name, price, prevClose, playing, opensAt? } }, most players
+-- first; `opensAt` is set while it warms up
 function RobloxMarketService.getListing()
 	local current = getMarket()
 	local rows = {}
@@ -279,6 +375,7 @@ function RobloxMarketService.getListing()
 				price = experience.price,
 				prevClose = experience.prevClose,
 				playing = experience.stats.playing,
+				opensAt = getOpensAt(experience),
 			})
 		end
 	end

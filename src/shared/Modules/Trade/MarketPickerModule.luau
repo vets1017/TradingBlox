@@ -1,12 +1,12 @@
 -- MarketPickerModule.luau
 --
--- The Trade screen's market picker. A dropdown picks the market:
+-- The Trade and Charts screens' market picker. A dropdown picks the market:
 --   Stocks & crypto  real-world stocks, ETFs and crypto; type a ticker as before
 --   Roblox market    Roblox games; search by name and pick one from a list with
 --                    each game's icon, price, day change and players online
 -- so nobody needs to know an RBX- ticker.
 --
--- Client-only. TradeController owns loading: the picker calls
+-- Client-only. The screen's controller owns loading: the picker calls
 -- options.onSelect(ticker) and is told what loaded through showLoaded.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -14,6 +14,7 @@ local UserInputService = game:GetService("UserInputService")
 
 local Theme = require(ReplicatedStorage.Modules.Multi.Theme)
 local NumberModule = require(ReplicatedStorage.Modules.Multi.NumberModule)
+local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursModule)
 local UIKit = require(ReplicatedStorage.UI.UIKit)
 local RobloxMarket = require(ReplicatedStorage.Config.RobloxMarket)
 local Instruments = require(ReplicatedStorage.Config.Instruments)
@@ -102,14 +103,16 @@ local function isInside(guiObject, position: Vector2): boolean
 end
 
 -- options = {
---   inputRow, input (the row's TextBox), overlayParent (where dropdowns go,
---   outside the scrolling screen), screen (the Trade screen), onSelect(ticker)
+--   inputRow, input (the row's TextBox), inputFrame? (what draws the box, if
+--   the TextBox sits inside one; moved beside the market button in its place),
+--   overlayParent (where dropdowns go, outside the screen), screen, onSelect(ticker)
 -- }
 function MarketPickerModule.new(options)
 	local self = setmetatable({}, MarketPickerModule)
 
 	self.options = options
 	self.input = options.input
+	self.inputFrame = options.inputFrame or options.input
 	self.market = "World"
 	self.loadedText = "" -- what the box showed for the loaded ticker
 	self.listing = nil -- GetRobloxMarketEvent's rows
@@ -149,8 +152,8 @@ function MarketPickerModule:buildButton()
 	self.button = button
 
 	-- The search box moves over to make room
-	self.input.Position = UDim2.fromOffset(MARKET_BUTTON_WIDTH + GAP, 0)
-	self.input.Size = UDim2.new(0, SEARCH_WIDTH, 1, 0)
+	self.inputFrame.Position = UDim2.fromOffset(MARKET_BUTTON_WIDTH + GAP, 0)
+	self.inputFrame.Size = UDim2.new(0, SEARCH_WIDTH, 1, 0)
 end
 
 function MarketPickerModule:buildMenu()
@@ -338,18 +341,20 @@ function MarketPickerModule:connect()
 		end
 	end)
 
-	-- The dropdowns hang under the row, which scrolls with the screen
-	screen:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
-		self:placeOverlays()
-	end)
+	-- The dropdowns hang under the row, which scrolls with a scrolling screen
+	if screen:IsA("ScrollingFrame") then
+		screen:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
+			self:placeOverlays()
+		end)
+	end
 end
 
 -- Under the market button and the search box, in overlayParent's space
 function MarketPickerModule:placeOverlays()
 	local origin = self.options.overlayParent.AbsolutePosition
 	local buttonPosition = self.button.AbsolutePosition
-	local inputPosition = self.input.AbsolutePosition
-	local below = self.input.AbsoluteSize.Y + 4
+	local inputPosition = self.inputFrame.AbsolutePosition
+	local below = self.inputFrame.AbsoluteSize.Y + 4
 
 	self.menu.Position = UDim2.fromOffset(buttonPosition.X - origin.X, buttonPosition.Y + below - origin.Y)
 	self.results.Position = UDim2.fromOffset(inputPosition.X - origin.X, inputPosition.Y + below - origin.Y)
@@ -528,9 +533,15 @@ function MarketPickerModule:createRow(index, row)
 	changeLabel.Size = UDim2.fromOffset(140, 16)
 	changeLabel.TextXAlignment = Enum.TextXAlignment.Right
 	changeLabel.RichText = true
-	changeLabel.Text = change
-			and string.format('<font color="#%s">%+.2f%%</font> today', change >= 0 and UP_HEX or DOWN_HEX, change)
-		or "—"
+
+	if row.opensAt then
+		changeLabel.Text = "Opens in " .. MarketHoursModule.formatCountdown(row.opensAt - os.time())
+	elseif change then
+		changeLabel.Text =
+			string.format('<font color="#%s">%+.2f%%</font> today', change >= 0 and UP_HEX or DOWN_HEX, change)
+	else
+		changeLabel.Text = "—"
+	end
 
 	button.MouseEnter:Connect(function()
 		button.BackgroundTransparency = 0

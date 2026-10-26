@@ -18,10 +18,10 @@ jobs:
       - uses: ok-nick/setup-aftman@v0.4.2
 
       - name: Lint
-        run: selene src tests
+        run: selene src tests tools
 
       - name: Check formatting
-        run: stylua --check src tests
+        run: stylua --check src tests tools
 
       - name: Unit tests
         run: lune run tests/run.luau

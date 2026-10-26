@@ -11,6 +11,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Theme = require(ReplicatedStorage.Modules.Multi.Theme)
 local NumberModule = require(ReplicatedStorage.Modules.Multi.NumberModule)
+local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursModule)
 local UIKit = require(ReplicatedStorage.UI.UIKit)
 local RobloxMarket = require(ReplicatedStorage.Config.RobloxMarket)
 
@@ -138,10 +139,21 @@ function GameBannerModule:show(data)
 	self.playersChip.Text = observed.playing
 			and string.format("%s playing now · observed", NumberModule.formatShares(observed.playing))
 		or "Players unavailable"
-	self.priceChip.Text = data.delisted and "Delisted" or "Simulated price"
 	self.priceChip.TextColor3 = data.delisted and Theme.Colors.Down or Theme.Colors.Accent
-	self.note.Text = data.delisted and DELISTED_NOTE
-		or (RobloxMarket.SIMULATED_NOTE .. " " .. RobloxMarket.OBSERVED_NOTE)
+
+	local note = RobloxMarket.SIMULATED_NOTE .. " " .. RobloxMarket.OBSERVED_NOTE
+
+	if data.delisted then
+		self.priceChip.Text = "Delisted"
+		note = DELISTED_NOTE
+	elseif data.opensAt then
+		self.priceChip.Text = "Opens for trading in " .. MarketHoursModule.formatCountdown(data.opensAt - os.time())
+		note = RobloxMarket.WARMUP_NOTE .. " " .. note
+	else
+		self.priceChip.Text = "Simulated price"
+	end
+
+	self.note.Text = note
 	self.frame.Visible = true
 end
 

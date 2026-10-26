@@ -132,7 +132,7 @@ local ANALYST_FIELDS = {
 -- and the simulated price never be confused
 local ROBLOX_FIELDS = {
 	{ label = "Players now · observed", key = "playing", format = "count" },
-	{ label = "24h avg players · estimated", key = "averagePlaying", format = "count" },
+	{ label = "7-day avg players · estimated", key = "averagePlaying", format = "count" },
 	{ label = "Visits · observed", key = "visits", format = "count" },
 	{ label = "Favorites · observed", key = "favorites", format = "count" },
 	{ label = "Like ratio · observed", key = "likeRatio", format = "percent" },
@@ -346,7 +346,13 @@ local function updateHeader(data, livePrice)
 
 	-- A Roblox-market price is the game's simulation, and says so beside it
 	if data and data.assetClass == "roblox" then
-		CompanyLabel.Text ..= data.delisted and " · Delisted" or " · Simulated price"
+		if data.delisted then
+			CompanyLabel.Text ..= " · Delisted"
+		elseif data.opensAt then
+			CompanyLabel.Text ..= " · Opens in " .. MarketHoursModule.formatCountdown(data.opensAt - os.time())
+		else
+			CompanyLabel.Text ..= " · Simulated price"
+		end
 	end
 
 	local priceLabel = HeaderRow:FindFirstChild("PriceLabel")

@@ -18,6 +18,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local PlayerDataService = require(ServerScriptService.Services.PlayerDataService)
 local ProgressionService = require(ServerScriptService.Services.ProgressionService)
+local RobloxMarketService = require(ServerScriptService.Services.RobloxMarketService)
 local OrderEvents = require(ServerScriptService.Services.OrderEvents)
 local MarketDataModule = require(ServerScriptService.Modules.MarketDataModule)
 local FillPriceModule = require(ServerScriptService.Modules.FillPriceModule)
@@ -142,6 +143,15 @@ function OrderService.placeLimit(player, action, ticker, shares, limitPrice)
 		return { success = false, message = "Limit orders: " .. Progression.getLockedMessage("LimitOrders") }
 	end
 
+	-- A Roblox game warming up has candles but no trading, so no order may catch up against them
+	if Instruments.isRoblox(ticker) then
+		local reason = RobloxMarketService.getClosedReason(string.upper(ticker))
+
+		if reason then
+			return { success = false, message = reason }
+		end
+	end
+
 	local data = PlayerDataService.get(player)
 
 	if not data then
@@ -233,8 +243,17 @@ end
 
 -- The live price an order on `ticker` fills at - the ask for a buy and the
 -- bid for a sell in regular trading - or nil and why not. Falls back to the
--- candle-based price when the quote route can't be reached.
+-- candle-based price when the quote route can't be reached. A Roblox-market
+-- game that's warming up or delisted doesn't trade.
 function OrderService.getFillPrice(ticker, side)
+	if Instruments.isRoblox(ticker) then
+		local reason = RobloxMarketService.getClosedReason(string.upper(ticker))
+
+		if reason then
+			return nil, reason
+		end
+	end
+
 	local isCrypto = MarketDataModule.isCryptoTicker(ticker)
 	local quote = MarketDataModule.getLiveQuote(ticker)
 
