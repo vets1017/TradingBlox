@@ -668,6 +668,45 @@ Taken at the start of Phase 3 (2026-10-25); Kevin accepted each recommendation:
    day is a weekend and the other isn't. In the simulator a one-off 60% rush of players lifts the
    price about 18% within the hour. Quote Details shows "Players vs usual · estimated".
 
+### Phase 4 decisions
+
+Taken at the start of Phase 4 (2026-10-26); Kevin accepted each recommendation:
+
+- **Short selling unlocks at Level 2, cash-backed,** as GDD §8 places it (the trading-engine section
+  above grouped it with margin at Level 3). Opening a short holds cash collateral of 150% of its value,
+  so nothing is borrowed; buying back closes it. No borrow fee. Stocks, crypto and Roblox games can be
+  shorted.
+- **Margin at Level 3: up to 2x buying power, automatic liquidation, 6% a year interest.**
+  Maintenance is 25% of long positions' value and 30% of shorts'. Below it, positions are sold
+  automatically: live while the player is online, and at login for what happened while they were
+  offline, through the same catch-up step as limit orders and settlement. Interest accrues on
+  borrowed cash, so leverage isn't free.
+- **Options at Level 3 are built last and tested against the local backend.** Production can't get
+  Yahoo's options data while Yahoo refuses the backend's crumb (`/api/options` returns 500 as of
+  2026-10-26), so several expirations and the Greeks light up there once a data source works
+  (decision 3).
+
+### Phase 4 build order
+
+1. ✅ Indicators: RSI, MACD and Bollinger Bands at Level 2; ATR, VWAP and volume profile at Level 3
+   (`AdvancedIndicators`). The maths is pure and tested in `IndicatorModule`; RSI, MACD and ATR draw in
+   stacked panes under the chart, which gives up their height. Indicators are now computed over the
+   whole loaded history and cut to the view, so a line no longer starts `period` candles in. VWAP
+   restarts each UTC day with no line across the restart. Roblox games have no volume, so VWAP and
+   the volume profile draw nothing for them. Seen while testing: in a window under ~700 px wide the
+   Charts toolbar (market picker, timeframe, indicators) runs past the chart's edge.
+2. Stop and stop-limit orders (Level 2): order types in `OrderService`, checked live and caught up at
+   login against candles like limit orders; the Trade ticket offers them.
+3. Short selling (Level 2), cash-backed as decided.
+4. Risk analytics on the Portfolio tab (Level 2): volatility, Sharpe ratio, beta against SPY and
+   concentration; leverage and options exposure once they exist.
+5. Leaderboards: Best Risk-Adjusted Return (Sharpe over at least 20 days), Consistency (share of
+   positive weeks), Best Trader (return, win rate and drawdown), Best Analyst (theses scored when their
+   horizon ends, with a minimum sample), and the Roblox-market filter deferred from Phase 3.
+6. Margin (Level 3), as decided.
+7. Options (Level 3): several expirations, Greeks from a tested Black-Scholes `OptionsMath`, and
+   combined positions.
+
 ## Sources
 
 - [In-experience HTTP requests (Roblox docs)](https://create.roblox.com/docs/cloud-services/http-service)

@@ -45,6 +45,7 @@ test("getUnlocksAt lists that level's features, sorted", function()
 		"limit orders",
 		"portfolio analytics",
 	})
+	equal(Progression.getUnlocksAt(3), { "advanced chart indicators", "options trading" })
 end)
 
 test("milestone tutorial steps have a milestone to claim", function()

@@ -1,4 +1,3 @@
-local IndicatorModule = require(script.Parent.IndicatorModule)
 local Theme = require(script.Parent.Theme)
 
 local ChartRenderer = {}
@@ -10,10 +9,53 @@ local RED = Theme.Colors.Down
 -- (e.g. BTC) only fit without decimals
 local BADGE_DECIMALS_CUTOFF = 10000
 
-local INDICATOR_FUNCTIONS = {
-	sma = IndicatorModule.sma,
-	ema = IndicatorModule.ema,
-}
+local PROFILE_WIDTH = 0.25 -- of the chart's width, for the busiest price band
+local PROFILE_TRANSPARENCY = 0.75
+local BAR_TRANSPARENCY = 0.35
+local PANE_PADDING = 0.1 -- of a pane's value range, above and below
+
+-- One line through `line.values` (aligned with the candles; nil gaps are
+-- left out, and so are joins into an index in `line.breaks`) as rotated
+-- segments in `container`. `toY(value)` gives the value's height on the
+-- container's scale, 0 at the top.
+local function drawLine(container, name, line, count, color, toY)
+	local size = container.AbsoluteSize
+	local width = 1 / count
+	local values, breaks = line.values, line.breaks
+
+	for index = 2, count do
+		local previous, current = values[index - 1], values[index]
+
+		if previous and current and not (breaks and breaks[index]) then
+			local x1, x2 = (index - 1.5) * width, (index - 0.5) * width
+			local y1, y2 = toY(previous), toY(current)
+			local dx, dy = (x2 - x1) * size.X, (y2 - y1) * size.Y
+
+			local segment = Instance.new("Frame")
+			segment.Name = name .. "_" .. index
+			segment.AnchorPoint = Vector2.new(0.5, 0.5)
+			segment.BackgroundColor3 = color
+			segment.BackgroundTransparency = line.transparency or 0
+			segment.BorderSizePixel = 0
+			segment.ZIndex = 2
+			segment.Size = UDim2.fromOffset(math.sqrt(dx * dx + dy * dy), 2)
+			segment.Rotation = math.deg(math.atan2(dy, dx))
+			segment.Position = UDim2.fromScale((x1 + x2) / 2, (y1 + y2) / 2)
+			segment.Parent = container
+		end
+	end
+end
+
+-- The last value set in `values`, looking back from `count`
+local function lastValue(values, count)
+	for index = count, 1, -1 do
+		if values[index] then
+			return values[index]
+		end
+	end
+
+	return nil
+end
 
 ChartRenderer.TimeframeFormats = {
 	["D"] = "%b %d, %Y",
@@ -32,25 +74,27 @@ ChartRenderer.TimeframeFormats = {
 --     IndicatorsContainer : Frame
 --     RightAxis : Frame
 --     BottomAxis : Frame
---     MainChart : Frame
 -- }
 --
 -- ticker : string
 -- chartData : array  { Open, High, Low, Close, Timestamp}
 -- timeframe : string matching TimeframeFormats keys
 -- liveCandle : optional latest candle (full series); used for price badge when viewport is scrolled
--- indicators : optional array of { key, type ("sma"|"ema"), period, color }, drawn as overlay lines
+-- overlays : optional array of indicators drawn on the price scale, each
+--     { key, color, lines = { { values, color?, transparency?, breaks? } }?,
+--       profile = { low, high, volumes }? } with values aligned to chartData.
+--     Lines widen the price scale so they stay in view; a profile draws as
+--     bars from the right edge, one per price band.
 --
 -- Returns minPrice, maxPrice,
 
-function ChartRenderer.render(elements, ticker, chartData, timeframe, liveCandle, indicators)
+function ChartRenderer.render(elements, ticker, chartData, timeframe, liveCandle, overlays)
 	local ChartTickerLabel = elements.ChartTickerLabel
 	local CandlesContainer = elements.CandlesContainer
 	local GridContainer = elements.GridContainer
 	local IndicatorsContainer = elements.IndicatorsContainer
 	local RightAxis = elements.RightAxis
 	local BottomAxis = elements.BottomAxis
-	local MainChart = elements.MainChart
 
 	ChartTickerLabel.Text = ticker
 
@@ -86,6 +130,19 @@ function ChartRenderer.render(elements, ticker, chartData, timeframe, liveCandle
 		end
 		if candle.High > maximumPrice then
 			maximumPrice = candle.High
+		end
+	end
+
+	for _, overlay in ipairs(overlays or {}) do
+		for _, line in ipairs(overlay.lines or {}) do
+			for index = 1, #chartData do
+				local value = line.values[index]
+
+				if value then
+					minimumPrice = math.min(minimumPrice, value)
+					maximumPrice = math.max(maximumPrice, value)
+				end
+			end
 		end
 	end
 
@@ -140,44 +197,41 @@ function ChartRenderer.render(elements, ticker, chartData, timeframe, liveCandle
 		bodyFrame.Parent = CandlesContainer
 	end
 
-	-- Indicator Overlays (moving averages drawn on the same price scale as the candles)
-	if IndicatorsContainer and indicators and #indicators > 0 then
-		local closes = {}
-
-		for index, candle in ipairs(chartData) do
-			closes[index] = candle.Close
+	-- Indicator overlays, on the same price scale as the candles
+	if IndicatorsContainer and overlays then
+		local function toY(price)
+			return (maximumPrice - price) / priceRange
 		end
 
-		for _, indicator in ipairs(indicators) do
-			local computeFn = INDICATOR_FUNCTIONS[indicator.type]
-			local values = computeFn and computeFn(closes, indicator.period)
+		for _, overlay in ipairs(overlays) do
+			for lineIndex, line in ipairs(overlay.lines or {}) do
+				drawLine(
+					IndicatorsContainer,
+					overlay.key .. "_" .. lineIndex,
+					line,
+					numberCandles,
+					line.color or overlay.color,
+					toY
+				)
+			end
 
-			if values then
-				for index = 2, numberCandles do
-					local previousValue = values[index - 1]
-					local currentValue = values[index]
+			local profile = overlay.profile
 
-					if previousValue and currentValue then
-						local x1 = ((index - 2) * candleWidthScale) + (candleWidthScale / 2)
-						local x2 = ((index - 1) * candleWidthScale) + (candleWidthScale / 2)
-						local y1 = (maximumPrice - previousValue) / priceRange
-						local y2 = (maximumPrice - currentValue) / priceRange
+			if profile then
+				local busiest = math.max(table.unpack(profile.volumes))
+				local bandHeight = (profile.high - profile.low) / #profile.volumes
 
-						local dx = (x2 - x1) * MainChart.AbsoluteSize.X
-						local dy = (y2 - y1) * MainChart.AbsoluteSize.Y
-						local length = math.sqrt(dx * dx + dy * dy)
-						local angle = math.deg(math.atan2(dy, dx))
-
-						local segment = Instance.new("Frame")
-						segment.Name = indicator.key .. "_" .. index
-						segment.AnchorPoint = Vector2.new(0.5, 0.5)
-						segment.BackgroundColor3 = indicator.color
-						segment.BorderSizePixel = 0
-						segment.ZIndex = 2
-						segment.Size = UDim2.fromOffset(length, 2)
-						segment.Rotation = angle
-						segment.Position = UDim2.fromScale((x1 + x2) / 2, (y1 + y2) / 2)
-						segment.Parent = IndicatorsContainer
+				for band, volume in ipairs(profile.volumes) do
+					if volume > 0 then
+						local bar = Instance.new("Frame")
+						bar.Name = overlay.key .. "_" .. band
+						bar.AnchorPoint = Vector2.new(1, 0)
+						bar.BackgroundColor3 = overlay.color
+						bar.BackgroundTransparency = PROFILE_TRANSPARENCY
+						bar.BorderSizePixel = 0
+						bar.Position = UDim2.fromScale(1, toY(profile.low + band * bandHeight))
+						bar.Size = UDim2.new(PROFILE_WIDTH * volume / busiest, 0, bandHeight / priceRange, -1)
+						bar.Parent = IndicatorsContainer
 					end
 				end
 			end
@@ -189,7 +243,8 @@ function ChartRenderer.render(elements, ticker, chartData, timeframe, liveCandle
 	local numberPriceLabels = 10
 	local numberTimeLabels = 4
 
-	local containerHeight = MainChart.AbsoluteSize.Y
+	-- The candles' own height: indicator panes may take some of the chart's
+	local containerHeight = CandlesContainer.AbsoluteSize.Y
 
 	if containerHeight and containerHeight > 0 then
 		numberPriceLabels = math.clamp(math.floor(containerHeight / 55), 3, 10)
@@ -351,6 +406,141 @@ function ChartRenderer.render(elements, ticker, chartData, timeframe, liveCandle
 	end
 
 	return minimumPrice, maximumPrice
+end
+
+-- Draws an oscillator in `container` (a pane under the chart, emptied
+-- first) for `count` visible candles:
+--   pane = { key, label, color, lines = { { values, color? } },
+--            bars = { values }?, range = { min, max }?, guides = { number }? }
+-- Values are aligned to the candles. Without a range the pane fits its
+-- values (and zero, when it has bars). Bars rise or fall from zero in the
+-- up or down color. The label shows each line's latest value.
+function ChartRenderer.renderPane(container, pane, count)
+	container:ClearAllChildren()
+
+	if count == 0 then
+		return
+	end
+
+	local low, high
+
+	if pane.range then
+		low, high = pane.range[1], pane.range[2]
+	else
+		low, high = math.huge, -math.huge
+
+		local function include(values)
+			for index = 1, count do
+				if values[index] then
+					low = math.min(low, values[index])
+					high = math.max(high, values[index])
+				end
+			end
+		end
+
+		for _, line in ipairs(pane.lines or {}) do
+			include(line.values)
+		end
+
+		if pane.bars then
+			include(pane.bars.values)
+			low, high = math.min(low, 0), math.max(high, 0)
+		end
+
+		if low > high then
+			return
+		end
+
+		local padding = math.max(high - low, math.abs(high) * 0.01, 1e-9) * PANE_PADDING
+
+		low -= padding
+		high += padding
+	end
+
+	local function toY(value)
+		return (high - value) / (high - low)
+	end
+
+	local function addAxisLabel(name, value)
+		local label = Instance.new("TextLabel")
+		label.Name = name
+		label.BackgroundTransparency = 1
+		label.AnchorPoint = Vector2.new(0, 0.5)
+		label.Position = UDim2.new(1, 5, math.clamp(toY(value), 0.08, 0.92), 0)
+		label.Size = UDim2.fromOffset(50, 14)
+		label.FontFace = Theme.Fonts.Mono
+		label.TextSize = Theme.TextSize.Caption
+		label.TextColor3 = Theme.Colors.TextMuted
+		label.TextXAlignment = Enum.TextXAlignment.Left
+		label.Text = string.format("%.2f", value)
+		label.Parent = container
+	end
+
+	for index, guide in ipairs(pane.guides or {}) do
+		local line = Instance.new("Frame")
+		line.Name = "Guide_" .. index
+		line.BackgroundColor3 = Theme.Colors.Border
+		line.BorderSizePixel = 0
+		line.Position = UDim2.fromScale(0, toY(guide))
+		line.Size = UDim2.new(1, 0, 0, 1)
+		line.Parent = container
+
+		addAxisLabel("AxisLabel_Guide_" .. index, guide)
+	end
+
+	if not pane.guides then
+		addAxisLabel("AxisLabel_High", high)
+		addAxisLabel("AxisLabel_Low", low)
+	end
+
+	if pane.bars then
+		local width = 1 / count
+		local zero = toY(0)
+
+		for index = 1, count do
+			local value = pane.bars.values[index]
+
+			if value and value ~= 0 then
+				local bar = Instance.new("Frame")
+				bar.Name = "Bar_" .. index
+				bar.AnchorPoint = Vector2.new(0.5, 0)
+				bar.BackgroundColor3 = value > 0 and GREEN or RED
+				bar.BackgroundTransparency = BAR_TRANSPARENCY
+				bar.BorderSizePixel = 0
+				bar.Position = UDim2.fromScale((index - 0.5) * width, math.min(zero, toY(value)))
+				bar.Size = UDim2.fromScale(width * 0.6, math.abs(toY(value) - zero))
+				bar.Parent = container
+			end
+		end
+	end
+
+	local readings = {}
+
+	for lineIndex, line in ipairs(pane.lines or {}) do
+		local color = line.color or pane.color
+
+		drawLine(container, pane.key .. "_" .. lineIndex, line, count, color, toY)
+
+		local latest = lastValue(line.values, count)
+
+		if latest then
+			table.insert(readings, string.format('<font color="#%s">%.2f</font>', color:ToHex(), latest))
+		end
+	end
+
+	local label = Instance.new("TextLabel")
+	label.Name = "Label"
+	label.BackgroundTransparency = 1
+	label.Position = UDim2.fromOffset(6, 2)
+	label.Size = UDim2.new(1, -12, 0, 16)
+	label.FontFace = Theme.Fonts.Mono
+	label.TextSize = Theme.TextSize.Caption
+	label.TextColor3 = Theme.Colors.TextMuted
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.RichText = true
+	label.ZIndex = 3
+	label.Text = pane.label .. "  " .. table.concat(readings, "  ")
+	label.Parent = container
 end
 
 return ChartRenderer

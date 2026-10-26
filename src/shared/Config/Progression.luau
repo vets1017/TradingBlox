@@ -18,16 +18,18 @@ Progression.LEVELS = {
 -- level 1 because it's the only market open on weekends.
 Progression.FEATURES = {
 	Fundamentals = 2, -- Fundamentals and Analyst Reports tabs
-	ChartIndicators = 2,
+	ChartIndicators = 2, -- moving averages, RSI, MACD, Bollinger Bands
 	Analytics = 2, -- portfolio analytics beyond positions and value
 	LimitOrders = 2,
 	Options = 3, -- option chain, Option Stats tab, contract orders
+	AdvancedIndicators = 3, -- ATR, VWAP, volume profile
 }
 
 -- How each feature reads in the level-up toast
 Progression.FEATURE_NAMES = {
 	Fundamentals = "fundamentals and analyst reports",
 	ChartIndicators = "chart indicators",
+	AdvancedIndicators = "advanced chart indicators",
 	Analytics = "portfolio analytics",
 	LimitOrders = "limit orders",
 	Options = "options trading",

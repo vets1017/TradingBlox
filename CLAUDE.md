@@ -214,7 +214,10 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
 - **Shared (`src/shared/Modules/`)**:
   - `Multi/` — cross-boundary utilities used by both client and server-side logic conceptually:
     `ChartRenderer` (pure UI-building candlestick/grid/axis renderer, takes a table of UI element refs +
-    OHLC data and returns min/max price), `MarketHoursModule` (NYSE open/closed + holiday calendar, computed
+    OHLC data and returns min/max price; also draws indicator overlays and, with `renderPane`, the oscillator
+    panes under the chart), `IndicatorModule` (pure and tested: SMA, EMA, RSI, MACD, Bollinger Bands, ATR, VWAP,
+    volume profile — `TerminalController`'s `INDICATORS` list builds them over the whole loaded history, each
+    with its unlock), `MarketHoursModule` (NYSE open/closed + holiday calendar, computed
     algorithmically including Easter-relative Good Friday), `NumberModule` (currency formatting), `Navigation`
     (client-only: `Navigation.openTicker(ticker)`, `Navigation.openProfile(userId)` and `Navigation.openTab(name)`
     let any controller send the player to a ticker on the Trade tab, a profile on the Leaderboards tab or another

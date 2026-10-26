@@ -10,6 +10,7 @@ local NumberModule = require(ReplicatedStorage.Modules.Multi.NumberModule)
 local MarketHoursModule = require(ReplicatedStorage.Modules.Multi.MarketHoursModule)
 local Instruments = require(ReplicatedStorage.Config.Instruments)
 local ChartRenderer = require(ReplicatedStorage.Modules.Multi.ChartRenderer)
+local IndicatorModule = require(ReplicatedStorage.Modules.Multi.IndicatorModule)
 local DrawingModule = require(ReplicatedStorage.Modules.Multi.DrawingModule)
 local Theme = require(ReplicatedStorage.Modules.Multi.Theme)
 local Navigation = require(ReplicatedStorage.Modules.Multi.Navigation)
@@ -183,6 +184,7 @@ local isDraggingScroll = false
 
 local currentChartData = {} -- Data of current chart
 local masterChartData = {}
+local currentStartIndex = 1 -- where currentChartData starts in masterChartData
 local viewportUpdateScheduled = false
 
 -- Drawing tools (session-only, per ticker; not persisted to DataStore)
@@ -239,38 +241,288 @@ local TimeDropdownOptions = {
 	[TimeDropdownList:WaitForChild("1DayButton")] = { query = "D" },
 }
 
--- Moving-average overlay indicators. `active` is toggled by the dropdown;
--- renderChart reads it to decide what to hand ChartRenderer each render.
-local IndicatorOptions = {
-	[IndicatorsDropdownList:WaitForChild("SMA20Button")] = {
+local function movingAverage(average, period)
+	return function(_, closes)
+		return { lines = { { values = average(closes, period) } } }
+	end
+end
+
+local function utcDay(timestamp)
+	return timestamp // 86400
+end
+
+-- Chart indicators, in the dropdown's order. `build(candles, closes)` makes
+-- the series from the whole loaded history (aligned with it), so a line
+-- starts at the left edge rather than `period` candles in; a `visibleOnly`
+-- one (the volume profile) is built from the candles in view instead. An
+-- indicator draws on the price chart, or in its own pane under it (`pane`).
+-- `feature` is its unlock (Config/Progression). The moving averages have
+-- Studio-built buttons (`buttonName`); the rest get copies of those.
+-- Series colors are chart data, so they're literals. `active` is toggled by
+-- the dropdown.
+local INDICATORS = {
+	{
 		key = "SMA20",
-		type = "sma",
-		period = 20,
+		label = "SMA 20",
+		buttonName = "SMA20Button",
+		feature = "ChartIndicators",
 		color = Color3.fromRGB(255, 170, 0),
-		active = false,
+		build = movingAverage(IndicatorModule.sma, 20),
 	},
-	[IndicatorsDropdownList:WaitForChild("SMA50Button")] = {
+	{
 		key = "SMA50",
-		type = "sma",
-		period = 50,
+		label = "SMA 50",
+		buttonName = "SMA50Button",
+		feature = "ChartIndicators",
 		color = Color3.fromRGB(0, 170, 255),
-		active = false,
+		build = movingAverage(IndicatorModule.sma, 50),
 	},
-	[IndicatorsDropdownList:WaitForChild("EMA20Button")] = {
+	{
 		key = "EMA20",
-		type = "ema",
-		period = 20,
+		label = "EMA 20",
+		buttonName = "EMA20Button",
+		feature = "ChartIndicators",
 		color = Color3.fromRGB(255, 90, 205),
-		active = false,
+		build = movingAverage(IndicatorModule.ema, 20),
 	},
-	[IndicatorsDropdownList:WaitForChild("EMA50Button")] = {
+	{
 		key = "EMA50",
-		type = "ema",
-		period = 50,
+		label = "EMA 50",
+		buttonName = "EMA50Button",
+		feature = "ChartIndicators",
 		color = Color3.fromRGB(220, 222, 230), -- near-white: the old purple was nearly the UI accent
-		active = false,
+		build = movingAverage(IndicatorModule.ema, 50),
+	},
+	{
+		key = "BB20",
+		label = "Bollinger 20",
+		feature = "ChartIndicators",
+		color = Color3.fromRGB(110, 190, 255),
+		build = function(_, closes)
+			local bands = IndicatorModule.bollinger(closes, 20, 2)
+
+			return {
+				lines = {
+					{ values = bands.upper },
+					{ values = bands.middle, transparency = 0.5 },
+					{ values = bands.lower },
+				},
+			}
+		end,
+	},
+	{
+		key = "RSI14",
+		label = "RSI 14",
+		feature = "ChartIndicators",
+		pane = true,
+		color = Color3.fromRGB(190, 140, 255),
+		build = function(_, closes)
+			return { range = { 0, 100 }, guides = { 30, 70 }, lines = { { values = IndicatorModule.rsi(closes, 14) } } }
+		end,
+	},
+	{
+		key = "MACD",
+		label = "MACD 12 26 9",
+		feature = "ChartIndicators",
+		pane = true,
+		color = Color3.fromRGB(0, 170, 255),
+		build = function(_, closes)
+			local result = IndicatorModule.macd(closes, 12, 26, 9)
+
+			return {
+				lines = { { values = result.macd }, { values = result.signal, color = Color3.fromRGB(255, 140, 0) } },
+				bars = { values = result.histogram },
+			}
+		end,
+	},
+	{
+		key = "ATR14",
+		label = "ATR 14",
+		feature = "AdvancedIndicators",
+		pane = true,
+		color = Color3.fromRGB(220, 222, 230),
+		build = function(candles)
+			return { lines = { { values = IndicatorModule.atr(candles, 14) } } }
+		end,
+	},
+	{
+		key = "VWAP",
+		label = "VWAP",
+		feature = "AdvancedIndicators",
+		color = Color3.fromRGB(255, 215, 90),
+		build = function(candles)
+			-- Restarts each UTC day, with no line joining one day to the next;
+			-- daily candles run as one session
+			local sessionOf = currentTimeframe ~= "D" and utcDay or nil
+			local breaks = {}
+
+			for index = 2, if sessionOf then #candles else 0 do
+				if utcDay(candles[index].Timestamp) ~= utcDay(candles[index - 1].Timestamp) then
+					breaks[index] = true
+				end
+			end
+
+			return { lines = { { values = IndicatorModule.vwap(candles, sessionOf), breaks = breaks } } }
+		end,
+	},
+	{
+		key = "VolumeProfile",
+		label = "Volume profile",
+		feature = "AdvancedIndicators",
+		visibleOnly = true,
+		color = Color3.fromRGB(154, 107, 255),
+		build = function(candles)
+			return { profile = IndicatorModule.volumeProfile(candles, 24) }
+		end,
 	},
 }
+
+local INDICATOR_OPTION_HEIGHT = 30
+local INDICATOR_LIST_WIDTH = 180 -- room for "Volume profile · Lv 3"
+
+do
+	local template = IndicatorsDropdownList:WaitForChild("SMA20Button")
+
+	for index, indicator in ipairs(INDICATORS) do
+		local button
+
+		if indicator.buttonName then
+			button = IndicatorsDropdownList:WaitForChild(indicator.buttonName)
+		else
+			button = template:Clone()
+			button.Name = indicator.key .. "Button"
+			button.Parent = IndicatorsDropdownList
+		end
+
+		button.Text = indicator.label
+		button.LayoutOrder = index
+		indicator.button = button
+		indicator.active = false
+	end
+
+	-- The Studio list fits only the moving averages
+	IndicatorsDropdownList.Size = UDim2.fromOffset(INDICATOR_LIST_WIDTH, INDICATOR_OPTION_HEIGHT * #INDICATORS)
+end
+
+-- Oscillator panes under the price chart, built in code. While any are on,
+-- the chart and its price axis give up their height.
+local PANE_HEIGHT = 96
+local PANE_GAP = 12 -- keeps the chart's scroll bar clear of the first pane
+local CANVAS_SIZE = ChartCanvas.Size
+local AXIS_SIZE = RightAxis.Size
+local CANVAS_BOTTOM = ChartCanvas.Position.Y.Offset + CANVAS_SIZE.Y.Offset -- from the bottom of MainChart
+
+local IndicatorPanes = Instance.new("Frame")
+IndicatorPanes.Name = "IndicatorPanes"
+IndicatorPanes.BackgroundTransparency = 1
+IndicatorPanes.Parent = MainChart
+
+local paneContents = {} -- each pane's frame for ChartRenderer.renderPane
+
+local function layoutPanes(count)
+	local taken = count > 0 and count * PANE_HEIGHT + PANE_GAP or 0
+
+	ChartCanvas.Size = UDim2.new(CANVAS_SIZE.X.Scale, CANVAS_SIZE.X.Offset, 1, CANVAS_SIZE.Y.Offset - taken)
+	RightAxis.Size = UDim2.new(AXIS_SIZE.X.Scale, AXIS_SIZE.X.Offset, 1, AXIS_SIZE.Y.Offset - taken)
+	IndicatorPanes.Position = UDim2.new(0, ChartCanvas.Position.X.Offset, 1, CANVAS_BOTTOM - count * PANE_HEIGHT)
+	IndicatorPanes.Size = UDim2.new(CANVAS_SIZE.X.Scale, CANVAS_SIZE.X.Offset, 0, count * PANE_HEIGHT)
+
+	for index = #paneContents + 1, count do
+		local pane = Instance.new("Frame")
+		pane.Name = "Pane_" .. index
+		pane.BackgroundTransparency = 1
+		pane.Position = UDim2.fromOffset(0, (index - 1) * PANE_HEIGHT)
+		pane.Size = UDim2.new(1, 0, 0, PANE_HEIGHT)
+		pane.Parent = IndicatorPanes
+
+		local divider = Instance.new("Frame")
+		divider.Name = "Divider"
+		divider.BackgroundColor3 = Theme.Colors.Border
+		divider.BorderSizePixel = 0
+		divider.Size = UDim2.new(1, 0, 0, 1)
+		divider.Parent = pane
+
+		local content = Instance.new("Frame")
+		content.Name = "Content"
+		content.BackgroundTransparency = 1
+		content.Position = UDim2.fromOffset(0, 4)
+		content.Size = UDim2.new(1, 0, 1, -8)
+		content.Parent = pane
+
+		paneContents[index] = content
+	end
+
+	for index = #paneContents, count + 1, -1 do
+		paneContents[index].Parent:Destroy()
+		paneContents[index] = nil
+	end
+end
+
+-- The whole loaded history's series, per indicator; rebuilt when the
+-- history changes (a new ticker or timeframe, or a live candle)
+local seriesCache = { source = nil, length = 0, lastClose = nil, closes = {}, byKey = {} }
+
+local function getFullSeries(indicator)
+	local last = masterChartData[#masterChartData]
+	local lastClose = last and last.Close
+
+	if
+		seriesCache.source ~= masterChartData
+		or seriesCache.length ~= #masterChartData
+		or seriesCache.lastClose ~= lastClose
+	then
+		local closes = {}
+
+		for index, candle in ipairs(masterChartData) do
+			closes[index] = candle.Close
+		end
+
+		seriesCache =
+			{ source = masterChartData, length = #masterChartData, lastClose = lastClose, closes = closes, byKey = {} }
+	end
+
+	local series = seriesCache.byKey[indicator.key]
+
+	if not series then
+		series = indicator.build(masterChartData, seriesCache.closes)
+		seriesCache.byKey[indicator.key] = series
+	end
+
+	return series
+end
+
+-- `series` cut to the `count` candles in view, which start at history index `first`
+local function sliceSeries(series, first, count)
+	local function cut(values)
+		local slice = {}
+
+		for index = 1, count do
+			slice[index] = values[first + index - 1]
+		end
+
+		return slice
+	end
+
+	local sliced = table.clone(series)
+
+	if series.lines then
+		sliced.lines = {}
+
+		for index, line in ipairs(series.lines) do
+			local copy = table.clone(line)
+
+			copy.values = cut(line.values)
+			copy.breaks = line.breaks and cut(line.breaks)
+			sliced.lines[index] = copy
+		end
+	end
+
+	if series.bars then
+		sliced.bars = { values = cut(series.bars.values) }
+	end
+
+	return sliced
+end
 
 -- Unfinished: wired up once the stock list lands
 -- selene: allow(unused_variable)
@@ -283,20 +535,33 @@ local function refreshTerminal()
 	-- continue after stock-list is done
 end
 
-local function getActiveIndicators()
-	local activeIndicators = {}
+-- The active indicators for the candles in view: overlays for the price
+-- chart, and panes for under it
+local function getActiveIndicators(chartData)
+	local overlays, panes = {}, {}
 
-	for _, indicator in pairs(IndicatorOptions) do
+	for _, indicator in ipairs(INDICATORS) do
 		if indicator.active then
-			table.insert(activeIndicators, indicator)
+			local series = if indicator.visibleOnly
+				then indicator.build(chartData)
+				else sliceSeries(getFullSeries(indicator), currentStartIndex, #chartData)
+
+			series.key = indicator.key
+			series.label = indicator.label
+			series.color = indicator.color
+			table.insert(if indicator.pane then panes else overlays, series)
 		end
 	end
 
-	return activeIndicators
+	return overlays, panes
 end
 
 local function renderChart(ticker, chartData)
 	local liveCandle = #masterChartData > 0 and masterChartData[#masterChartData] or nil
+	local overlays, panes = getActiveIndicators(chartData)
+
+	-- Panes first: the chart's size depends on how many there are
+	layoutPanes(#panes)
 
 	local minPrice, maxPrice = ChartRenderer.render({
 		ChartTickerLabel = ChartTickerLabel,
@@ -305,8 +570,11 @@ local function renderChart(ticker, chartData)
 		IndicatorsContainer = IndicatorsContainer,
 		RightAxis = RightAxis,
 		BottomAxis = BottomAxis,
-		MainChart = MainChart,
-	}, ticker, chartData, currentTimeframe, liveCandle, getActiveIndicators())
+	}, ticker, chartData, currentTimeframe, liveCandle, overlays)
+
+	for index, pane in ipairs(panes) do
+		ChartRenderer.renderPane(paneContents[index], pane, #chartData)
+	end
 
 	if minPrice and maxPrice then
 		currentMinPrice = minPrice
@@ -851,6 +1119,7 @@ local function updateViewport()
 	local startIndex = #masterChartData - rightOffset - visibleCandles + 1
 	local endIndex = #masterChartData - rightOffset
 
+	currentStartIndex = startIndex
 	currentChartData = {}
 
 	for i = startIndex, endIndex do
@@ -1005,28 +1274,33 @@ end)
 
 local INDICATORS_BUTTON_TEXT = MainIndicatorsButton.Text
 
-local function areIndicatorsUnlocked()
-	return Progression.isUnlocked(Player:GetAttribute("Level") or 1, "ChartIndicators")
+local function isUnlocked(feature)
+	return Progression.isUnlocked(Player:GetAttribute("Level") or 1, feature)
 end
 
--- Below the unlock level the dropdown still opens, but its options are
--- dimmed and do nothing, and the button names the level that unlocks them
+-- Below an indicator's unlock level its option is dimmed, does nothing and
+-- names the level; below the first, the dropdown's button names it too
 local function updateIndicatorLock()
-	local isUnlocked = areIndicatorsUnlocked()
-
-	MainIndicatorsButton.Text = isUnlocked and INDICATORS_BUTTON_TEXT
+	MainIndicatorsButton.Text = isUnlocked("ChartIndicators") and INDICATORS_BUTTON_TEXT
 		or string.format("%s · Lv %d", INDICATORS_BUTTON_TEXT, Progression.FEATURES.ChartIndicators)
 
-	for button, indicator in pairs(IndicatorOptions) do
+	for _, indicator in ipairs(INDICATORS) do
+		local unlocked = isUnlocked(indicator.feature)
+
+		indicator.button.Text = unlocked and indicator.label
+			or string.format("%s · Lv %d", indicator.label, Progression.FEATURES[indicator.feature])
+
 		if not indicator.active then
-			button.TextColor3 = isUnlocked and COLOR_INACTIVE_TEXT or Theme.Colors.TextDisabled
+			indicator.button.TextColor3 = unlocked and COLOR_INACTIVE_TEXT or Theme.Colors.TextDisabled
 		end
 	end
 end
 
-for button, indicator in pairs(IndicatorOptions) do
+for _, indicator in ipairs(INDICATORS) do
+	local button = indicator.button
+
 	button.MouseButton1Click:Connect(function()
-		if not areIndicatorsUnlocked() then
+		if not isUnlocked(indicator.feature) then
 			return
 		end
 
@@ -1526,9 +1800,9 @@ for _, preset in ipairs(ActiveTraderSellPresets) do
 	stylePresetPill(preset.button, RED)
 end
 
-for button in pairs(IndicatorOptions) do
-	button.BackgroundColor3 = COLOR_INACTIVE_BACKGROUND
-	button.TextColor3 = COLOR_INACTIVE_TEXT
+for _, indicator in ipairs(INDICATORS) do
+	indicator.button.BackgroundColor3 = COLOR_INACTIVE_BACKGROUND
+	indicator.button.TextColor3 = COLOR_INACTIVE_TEXT
 end
 
 Player:GetAttributeChangedSignal("Level"):Connect(updateIndicatorLock)
