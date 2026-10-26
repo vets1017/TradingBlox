@@ -326,10 +326,12 @@ end
 
 -- What the research view shows, or nil if the ticker isn't on the market:
 -- { name, price, prevClose, delisted, opensAt?, lastTickAt, listedAt,
--- target, averagePlaying, observed = { playing, visits, favorites, upVotes,
--- downVotes, created, updated, genre, creator } }. `opensAt` is set while it
--- warms up. `observed` is Roblox's own numbers (the creator's name still
--- needs filtering); the price, target and average are ours.
+-- target, averagePlaying, vsUsual?, observed = { playing, visits, favorites,
+-- upVotes, downVotes, created, updated, genre, creator } }. `opensAt` is set
+-- while it warms up; `vsUsual` is players now against the usual for this
+-- hour of the week (0.35 is 35% more), once there's a usual. `observed` is
+-- Roblox's own numbers (the creator's name still needs filtering); the
+-- price, target, average and usual are ours.
 function RobloxMarketService.getResearch(ticker: string)
 	local experience = RobloxMarketService.getExperienceState(ticker)
 
@@ -350,6 +352,7 @@ function RobloxMarketService.getResearch(ticker: string)
 		listedAt = experience.listedAt,
 		target = experience.target,
 		averagePlaying = experience.activity,
+		vsUsual = if experience.usual and experience.usual > 0 then stats.playing / experience.usual - 1 else nil,
 		observed = {
 			playing = stats.playing,
 			visits = stats.visits,

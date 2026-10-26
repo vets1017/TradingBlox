@@ -133,6 +133,7 @@ local ANALYST_FIELDS = {
 local ROBLOX_FIELDS = {
 	{ label = "Players now · observed", key = "playing", format = "count" },
 	{ label = "7-day avg players · estimated", key = "averagePlaying", format = "count" },
+	{ label = "Players vs usual · estimated", key = "vsUsual", format = "auto" },
 	{ label = "Visits · observed", key = "visits", format = "count" },
 	{ label = "Favorites · observed", key = "favorites", format = "count" },
 	{ label = "Like ratio · observed", key = "likeRatio", format = "percent" },
@@ -715,6 +716,8 @@ local function renderQuoteDetails(data)
 		renderFieldGrid(ContentQuoteDetails, ROBLOX_FIELDS, {
 			playing = observed.playing,
 			averagePlaying = data.averagePlaying,
+			-- Against the same hour a week before; what moves the price fastest
+			vsUsual = data.vsUsual and string.format("%+.0f%%", data.vsUsual * 100),
 			visits = observed.visits,
 			favorites = observed.favorites,
 			likeRatio = votes > 0 and observed.upVotes / votes * 100 or nil,

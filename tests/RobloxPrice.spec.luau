@@ -91,7 +91,7 @@ test("a step closes in on the target but moves at most 10% per day passed", func
 	near(RobloxPriceModule.step(100, 200, 2 * DAY), 120, 1e-9, "two days with no ticks allow 20%")
 end)
 
-test("hours keep their mean, and drop off after a week", function()
+test("hours keep their mean, and leave the average after a week", function()
 	local hours, current = RobloxPriceModule.addSample(nil, nil, 100, NOW)
 
 	hours, current = RobloxPriceModule.addSample(hours, current, 300, NOW + 60)
@@ -103,7 +103,92 @@ test("hours keep their mean, and drop off after a week", function()
 	equal(RobloxPriceModule.activityFrom(hours, current), 125, "a mean of hourly means")
 
 	hours, current = RobloxPriceModule.addSample(hours, current, 50, NOW + 7 * DAY + HOUR)
-	equal(#hours, 0, "older than a week is gone")
+	equal(#hours, 2, "kept a little longer, for the same time last week")
+	equal(RobloxPriceModule.activityFrom(hours, current), 50, "but out of the weekly average")
+
+	hours = RobloxPriceModule.addSample(hours, current, 50, NOW + 7 * DAY + 3 * HOUR)
+	equal(hours[1][1] > NOW // HOUR, true, "then gone")
+end)
+
+test("the usual players for a time come from the same time a week before", function()
+	local base = NOW // HOUR -- NOW is a Sunday, 12:00 UTC
+	local hours = {
+		{ base - 7 * 24, 1000 },
+		{ base - 7 * 24 + 1, 2000 },
+		{ base - 24, 5000 },
+		{ base - 23, 7000 },
+	}
+
+	-- Between the middles of the two hours, a week before
+	equal(RobloxPriceModule.usualPlaying(hours, NOW + HOUR / 2), 1000, "the middle of an hour is its mean")
+	equal(RobloxPriceModule.usualPlaying(hours, NOW + HOUR), 1500, "halfway to the next")
+
+	-- Without a week, the day before - Saturday to Sunday, both weekend days
+	local dayOnly = { { base - 24, 5000 }, { base - 23, 7000 } }
+
+	equal(RobloxPriceModule.usualPlaying(dayOnly, NOW + HOUR), 6000)
+
+	-- Monday against Sunday isn't like for like
+	local monday = NOW + DAY
+
+	equal(RobloxPriceModule.usualPlaying({ { base, 5000 }, { base + 1, 7000 } }, monday + HOUR), nil)
+	equal(RobloxPriceModule.usualPlaying({}, NOW), nil)
+end)
+
+test("players above the usual lift the price within minutes, capped, and it fades", function()
+	local usual = 10000
+	local state = run(nil, NOW, NOW + 8 * DAY, 300, function()
+		return usual
+	end)
+
+	near(state.surge, 0, 1e-6, "a steady game has no surge")
+
+	state = run(state, NOW + 8 * DAY + 60, NOW + 8 * DAY + 30 * 60, 60, function()
+		return usual * 1.5
+	end)
+
+	local lift = math.exp(state.surge)
+	local wanted = 1.5 ^ RobloxPriceModule.SURGE_RESPONSE
+
+	equal(
+		lift > 1 + (wanted - 1) * 0.9 and lift <= wanted + 1e-9,
+		true,
+		string.format("+%.1f%% in 30 minutes", (lift - 1) * 100)
+	)
+	near(state.fair, state.trend * lift, 1e-6, "the fair price carries it")
+
+	state = run(state, NOW + 8 * DAY + 31 * 60, NOW + 8 * DAY + 90 * 60, 60, function()
+		return usual * 100
+	end)
+	near(state.surge, RobloxPriceModule.SURGE_LIMIT, 1e-3, "capped")
+
+	state = run(state, NOW + 8 * DAY + 91 * 60, NOW + 8 * DAY + 150 * 60, 60, function()
+		return usual
+	end)
+	equal(math.abs(state.surge) < 0.01, true, "fades once players are back to usual")
+	equal(RobloxPriceModule.surgeTarget(usual / 2, usual) < 0, true, "a quiet hour pulls it down")
+end)
+
+test("a steady day-night cycle and weekends make no surge once a week is known", function()
+	-- Busiest Saturday-Sunday, smoothly: real player counts don't step at midnight
+	local SATURDAY_NIGHT = TestKit.utc(2026, 10, 25, 0)
+
+	local function playingAt(t)
+		local hour = (t % DAY) / HOUR
+		local week = math.cos((t - SATURDAY_NIGHT) / (7 * DAY) * 2 * math.pi)
+
+		return 10000 * (1 + 0.35 * math.cos(hour / 24 * 2 * math.pi)) * (1 + 0.075 * week)
+	end
+
+	local state = run(nil, NOW, NOW + 8 * DAY, 300, playingAt)
+	local largest = 0
+
+	for t = NOW + 8 * DAY + 300, NOW + 15 * DAY, 300 do
+		state = RobloxPriceModule.tick(state, stats(playingAt(t)), t)
+		largest = math.max(largest, math.abs(state.surge))
+	end
+
+	equal(largest < 0.005, true, string.format("largest surge %.2f%%", largest * 100))
 end)
 
 test("a steady day-night cycle and weekends leave the weekly average flat", function()
@@ -144,8 +229,15 @@ test("a new listing warms up for a day: the price follows the target, then trade
 
 	local before = state.price
 
+	local trendBefore = state.trend
+
 	state = RobloxPriceModule.tick(state, stats(400000), NOW + WARMUP + 60)
-	equal(state.price <= before * (1 + 0.10 * 60 / DAY) + 0.01, true, "open: capped")
+	equal(state.trend <= trendBefore * (1 + 0.10 * 60 / DAY) + 1e-9, true, "open: the trend is capped")
+	equal(
+		state.price <= before * math.exp(RobloxPriceModule.SURGE_LIMIT) * (1 + 0.10 * 60 / DAY) + 0.01,
+		true,
+		"and a surge is limited too"
+	)
 end)
 
 test("a cheap price still moves a minute at a time", function()
@@ -154,14 +246,15 @@ test("a cheap price still moves a minute at a time", function()
 	local state = run(nil, NOW, NOW + WARMUP, 60, function()
 		return 1
 	end)
-	local opening = state.price
+	local opening = state.trend
 
 	state = run(state, NOW + WARMUP + 60, NOW + WARMUP + DAY, 60, function()
 		return 4
 	end)
 
-	equal(state.price > opening * 1.05, true, string.format("$%.4f -> $%.4f", opening, state.price))
-	equal(state.price <= opening * math.exp(0.10) + 1e-9, true, "within the daily cap")
+	-- The trend carries the cap; four times the usual players also make a surge on top
+	equal(state.trend > opening * 1.05, true, string.format("$%.4f -> $%.4f", opening, state.trend))
+	equal(state.trend <= opening * math.exp(0.10) + 1e-9, true, "within the daily cap")
 end)
 
 test("momentum waits for a full week's average from a week before", function()

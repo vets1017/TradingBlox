@@ -17,7 +17,14 @@
 -- never moving more than DAILY_MOVE_CAP of itself per 24 hours that pass -
 -- so after a gap with no ticks it may catch up further, in proportion.
 --
--- That smooth path is the "fair" price. The traded price wanders around it:
+-- That smooth path is the trend. Live activity moves the price faster: the
+-- players online right now against the usual for this hour of the week (the
+-- same time a week before) make a surge, which the price follows within
+-- minutes - up to SURGE_LIMIT either way - and which fades as the activity
+-- does. Comparing like with like, a steady game's daily and weekly cycles
+-- make no surge, so it can't be farmed on a schedule. fair = trend x surge.
+--
+-- The traded price wanders around the fair price:
 -- price = fair x e^noise, where the noise is jolted at random and drifts back
 -- to zero over about a day (keeping a spread of NOISE_SPREAD), so charts
 -- move like a market's, candles get wicks, and a minute's move is close to
@@ -26,10 +33,10 @@
 --
 -- A newly listed experience warms up for WARMUP_SECONDS before it trades:
 -- until its average covers a full day, the time of day it was listed would
--- skew the price. While warming up the fair price simply follows the target.
+-- skew the price. While warming up the trend simply follows the target.
 --
 -- One experience's saved state:
---   { price, high, low, fair, noise, prevClose, day, activity,
+--   { price, high, low, trend, surge, usual?, fair, noise, prevClose, day, activity,
 --     hours = { { hour, mean } }, current = { hour, sum, count },
 --     activityByDay = { [day] = activity }, target, listedAt, opensAt,
 --     lastSeenAt, missingSince?, stats }
@@ -47,10 +54,16 @@ RobloxPriceModule.FLUSH_SECONDS = 300 -- how often recent price points are writt
 RobloxPriceModule.RECENT_SECONDS = 900 -- longer than a flush plus a reader's history cache
 RobloxPriceModule.NOISE_SPREAD = 0.025 -- typical distance of the price from its fair price
 RobloxPriceModule.NOISE_TAU = 86400 -- how long the noise takes to fade back, roughly
+RobloxPriceModule.SURGE_RESPONSE = 0.35 -- price change per change in activity, on log scales
+RobloxPriceModule.SURGE_LIMIT = math.log(1.25) -- at most 25% up, or the same down
+RobloxPriceModule.SURGE_TAU = 600 -- how fast the price follows a surge
 
 local DAY = 86400
 local HOUR = 3600
 local WINDOW_HOURS = 7 * 24
+-- Hours kept: the window plus two, so the same time a week before always has
+-- an hour either side to interpolate between
+local KEPT_HOURS = WINDOW_HOURS + 2
 local PRICE_TAU = 12 * HOUR
 local MOMENTUM_DAYS = 7
 local MOMENTUM_MIN, MOMENTUM_MAX = 0.5, 2
@@ -134,7 +147,7 @@ end
 
 -- Adds a players-online sample to the hourly buckets: `current` gathers
 -- this hour's samples, and each finished hour keeps just its mean. Hours
--- older than the window drop off. Returns new tables.
+-- older than KEPT_HOURS drop off. Returns new tables.
 function RobloxPriceModule.addSample(hours, current, playing: number, now: number)
 	local hour = now // HOUR
 	local newHours = table.clone(hours or {})
@@ -152,21 +165,25 @@ function RobloxPriceModule.addSample(hours, current, playing: number, now: numbe
 	newCurrent.sum += playing
 	newCurrent.count += 1
 
-	while newHours[1] and newHours[1][1] <= hour - WINDOW_HOURS do
+	while newHours[1] and newHours[1][1] <= hour - KEPT_HOURS do
 		table.remove(newHours, 1)
 	end
 
 	return newHours, newCurrent
 end
 
--- Players online over the window: the mean of the hourly means, so an hour
--- with more samples counts no more than one with fewer
+-- Players online over the window (this hour and the WINDOW_HOURS - 1 before
+-- it): the mean of the hourly means, so an hour with more samples counts no
+-- more than one with fewer
 function RobloxPriceModule.activityFrom(hours, current): number
 	local total, count = 0, 0
+	local oldest = if current then current.hour - WINDOW_HOURS + 1 else -math.huge
 
 	for _, entry in ipairs(hours) do
-		total += entry[2]
-		count += 1
+		if entry[1] >= oldest then
+			total += entry[2]
+			count += 1
+		end
 	end
 
 	if current and current.count > 0 then
@@ -175,6 +192,72 @@ function RobloxPriceModule.activityFrom(hours, current): number
 	end
 
 	return if count > 0 then total / count else 0
+end
+
+local function hourlyMean(hours, hour: number): number?
+	for _, entry in ipairs(hours) do
+		if entry[1] == hour then
+			return entry[2]
+		end
+	end
+
+	return nil
+end
+
+-- Players online at `time` by the hourly means, interpolated between the
+-- middles of the hours either side, so a climb within an hour isn't read as
+-- a surprise; nil without either hour
+local function playingAt(hours, time: number): number?
+	local position = (time - HOUR / 2) / HOUR
+	local before = position // 1
+	local weight = position - before
+	local first = hourlyMean(hours, before)
+	local second = hourlyMean(hours, before + 1)
+
+	if first and second then
+		return first + (second - first) * weight
+	end
+
+	return first or second
+end
+
+local function isWeekend(time: number): boolean
+	local weekday = os.date("!%w", time)
+
+	return weekday == "0" or weekday == "6"
+end
+
+-- The players usually online at `now`: the same time a week before. Until a
+-- week is kept, the same time the day before, unless one of the two days is
+-- a weekend and the other isn't, when there's nothing like to compare with.
+function RobloxPriceModule.usualPlaying(hours, now: number): number?
+	local weekBefore = playingAt(hours, now - 7 * DAY)
+
+	if weekBefore then
+		return weekBefore
+	end
+
+	if isWeekend(now) ~= isWeekend(now - DAY) then
+		return nil
+	end
+
+	return playingAt(hours, now - DAY)
+end
+
+-- Where the surge heads (on a log scale) for `playing` players online
+-- against `usual`: 0 without a usual to compare with
+function RobloxPriceModule.surgeTarget(playing: number, usual: number?): number
+	if not usual or usual <= 0 then
+		return 0
+	end
+
+	local change = math.log(math.max(playing, 1) / usual)
+
+	return math.clamp(
+		RobloxPriceModule.SURGE_RESPONSE * change,
+		-RobloxPriceModule.SURGE_LIMIT,
+		RobloxPriceModule.SURGE_LIMIT
+	)
 end
 
 -- A standard normal number from two uniform ones in [0, 1) (Box-Muller)
@@ -206,12 +289,8 @@ function RobloxPriceModule.tick(state, stats, now: number, random: (() -> number
 	local today = RobloxPriceModule.dayKey(now)
 	local isListing = not state or not state.hours
 	local prior = if isListing then nil else state
-	local hours, current = RobloxPriceModule.addSample(
-		prior and prior.hours,
-		prior and prior.current,
-		math.max(stats.playing or 0, 0),
-		now
-	)
+	local playing = math.max(stats.playing or 0, 0)
+	local hours, current = RobloxPriceModule.addSample(prior and prior.hours, prior and prior.current, playing, now)
 	local activity = RobloxPriceModule.activityFrom(hours, current)
 	local activityByDay = table.clone(prior and prior.activityByDay or {})
 
@@ -239,16 +318,27 @@ function RobloxPriceModule.tick(state, stats, now: number, random: (() -> number
 	)
 	local opensAt = if prior then prior.opensAt else now + RobloxPriceModule.WARMUP_SECONDS
 	local elapsed = if prior then math.max(now - prior.lastSeenAt, 0) else 0
-	-- States saved before the noise have only a price, which was the fair price
-	local priorFair = prior and (prior.fair or prior.price)
-	local fair
+	-- States saved before the surge have only a fair price, and before the
+	-- noise only a price; either was the trend
+	local priorTrend = prior and (prior.trend or prior.fair or prior.price)
+	local priorFair = prior and priorTrend * math.exp(prior.surge or 0)
+	local trend
 
 	if not prior or now < opensAt then
 		-- Warming up: no trades yet, so the price can follow the target freely
-		fair = target
+		trend = target
 	else
-		fair = RobloxPriceModule.step(priorFair, target, elapsed)
+		trend = RobloxPriceModule.step(priorTrend, target, elapsed)
 	end
+
+	-- The surge closes in on where live activity puts it over SURGE_TAU
+	local usual = RobloxPriceModule.usualPlaying(hours, now)
+	local surge = prior and prior.surge or 0
+	local follow = 1 - math.exp(-elapsed / RobloxPriceModule.SURGE_TAU)
+
+	surge += (RobloxPriceModule.surgeTarget(playing, usual) - surge) * follow
+
+	local fair = trend * math.exp(surge)
 
 	-- The path since the last tick: the fair price moves evenly, the noise in
 	-- sub-steps, and the range they cover is this tick's high and low
@@ -293,6 +383,9 @@ function RobloxPriceModule.tick(state, stats, now: number, random: (() -> number
 		price = price,
 		high = high,
 		low = low,
+		trend = trend,
+		surge = surge,
+		usual = usual and math.round(usual),
 		fair = fair,
 		noise = noise,
 		prevClose = prevClose,
@@ -426,7 +519,8 @@ end
 
 -- What every server reads: the market without the averaging internals,
 -- small enough to read often. Each experience keeps { price, prevClose,
--- target, activity, listedAt, opensAt, delisted, delistedAt, stats, recent }.
+-- target, activity, usual, listedAt, opensAt, delisted, delistedAt, stats,
+-- recent }.
 function RobloxPriceModule.publicView(market)
 	local experiences = {}
 
@@ -436,6 +530,7 @@ function RobloxPriceModule.publicView(market)
 			prevClose = roundCents(experience.prevClose),
 			target = experience.target,
 			activity = math.round(experience.activity or 0),
+			usual = experience.usual,
 			listedAt = experience.listedAt,
 			opensAt = experience.opensAt,
 			delisted = experience.delisted,

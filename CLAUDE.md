@@ -182,10 +182,12 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
     market in "state" (only the ticking server reads it) and publishes its small `publicView` to "prices", which
     every server reads (cached 20 s), so prices agree. "prices" carries each experience's last 15 minutes of
     points; the `history:<ticker>` keys get them in five-minute batches, and charts merge the two. The price
-    follows players online averaged over 7 days hour by hour (so day-night and weekend cycles cancel), and the
-    traded price wanders around that smooth "fair" price with random noise (about 2.5%, fading over a day),
-    walked in 1-second steps so each minute's point has a high and low and candles get wicks; a new
-    listing warms up for 24 h before it trades (`getClosedReason`), its forming price still charted. State keeps
+    trend follows players online averaged over 7 days hour by hour (so day-night and weekend cycles cancel); a
+    surge moves it within minutes when players online now differ from the usual for this hour of the week (the
+    same time a week before; ±25% at most, `usualPlaying`), so real activity makes it fast-paced; and the
+    traded price wanders around that "fair" price (trend × surge) with random noise (about 2.5%, fading over a
+    day), walked in 1-second steps so each minute's point has a high and low and candles get wicks; a new listing
+    warms up for 24 h before it trades (`getClosedReason`), its forming price still charted. State keeps
     exact prices — a minute's move can be under a cent — and only what players see is rounded. Prices move only
     while some server runs. `MarketDataModule` hands Roblox tickers' quotes and candles to it (`setRobloxProvider`)
     and answers their research routes "not available". Delisted experiences settle in `SettlementService`.

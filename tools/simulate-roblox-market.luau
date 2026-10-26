@@ -12,8 +12,11 @@
 --   day move the largest change between two daily closes
 --   swing    the average gap between a day's high and low, noise included
 --   minute   the average 1-minute candle's range, wicks included
---   fair     the day swing of the fair price alone - the part that follows
---            a schedule, which a player could farm by buying every dip and
+--   hour     the typical and the largest change over an hour - how fast-paced
+--            it feels
+--   fair     the day swing of the fair price alone (trend and surge, without
+--            the noise) - for a steady game, the part that would follow a
+--            schedule, which a player could farm by buying every dip and
 --            selling every peak (the noise is random, so it can't be)
 
 local process = require("@lune/process")
@@ -27,14 +30,16 @@ local DAYS = 28
 local TICK_SECONDS = tonumber(process.args[1]) or 60
 local SPARK = { "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█" }
 
+local SUNDAY = START - DAY -- a Sunday, 00:00 UTC
+
 -- A typical Roblox day: busiest in the US evening (about 00:00 UTC), quietest
--- twelve hours later, and a little busier at weekends
+-- twelve hours later, and busier over the weekend - smoothly, as real player
+-- counts are
 local function dailyCycle(t: number): number
 	local hour = (t % DAY) / HOUR
-	local weekday = tonumber(os.date("!%w", t))
-	local weekend = (weekday == 0 or weekday == 6) and 1.15 or 1
+	local week = math.cos((t - SUNDAY) / (7 * DAY) * 2 * math.pi)
 
-	return (1 + 0.35 * math.cos(hour / 24 * 2 * math.pi)) * weekend
+	return (1 + 0.35 * math.cos(hour / 24 * 2 * math.pi)) * (1 + 0.075 * week)
 end
 
 -- Players online at `t` for each scenario, around `base`
@@ -63,6 +68,16 @@ local SCENARIOS = {
 			local spike = (day == 10 or day == 11) and 10 or 1
 
 			return base * spike * dailyCycle(t)
+		end,
+	},
+	{
+		name = "Event: an update brings 60% more players for six hours, day 12 from 18:00",
+		base = 40000,
+		playing = function(base, t)
+			local hours = (t - START) / HOUR - (12 * 24 + 18)
+			local event = (hours >= 0 and hours < 6) and 1.6 or 1
+
+			return base * event * dailyCycle(t)
 		end,
 	},
 	{
@@ -121,13 +136,26 @@ local function run(scenario)
 	local fairLow, fairHigh = math.huge, -math.huge
 	local swings, fairSwings = {}, {}
 	local minuteRanges, minuteCount = 0, 0
+	local prices = {} -- every tick's price, for hourly changes
+	local ticksPerHour = HOUR // TICK_SECONDS
+	local hourTotal, hourCount, largestHour = 0, 0, 0
 
 	for t = start, start + DAYS * DAY, TICK_SECONDS do
 		local playing = scenario.playing(scenario.base, t) * (1 + (math.random() - 0.5) * 0.06)
 
 		state = RobloxPriceModule.tick(state, stats(playing, t), t, math.random)
+		table.insert(prices, state.price)
 
 		local isOpen = RobloxPriceModule.isOpen(state, t)
+		local hourAgo = prices[#prices - ticksPerHour]
+
+		if isOpen and hourAgo then
+			local move = math.abs(state.price / hourAgo - 1)
+
+			hourTotal += move
+			hourCount += 1
+			largestHour = math.max(largestHour, move)
+		end
 
 		if isOpen then
 			openPrice = openPrice or state.price
@@ -189,9 +217,11 @@ local function run(scenario)
 	)
 	print(
 		string.format(
-			"  swing %.2f%% · minute %.3f%% · fair swing %.2f%%",
+			"  swing %.2f%% · minute %.3f%% · hour %.2f%% (largest %.1f%%) · fair swing %.2f%%",
 			swingTotal / days * 100,
 			minuteRanges / math.max(minuteCount, 1) * 100,
+			hourTotal / math.max(hourCount, 1) * 100,
+			largestHour * 100,
 			fairSwingTotal / days * 100
 		)
 	)

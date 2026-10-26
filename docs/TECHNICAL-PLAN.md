@@ -657,6 +657,16 @@ Taken at the start of Phase 3 (2026-10-25); Kevin accepted each recommendation:
    predict the next (tested), so the noise can't be scalped. Limit orders catch up against the
    wicks, as they do for stocks' candles. The Charts tab opens on the hourly timeframe, so a market
    only minutes old shows one candle there until 1M is picked.
+9. ✅ A fast-paced feel from real data, after Kevin asked for more movement that still follows the
+   data. More noise would have looked random and, reverting faster, could be scalped, so the speed
+   comes from live activity instead: a surge compares players online now with the usual for this
+   hour of the week (the same time a week before, interpolated between hourly means) and moves the
+   price within about 10 minutes, `0.35 x log(now / usual)`, at most ±25%. It fades as players
+   return to usual, while the 7-day trend still decides where a price settles. Like-for-like
+   comparison means a steady game's daily and weekly cycles make no surge (tested), so nothing
+   follows a schedule. Until a week is kept the usual is the same time yesterday, skipped when one
+   day is a weekend and the other isn't. In the simulator a one-off 60% rush of players lifts the
+   price about 18% within the hour. Quote Details shows "Players vs usual · estimated".
 
 ## Sources
 
