@@ -629,7 +629,10 @@ Taken at the start of Phase 3 (2026-10-25); Kevin accepted each recommendation:
    fixed the Trade header's Buy/Sell and Active Trader refusing crypto on weekends); fills use
    FillPriceModule's existing 15-minute stale rule; holdings group as "Roblox market".
 5. ✅ Research on the Trade screen: "Simulated price" beside the price, and Quote Details showing observed
-   stats, the estimated 24-hour average and the simulated target, each labeled.
+   stats, the estimated 24-hour average and the simulated target, each labeled. After Kevin's review, the
+   ticker row gained a market dropdown: "Roblox market" swaps the ticker box for a game search with icons,
+   prices and players online, so no one types an `RBX-` ticker, and a loaded game gets a banner with its
+   icon, genre, creator, players and the simulated-price note.
 6. ✅ Browsing: a Roblox view in Market overview, every experience by players online, with a "simulated
    prices, not real valuations" note.
 

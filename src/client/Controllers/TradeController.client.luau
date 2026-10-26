@@ -1,6 +1,9 @@
 -- TradeController.client.luau
 --
--- Handles Trade Screen
+-- Handles Trade Screen. The ticker row picks the market first
+-- (MarketPickerModule): real-world tickers are typed, Roblox games are
+-- searched by name; a game also gets a banner under the header
+-- (GameBannerModule).
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -13,6 +16,8 @@ local Theme = require(ReplicatedStorage.Modules.Multi.Theme)
 local Navigation = require(ReplicatedStorage.Modules.Multi.Navigation)
 local OrderTicketModule = require(ReplicatedStorage.Modules.Trade.OrderTicketModule)
 local ThesisPanelModule = require(ReplicatedStorage.Modules.Trade.ThesisPanelModule)
+local MarketPickerModule = require(ReplicatedStorage.Modules.Trade.MarketPickerModule)
+local GameBannerModule = require(ReplicatedStorage.Modules.Trade.GameBannerModule)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -181,6 +186,8 @@ local orderQuantity = 1
 local currentPositionQuantity = 0 -- shares held of currentTicker, for the order ticket's sell presets
 local orderTicket = nil -- created once the functions it calls exist
 local thesisPanel = nil -- created with the order ticket
+local marketPicker = nil -- likewise
+local gameBanner = nil
 
 local selectedContract = nil
 
@@ -192,8 +199,9 @@ local selectedContract = nil
 local ContractIndicator = Instance.new("TextButton")
 
 ContractIndicator.Name = "ContractIndicator"
-ContractIndicator.Size = UDim2.fromScale(0.86, 1)
-ContractIndicator.Position = UDim2.fromScale(0.12, 0)
+-- Right of the market picker's dropdown and search box
+ContractIndicator.Size = UDim2.new(1, -(MarketPickerModule.ROW_WIDTH + 16), 1, 0)
+ContractIndicator.Position = UDim2.fromOffset(MarketPickerModule.ROW_WIDTH + 16, 0)
 ContractIndicator.BackgroundTransparency = 1
 ContractIndicator.Text = ""
 ContractIndicator.TextColor3 = TEXT_PRIMARY
@@ -1358,6 +1366,14 @@ local function loadTicker(rawTicker)
 	currentPrice = marketData.price or 0
 
 	TickerInput.Text = ticker
+	marketPicker:showLoaded(ticker)
+
+	if marketData.assetClass == "roblox" then
+		gameBanner:show(marketData)
+	else
+		gameBanner:hide()
+	end
+
 	updateHeader(marketData)
 	renderQuoteDetails(marketData)
 	switchTab("QuoteDetails")
@@ -1469,9 +1485,9 @@ SellButton.BackgroundColor3 = Theme.Colors.Down
 attachHover(BuyButton, Theme.Colors.Up, Theme.Colors.UpHover)
 attachHover(SellButton, Theme.Colors.Down, Theme.Colors.DownHover)
 
--- Ticker Input
+-- Ticker Input (real-world market; the picker handles Roblox searches)
 TickerInput.FocusLost:Connect(function(enterPressed)
-	if not enterPressed then
+	if not enterPressed or marketPicker:getMarket() == "Roblox" then
 		return
 	end
 
@@ -1514,17 +1530,30 @@ end
 Player:GetAttributeChangedSignal("Balance"):Connect(onBalanceChanged)
 Player:GetAttributeChangedSignal("NetWorth"):Connect(onBalanceChanged)
 
--- Order ticket: a code-built section right under the header, so the
--- Studio-built sections from QuoteDetails down move one slot further
+-- Code-built sections right under the header - a game's banner (hidden for
+-- real-world tickers), then the order ticket - so the Studio-built sections
+-- from QuoteDetails down move two slots further
 for _, section in ipairs(TradeScreen:GetChildren()) do
 	if section:IsA("GuiObject") and section.LayoutOrder >= 2 then
-		section.LayoutOrder += 1
+		section.LayoutOrder += 2
 	end
 end
 
+gameBanner = GameBannerModule.new({ parent = TradeScreen, layoutOrder = 2 })
+
+marketPicker = MarketPickerModule.new({
+	inputRow = InputRow,
+	input = TickerInput,
+	overlayParent = MainBackground,
+	screen = TradeScreen,
+	onSelect = function(ticker)
+		task.spawn(loadTicker, ticker)
+	end,
+})
+
 orderTicket = OrderTicketModule.new({
 	parent = TradeScreen,
-	layoutOrder = 2,
+	layoutOrder = 3,
 	getTicker = function()
 		return currentTicker
 	end,

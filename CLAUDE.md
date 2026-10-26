@@ -209,7 +209,11 @@ into their respective services; plain `.luau` files under `Modules/` are `requir
   - `Terminal/` and `Trade/` subfolders hold per-screen logic pulled out of the client controllers as they
     grow. `Trade/OrderTicketModule` is the Trade screen's Market/Limit preset ticket (one-click presets, the
     house style for order entry); `Trade/ThesisPanelModule` is its Community section (the ticker's watchers,
-    trades and theses, and a thesis composer), after the news. The other files there are still empty placeholders.
+    trades and theses, and a thesis composer), after the news. `Trade/MarketPickerModule` is the ticker row's
+    market dropdown ("Stocks & crypto": type a ticker; "Roblox market": search games by name in a list with
+    icons, prices and players) — players never type `RBX-` tickers — and `Trade/GameBannerModule` the banner
+    a Roblox game gets under the header. Game icons use `rbxthumb://type=GameIcon&id=<universe id>` (a place
+    id fails). The other files there are still empty placeholders.
 
 ### Cross-script state sharing
 
