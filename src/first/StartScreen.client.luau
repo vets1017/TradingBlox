@@ -387,6 +387,8 @@ local Navigation = require(ReplicatedStorage.Modules.Multi.Navigation)
 local Progression = require(ReplicatedStorage.Config.Progression)
 local Economy = require(ReplicatedStorage.Config.Economy)
 
+local GetDailyEvent = ReplicatedStorage:WaitForChild("EventsFolder"):WaitForChild("GetDailyEvent")
+
 local HOW_TO_PLAY = {
 	{
 		title = "Pick something to trade",
@@ -496,14 +498,21 @@ local XPLabel = makeLabel("XP", Card, Theme.Fonts.UI, Theme.TextSize.Caption, Th
 XPLabel.LayoutOrder = 2
 XPLabel.Size = UDim2.new(1, 0, 0, 14)
 
+-- The streak and today's challenges, once ChallengeService answers
+local DailyLabel = makeLabel("Daily", Card, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.TextMuted)
+DailyLabel.LayoutOrder = 3
+DailyLabel.Size = UDim2.new(1, 0, 0, 14)
+DailyLabel.RichText = true
+DailyLabel.Visible = false
+
 local CardDivider = UIKit.makeFrame("Divider", Card)
-CardDivider.LayoutOrder = 3
+CardDivider.LayoutOrder = 4
 CardDivider.Size = UDim2.new(1, 0, 0, 1)
 CardDivider.BackgroundTransparency = 0
 CardDivider.BackgroundColor3 = Theme.Colors.Border
 
 local Worth = UIKit.makeFrame("Worth", Card)
-Worth.LayoutOrder = 4
+Worth.LayoutOrder = 5
 Worth.Size = UDim2.new(1, 0, 0, 44)
 
 local WorthCaption = makeLabel("Caption", Worth, Theme.Fonts.UI, Theme.TextSize.Caption, Theme.Colors.TextMuted)
@@ -716,9 +725,13 @@ local function dismiss(tabName)
 	lift:Play()
 end
 
-StartButton.MouseButton1Click:Connect(function()
-	dismiss(nil)
-end)
+-- A new player goes straight to the Trade tab, where picks and a coached
+-- first trade wait; everyone else to the Dashboard
+local function start()
+	dismiss((Player:GetAttribute("XP") or 0) == 0 and "Trade" or nil)
+end
+
+StartButton.MouseButton1Click:Connect(start)
 
 LeaderboardsButton.MouseButton1Click:Connect(function()
 	dismiss("Leaderboards")
@@ -745,7 +758,7 @@ table.insert(
 		if HowToBlock.Visible and (isEnter or input.KeyCode == Enum.KeyCode.Escape) then
 			showHowToPlay(false)
 		elseif MenuBlock.Visible and isEnter then
-			dismiss(nil)
+			start()
 		end
 	end)
 )
@@ -756,6 +769,34 @@ end
 
 updateCard()
 updateMarketLine()
+
+task.spawn(function()
+	local success, daily = pcall(GetDailyEvent.InvokeServer, GetDailyEvent)
+
+	if not success or not daily or isDismissed then
+		return
+	end
+
+	local done = 0
+
+	for _, challenge in ipairs(daily.challenges) do
+		if challenge.done then
+			done += 1
+		end
+	end
+
+	local challenges = string.format("%d/%d daily challenges done", done, #daily.challenges)
+
+	DailyLabel.Text = daily.streak > 0
+			and string.format(
+				'🔥 <font color="#%s">%d-day streak</font> · %s',
+				Theme.Colors.Text:ToHex(),
+				daily.streak,
+				challenges
+			)
+		or ("🎯 " .. challenges .. " · finish one to start a streak")
+	DailyLabel.Visible = true
+end)
 
 task.spawn(function()
 	while not isDismissed do

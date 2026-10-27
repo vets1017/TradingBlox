@@ -37,12 +37,14 @@ local EVENTS = {
 	"MarkInboxSeenEvent",
 	"GetTrendingEvent",
 	"GetRobloxMarketEvent",
+	"GetDailyEvent",
 }
 
 -- Server-to-client pushes (RemoteEvents rather than RemoteFunctions)
 local PUSH_EVENTS = {
 	"OrderUpdateEvent", -- a limit order filled or was cancelled while the player wasn't waiting on it
 	"NotificationEvent", -- a new notification or unread count; see NotificationService
+	"RewardEvent", -- a fill, challenge, streak or milestone to celebrate, or new daily challenges; see ChallengeService
 }
 
 local function getOrCreateFolder(parent, name)

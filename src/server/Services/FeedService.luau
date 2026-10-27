@@ -19,6 +19,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local Social = require(ReplicatedStorage.Config.Social)
 local PlayerDataService = require(ServerScriptService.Services.PlayerDataService)
+local ChallengeService = require(ServerScriptService.Services.ChallengeService)
 local ProgressionService = require(ServerScriptService.Services.ProgressionService)
 local OrderEvents = require(ServerScriptService.Services.OrderEvents)
 local MuteService = require(ServerScriptService.Services.MuteService)
@@ -282,6 +283,11 @@ function FeedService.react(player, itemId: string, reaction: string?)
 		warn("[FeedService] A reaction failed for " .. player.Name .. ": " .. tostring(result))
 
 		return { success = false, message = "Couldn't save that. Try again in a moment." }
+	end
+
+	-- Keyed by post, so taking a reaction back and giving it again counts once
+	if result.success and reaction ~= nil then
+		ChallengeService.record(player, { kind = "reaction", key = itemId })
 	end
 
 	return result

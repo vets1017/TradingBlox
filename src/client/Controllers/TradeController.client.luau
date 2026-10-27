@@ -18,6 +18,7 @@ local OrderTicketModule = require(ReplicatedStorage.Modules.Trade.OrderTicketMod
 local ThesisPanelModule = require(ReplicatedStorage.Modules.Trade.ThesisPanelModule)
 local MarketPickerModule = require(ReplicatedStorage.Modules.Trade.MarketPickerModule)
 local GameBannerModule = require(ReplicatedStorage.Modules.Trade.GameBannerModule)
+local StarterPicksModule = require(ReplicatedStorage.Modules.Trade.StarterPicksModule)
 local UIKit = require(ReplicatedStorage.UI.UIKit)
 
 local Player = Players.LocalPlayer
@@ -106,19 +107,20 @@ local TAB_HEADER_HEIGHT = 30
 local OPTION_CHAIN_HEIGHT = 300
 local NEWS_MAX_HEIGHT = 300 -- about five headlines; more scroll inside
 
--- Top to bottom: what it is, how it's moving, trade it, what you hold, the
--- research, then the community
+-- Top to bottom: what it is (or, before anything's loaded, what to pick),
+-- how it's moving, trade it, what you hold, the research, then the community
 local SECTION_ORDER = {
 	InputRow = 1,
 	HeaderRow = 2,
-	GameBanner = 3,
-	PriceChart = 4,
-	OrderTicket = 5,
-	PositionsTable = 6,
-	QuoteDetails = 7,
-	OptionChain = 8,
-	NewsFeed = 9,
-	Theses = 10,
+	StarterPicks = 3,
+	GameBanner = 4,
+	PriceChart = 5,
+	OrderTicket = 6,
+	PositionsTable = 7,
+	QuoteDetails = 8,
+	OptionChain = 9,
+	NewsFeed = 10,
+	Theses = 11,
 }
 
 local QUOTE_FIELDS = {
@@ -229,6 +231,7 @@ local orderTicket = nil -- created once the functions it calls exist
 local thesisPanel = nil -- created with the order ticket
 local marketPicker = nil -- likewise
 local gameBanner = nil
+local starterPicks = nil
 
 local selectedContract = nil
 
@@ -1531,6 +1534,18 @@ local function showError(message)
 	CompanyLabel.Text = message or "Ticker not found"
 end
 
+-- Until a player's first trade, the order ticket coaches them through it
+local function updateCoaching()
+	if not orderTicket then
+		return -- the attribute can change while the screen is still being built
+	end
+
+	local progress = Player:GetAttribute("TutorialProgress")
+	local hasTraded = progress ~= nil and string.find("," .. progress .. ",", ",FirstTrade,", 1, true) ~= nil
+
+	orderTicket:setCoaching(progress ~= nil and currentTicker ~= "" and not hasTraded)
+end
+
 -- Main Load
 local function loadTicker(rawTicker)
 	local ticker = string.upper((string.gsub(rawTicker, "%s+", "")))
@@ -1591,6 +1606,7 @@ local function loadTicker(rawTicker)
 
 	TickerInput.Text = ticker
 	marketPicker:showLoaded(ticker)
+	starterPicks:hide()
 
 	if marketData.assetClass == "roblox" then
 		gameBanner:show(marketData)
@@ -1624,6 +1640,7 @@ local function loadTicker(rawTicker)
 
 	isFetchingData = false
 	orderTicket:update() -- the new ticker and price
+	updateCoaching()
 end
 
 -- Polling
@@ -1751,6 +1768,9 @@ local function onBalanceChanged()
 end
 
 Player:GetAttributeChangedSignal("Balance"):Connect(onBalanceChanged)
+Player:GetAttributeChangedSignal("TutorialProgress"):Connect(function()
+	updateCoaching()
+end)
 Player:GetAttributeChangedSignal("NetWorth"):Connect(onBalanceChanged)
 
 -- Screen and sections
@@ -1878,6 +1898,14 @@ end
 NewsLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(fitNews)
 
 gameBanner = GameBannerModule.new({ parent = TradeScreen, layoutOrder = SECTION_ORDER.GameBanner })
+
+starterPicks = StarterPicksModule.new({
+	parent = TradeScreen,
+	layoutOrder = SECTION_ORDER.StarterPicks,
+	onSelect = function(ticker)
+		task.spawn(loadTicker, ticker)
+	end,
+})
 
 marketPicker = MarketPickerModule.new({
 	inputRow = InputRow,

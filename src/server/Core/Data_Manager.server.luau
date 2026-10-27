@@ -7,6 +7,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local PlayerDataService = require(ServerScriptService.Services.PlayerDataService)
 local ProgressionService = require(ServerScriptService.Services.ProgressionService)
+local ChallengeService = require(ServerScriptService.Services.ChallengeService)
 local LeaderboardService = require(ServerScriptService.Services.LeaderboardService)
 local PublicProfileService = require(ServerScriptService.Services.PublicProfileService)
 local SocialService = require(ServerScriptService.Services.SocialService)
@@ -27,6 +28,7 @@ end)
 
 -- Listeners first, so none of them misses a player who loads straight away
 ProgressionService.start()
+ChallengeService.start()
 LeaderboardService.start()
 PublicProfileService.start()
 SocialService.start()

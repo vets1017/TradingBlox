@@ -8,11 +8,15 @@
 -- market is closed and fill once it opens and the price gets there
 -- (OrderRules).
 --
+-- A new player is coached through their first trade (setCoaching): the
+-- first Buy preset pulses and the status line says to tap it.
+--
 -- Client-only. TradeController owns the ticker, price and position and
 -- calls update() when any of them change.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
 
 local Theme = require(ReplicatedStorage.Modules.Multi.Theme)
 local NumberModule = require(ReplicatedStorage.Modules.Multi.NumberModule)
@@ -52,6 +56,10 @@ local function getMode(id)
 end
 
 local NO_TICKER_HINT = "Load a ticker to trade"
+local COACH_HINT = "Tap $100 to buy your first shares. You can sell any time."
+local COACH_CLOSED_HINT = "The stock market is closed right now. Crypto and Roblox games trade around the clock."
+local COACH_PULSE = TweenInfo.new(0.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true)
+local COACH_STROKE = 3
 local CONTROL_HEIGHT = 28
 local PILL_PADDING = 10
 local LIMIT_BOX_WIDTH = 90
@@ -129,6 +137,8 @@ function OrderTicketModule.new(options)
 	self.mode = "Market"
 	self.isBusy = false
 	self.pricesTicker = nil -- the ticker the price boxes were last filled in for
+	self.isCoaching = false
+	self.coachTween = nil
 
 	local frame = UIKit.makePanel("OrderTicket", options.parent)
 	frame.LayoutOrder = options.layoutOrder
@@ -367,11 +377,53 @@ function OrderTicketModule:update()
 		pill.stroke.Color = pill.button.TextColor3
 	end
 
+	-- A hint only replaces another hint, never an order's result
+	local isShowingHint = self.status.Text == ""
+		or self.status.Text == NO_TICKER_HINT
+		or self.status.Text == COACH_HINT
+		or self.status.Text == COACH_CLOSED_HINT
+
 	if not hasTicker then
 		self:setStatus(NO_TICKER_HINT)
-	elseif self.status.Text == NO_TICKER_HINT then
+	elseif self.isCoaching and isShowingHint then
+		if
+			self.mode ~= "Market"
+			or Instruments.tradesAroundTheClock(ticker)
+			or MarketHoursModule.getMarketStatus(os.time())
+		then
+			self:setStatus(COACH_HINT, Theme.Colors.Accent)
+		else
+			self:setStatus(COACH_CLOSED_HINT)
+		end
+	elseif isShowingHint then
 		self:setStatus("")
 	end
+end
+
+-- Turns the first-trade coaching on or off: the first Buy preset's outline
+-- pulses and the status says what to do
+function OrderTicketModule:setCoaching(isOn: boolean)
+	if self.isCoaching == isOn then
+		return
+	end
+
+	self.isCoaching = isOn
+
+	local stroke = self.buyPills[1].stroke
+
+	if self.coachTween then
+		self.coachTween:Cancel()
+		self.coachTween = nil
+	end
+
+	stroke.Thickness = 1
+
+	if isOn then
+		self.coachTween = TweenService:Create(stroke, COACH_PULSE, { Thickness = COACH_STROKE })
+		self.coachTween:Play()
+	end
+
+	self:update()
 end
 
 -- Market orders fill at the live price, so they need the market open

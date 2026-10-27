@@ -2,10 +2,12 @@
 --
 -- Owns the full-screen terminal shell around the screens: sizes the window
 -- to the whole viewport, lays the nav bar out around Roblox's own top-bar
--- buttons, adds the wordmark, inbox bell, level and balance pills and bottom
--- status bar, shows toasts, and stamps the theme onto all of TerminalGui
--- once at startup. Switching tabs stays in TerminalController; the inbox
--- itself (badge and list) is InboxController's.
+-- buttons, adds the wordmark, daily-challenges pill, inbox bell, level and
+-- balance pills and bottom status bar, shows toasts, and stamps the theme
+-- onto all of TerminalGui once at startup. Switching tabs stays in
+-- TerminalController; the inbox itself (badge and list) is InboxController's,
+-- the daily challenges (the pill's text and its panel) DailyController's, and
+-- level-ups RewardController's.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -48,6 +50,9 @@ local TOAST_WIDTH = 420
 local TOAST_HEIGHT = 56
 local TOAST_SECONDS = 6
 local TOAST_FADE = TweenInfo.new(0.3)
+local BALANCE_COUNT = TweenInfo.new(0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+local BALANCE_PULSE = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, true)
+local BALANCE_PULSE_SCALE = 1.08
 
 -- The terminal is the whole game UI; these default HUD pieces would sit on
 -- top of it once it fills the screen. Chat stays available.
@@ -97,6 +102,10 @@ local BalanceValue = makeTextLabel("BalanceValue", "Number", BalancePill)
 BalanceValue.Size = UDim2.fromScale(1, 1)
 BalanceValue.TextXAlignment = Enum.TextXAlignment.Center
 
+-- Pops a little whenever the balance changes
+local BalancePulse = Instance.new("UIScale")
+BalancePulse.Parent = BalancePill
+
 local LevelPill = Instance.new("Frame")
 LevelPill.Name = "LevelPill"
 LevelPill.AnchorPoint = Vector2.new(1, 0.5)
@@ -121,6 +130,20 @@ InboxButton.TextSize = Theme.TextSize.Body
 InboxButton.Text = "🔔"
 InboxButton:SetAttribute("ThemeRole", "Pill")
 InboxButton.Parent = TopBar
+
+-- The day's challenges and streak; DailyController sets the text ("🔥 3 · 1/3")
+-- and opens the challenges under it
+local DailyButton = Instance.new("TextButton")
+DailyButton.Name = "DailyButton"
+DailyButton.AnchorPoint = Vector2.new(1, 0.5)
+DailyButton.Size = UDim2.fromOffset(INBOX_BUTTON_WIDTH, BALANCE_PILL_HEIGHT)
+DailyButton.BorderSizePixel = 0
+DailyButton.AutoButtonColor = false
+DailyButton.FontFace = Theme.Fonts.UISemibold
+DailyButton.TextSize = Theme.TextSize.Body
+DailyButton.Text = "🎯"
+DailyButton:SetAttribute("ThemeRole", "Pill")
+DailyButton.Parent = TopBar
 
 -- Untagged on purpose: InboxController shows and fills it
 local InboxBadge = Instance.new("TextLabel")
@@ -277,7 +300,9 @@ local function layoutShell()
 	local levelPillWidth = LevelValue.TextBounds.X + BALANCE_PILL_PADDING * 2
 	local levelPillRight = rightEdge - pillWidth - PILL_GAP
 	local inboxRight = levelPillRight - levelPillWidth - PILL_GAP
-	local tabsRight = inboxRight - INBOX_BUTTON_WIDTH - SECTION_GAP
+	local dailyRight = inboxRight - INBOX_BUTTON_WIDTH - PILL_GAP
+	local dailyWidth = math.max(DailyButton.TextBounds.X + BALANCE_PILL_PADDING * 2, INBOX_BUTTON_WIDTH)
+	local tabsRight = dailyRight - dailyWidth - SECTION_GAP
 
 	-- On a narrow window the wordmark gives up its space before the tabs do
 	local tabsLeftWithWordmark = leftEdge + WORDMARK_WIDTH + SECTION_GAP
@@ -294,6 +319,8 @@ local function layoutShell()
 	LevelPill.Size = UDim2.fromOffset(levelPillWidth, BALANCE_PILL_HEIGHT)
 	LevelPill.Position = UDim2.new(0, levelPillRight, 0.5, 0)
 	InboxButton.Position = UDim2.new(0, inboxRight, 0.5, 0)
+	DailyButton.Size = UDim2.fromOffset(dailyWidth, BALANCE_PILL_HEIGHT)
+	DailyButton.Position = UDim2.new(0, dailyRight, 0.5, 0)
 	Toast.Position = UDim2.new(0.5, 0, 0, navHeight + 12)
 
 	ScreenContainer.Position = UDim2.fromOffset(0, navHeight)
@@ -307,15 +334,33 @@ local function formatStat(value)
 	return value and NumberModule.format(value) or "—"
 end
 
+-- The pill counts up or down to a new balance rather than jumping
+local shownBalance = Instance.new("NumberValue")
+local hasShownBalance = false
+
+shownBalance.Changed:Connect(function(value)
+	BalanceValue.Text = NumberModule.format(value)
+end)
+
 local function updateBalance()
-	BalanceValue.Text = formatStat(Player:GetAttribute("Balance"))
+	local balance = Player:GetAttribute("Balance")
+
+	if not balance or not hasShownBalance then
+		hasShownBalance = balance ~= nil
+		shownBalance.Value = balance or 0
+		BalanceValue.Text = formatStat(balance)
+
+		return
+	end
+
+	TweenService:Create(shownBalance, BALANCE_COUNT, { Value = balance }):Play()
+	TweenService:Create(BalancePulse, BALANCE_PULSE, { Scale = BALANCE_PULSE_SCALE }):Play()
 end
 
 local function updateNetWorth()
 	NetWorthValue.Text = formatStat(Player:GetAttribute("NetWorth"))
 end
 
-local shownLevel = nil -- nil until the server first sets Level, so loading in isn't announced
 local toastVersion = 0
 
 local function showToast(title, body)
@@ -337,25 +382,11 @@ local function showToast(title, body)
 	end)
 end
 
-local function showLevelToast(level)
-	local unlocks = Progression.getUnlocksAt(level)
-
-	showToast(
-		string.format("Level %d · %s", level, Progression.LEVELS[level].name),
-		#unlocks > 0 and ("Unlocked " .. table.concat(unlocks, ", ")) or "New level reached"
-	)
-end
-
+-- A new level is celebrated by RewardController
 local function updateLevel()
 	local level = Player:GetAttribute("Level")
 
 	LevelValue.Text = level and string.format("Lv %d · %s", level, Progression.LEVELS[level].name) or "—"
-
-	if level and shownLevel and level > shownLevel then
-		showLevelToast(level)
-	end
-
-	shownLevel = level
 end
 
 local function updateMarketStatus()
@@ -374,6 +405,7 @@ MainBackground:GetPropertyChangedSignal("AbsoluteSize"):Connect(layoutShell)
 TabLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(layoutShell)
 BalanceValue:GetPropertyChangedSignal("TextBounds"):Connect(layoutShell)
 LevelValue:GetPropertyChangedSignal("TextBounds"):Connect(layoutShell)
+DailyButton:GetPropertyChangedSignal("TextBounds"):Connect(layoutShell)
 Player:GetAttributeChangedSignal("Balance"):Connect(updateBalance)
 Player:GetAttributeChangedSignal("NetWorth"):Connect(updateNetWorth)
 Player:GetAttributeChangedSignal("Level"):Connect(updateLevel)

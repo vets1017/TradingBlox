@@ -71,7 +71,10 @@ to compile ("Out of local registers") and every tab stops working, and selene do
   latest candle's O/H/L/C, change and volume; Symbol Info falls back to chart data when quote details are
   unavailable, and shows a Roblox game's own labeled fields); `DashboardController` for the Dashboard's widgets
   (account info, watchlist, orders, performance, market overview with Trending and Roblox views, and Social — followed
-  players' posts, theses ranked by reactions, top traders), built in code inside the Studio widget frames; `TutorialController` for the "Getting started" checklist card; `TradeController` for the Trade screen; `PortfolioController` for the Portfolio screen, which it builds
+  players' posts, theses ranked by reactions, top traders), built in code inside the Studio widget frames; `TutorialController` for the "Getting started" checklist card; `RewardController` for celebrations (a pop with a
+  sound for every fill, finished daily challenge, streak day and milestone, confetti for wins, and a level-up screen,
+  in its own `RewardGui`); `DailyController` for the nav bar's daily-challenges pill and the panel it opens;
+  `TradeController` for the Trade screen; `PortfolioController` for the Portfolio screen, which it builds
   entirely in code inside the empty Studio `PortfolioScreen` frame; `SocialController` for the Social tab (the feed,
   All or Following, polled every 5 s while open, with reaction chips, plus a Trending view; it also sends the server the player's
   Roblox block list) and `LeaderboardController` for the Leaderboards
@@ -90,7 +93,7 @@ to compile ("Out of local registers") and every tab stops working, and selene do
     `FollowPlayerEvent`, `SetShareTradesEvent`, `GetFeedEvent`,
     `PublishThesisEvent`, `DeleteThesisEvent`, `GetTickerThesesEvent`, `MutePlayerEvent`, `SetRobloxBlocksEvent`,
     `ReportThesisEvent`, `ReactToFeedItemEvent`, `GetInboxEvent`, `MarkInboxSeenEvent`, `GetTrendingEvent`,
-    `GetRobloxMarketEvent`, plus watchlist and research remotes; pushes go through RemoteEvents `OrderUpdateEvent` and `NotificationEvent`). This must run before other server scripts wire up
+    `GetRobloxMarketEvent`, plus watchlist and research remotes; pushes go through RemoteEvents `OrderUpdateEvent`, `NotificationEvent` and `RewardEvent`). This must run before other server scripts wire up
     `OnServerInvoke` handlers.
   - `API_Manager.server.luau` wires the market-data remotes. `Modules/MarketDataModule.luau` is the sole
     bridge to the external HTTP backend (`SERVER_URL`, a Render-hosted service): ticker validation, a
@@ -108,7 +111,7 @@ to compile ("Out of local registers") and every tab stops working, and selene do
     backend (e.g. `http://localhost:3000` while developing `~/Documents/VS/StockDataFetcher`; Studio can reach
     localhost). Remove it after testing; live servers always use the deployed backend.
   - `Data_Manager.server.luau` is the bootstrap for the player services: it starts the services that listen
-    for players (`ProgressionService`, `LeaderboardService`, `PublicProfileService`, `SocialService`, `FeedService`,
+    for players (`ProgressionService`, `ChallengeService`, `LeaderboardService`, `PublicProfileService`, `SocialService`, `FeedService`,
     `ThesisService`, `NotificationService`, `DiscoveryService`, `RobloxMarketService`, `OrderService`,
     `SettlementService`) before `PlayerDataService`, so none misses a player who loads straight away.
   - `API_Manager`'s option and research remotes check level unlocks; a locked request gets
@@ -213,6 +216,13 @@ to compile ("Out of local registers") and every tab stops working, and selene do
     (`TickerTrades_<UTC day>`, batched and written once a minute per server). `getTickerStats` (cached 60 s) and
     `getTrending` (most traded today+yesterday and most watched; cached 120 s because ranked reads have a budget of
     only 5 + 2 per player a minute, shared with the leaderboards). Pure rules: `Modules/DiscoveryModule.luau`.
+  - `ChallengeService` — daily challenges and streaks (`Config/Challenges`), in `playerData.Daily`: each UTC day
+    every player gets 3 challenges picked for them (seeded by day and user; only ones their level, and NYSE's
+    calendar, allow). They advance on fills (`OrderEvents`), published theses and feed reactions (`ThesisService` and
+    `FeedService` call `record`); finishing one earns XP, and the day's first extends the streak for a bonus. It also
+    pushes every moment worth celebrating to the player's client through `RewardEvent` (`fill`, `challenge`, `streak`,
+    `milestone`, and `daily` with the day's state) and answers `GetDailyEvent`. Pure rules:
+    `Modules/ChallengeModule.luau`.
   - `Core/LeaderboardSystem.server.luau` wires `GetLeaderboardEvent` / `GetPublicProfileEvent` (which adds the
     follower count, whether the caller follows, and the player's latest theses); `Core/SocialSystem.server.luau`
     wires `FollowPlayerEvent`, `SetShareTradesEvent`, `GetFeedEvent` and the thesis remotes.
@@ -223,10 +233,12 @@ to compile ("Out of local registers") and every tab stops working, and selene do
   `Economy` (starting cash), `Social` (follow cap, recent trades per profile, feed views and milestone wording,
   thesis directions, horizons and limits, reactions, safety limits), `RobloxMarket` (the listed experiences and
   the observed/simulated wording), `Instruments` (a ticker's asset class: `roblox`, `crypto` or `security`, and
-  whether it trades 24/7 — use it for any market-hours check).
+  whether it trades 24/7 — use it for any market-hours check), `Challenges` (the daily challenge pool, XP and the
+  streak bonus).
 - **Shared UI (`src/shared/UI/`)** — the in-house kit for UI built in code: `UIKit` (frame/label/panel/pill/
-  dot/avatar builders on Theme tokens), `FeedText` (how feed items read, shared by the Social tab and Dashboard) and `LineChart` (the gradient line + fill used by the Portfolio chart and
-  profile panel). New code-built screens should use these instead of copying builders.
+  dot/avatar builders on Theme tokens), `FeedText` (how feed items read, shared by the Social tab and Dashboard) `LineChart` (the gradient line + fill used by the Portfolio chart and
+  profile panel), `Sounds` (`Sounds.play("Fill")`: Roblox's own UI sounds, which stay public) and `Confetti`. New
+  code-built screens should use these instead of copying builders.
 - **Shared (`src/shared/Modules/`)**:
   - `Multi/` — cross-boundary utilities used by both client and server-side logic conceptually:
     `ChartRenderer` (pure UI-building candlestick/grid/axis renderer, takes a table of UI element refs +
@@ -240,7 +252,9 @@ to compile ("Out of local registers") and every tab stops working, and selene do
     tab — the only link between controllers, which otherwise can't reach each other's locals).
   - `Terminal/` and `Trade/` subfolders hold per-screen logic pulled out of the client controllers as they
     grow. `Trade/OrderTicketModule` is the Trade screen's Market/Limit preset ticket (one-click presets, the
-    house style for order entry); `Trade/ThesisPanelModule` is its Community section (the ticker's watchers,
+    house style for order entry; it coaches a new player's first trade by pulsing the $100 preset);
+    `Trade/StarterPicksModule` is the "Popular right now" row shown until a ticker loads (trending, then defaults;
+    24/7 assets first while NYSE is closed); `Trade/ThesisPanelModule` is its Community section (the ticker's watchers,
     trades and theses, and a thesis composer), after the news. `Trade/MarketPickerModule` is the ticker row's
     market dropdown on the Trade and Charts screens ("Stocks & crypto": type a ticker; "Roblox market": search
     games by name in a list with icons, prices and players) — players never type `RBX-` tickers — and

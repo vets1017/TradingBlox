@@ -47,6 +47,13 @@ local TEMPLATE = {
 		FillXPToday = 0,
 		TutorialSteps = {}, -- [stepId] = true for the steps the client reports
 	},
+	Daily = { -- daily challenges and their streak; see ChallengeService
+		Day = 0, -- the UTC day number the challenges are for
+		Challenges = {}, -- { { id, progress, done, seen } }
+		StreakDays = 0, -- the streak's length when it was last extended
+		StreakDay = 0, -- the UTC day it was last extended
+		BestStreak = 0,
+	},
 	Orders = {}, -- [orderId] = open limit order; see OrderService
 	OrderSequence = 0, -- numbers the next order id
 	Leaderboard = { -- the current week and month; see LeaderboardService

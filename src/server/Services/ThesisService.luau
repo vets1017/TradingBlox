@@ -23,6 +23,7 @@ local TextService = game:GetService("TextService")
 
 local Social = require(ReplicatedStorage.Config.Social)
 local PlayerDataService = require(ServerScriptService.Services.PlayerDataService)
+local ChallengeService = require(ServerScriptService.Services.ChallengeService)
 local PublicProfileService = require(ServerScriptService.Services.PublicProfileService)
 local FeedService = require(ServerScriptService.Services.FeedService)
 local MuteService = require(ServerScriptService.Services.MuteService)
@@ -281,7 +282,13 @@ function ThesisService.publish(player, ticker: string, draft)
 		return failure(limitMessage)
 	end
 
-	return withLock(player, publishThesis, ticker, draft)
+	local result = withLock(player, publishThesis, ticker, draft)
+
+	if result.success then
+		ChallengeService.record(player, { kind = "thesis", key = ticker })
+	end
+
+	return result
 end
 
 -- Deletes one of the player's own theses. Returns { success, message? }.
