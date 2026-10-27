@@ -5,7 +5,8 @@ DrawingModule.DEFAULT_COLOR = Color3.fromRGB(255, 200, 0)
 -- Renders session-only chart drawings (horizontal lines + trend lines) using
 -- the same price-scale math ChartRenderer uses for candles/indicators.
 --
--- elements: { DrawingsContainer : Frame, MainChart : Frame }
+-- elements: { DrawingsContainer : Frame } - the drawings' frame, covering the
+--     candle canvas
 -- chartData: the currently-visible candle window (same slice passed to
 --     ChartRenderer.render this frame)
 -- minPrice, maxPrice: the price range ChartRenderer.render returned for
@@ -17,7 +18,6 @@ DrawingModule.DEFAULT_COLOR = Color3.fromRGB(255, 200, 0)
 -- that render - v1 doesn't attempt to extrapolate or clip partial lines.
 function DrawingModule.render(elements, chartData, minPrice, maxPrice, drawings)
 	local DrawingsContainer = elements.DrawingsContainer
-	local MainChart = elements.MainChart
 
 	DrawingsContainer:ClearAllChildren()
 
@@ -70,8 +70,10 @@ function DrawingModule.render(elements, chartData, minPrice, maxPrice, drawings)
 			local y1 = priceToYScale(line.p1)
 			local y2 = priceToYScale(line.p2)
 
-			local dx = (x2 - x1) * MainChart.AbsoluteSize.X
-			local dy = (y2 - y1) * MainChart.AbsoluteSize.Y
+			-- The points are fractions of the canvas, so the length and angle
+			-- come from its size (the whole chart's ran each line past its ends)
+			local dx = (x2 - x1) * DrawingsContainer.AbsoluteSize.X
+			local dy = (y2 - y1) * DrawingsContainer.AbsoluteSize.Y
 			local length = math.sqrt(dx * dx + dy * dy)
 			local angle = math.deg(math.atan2(dy, dx))
 

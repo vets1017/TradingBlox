@@ -17,6 +17,32 @@ test("level thresholds rise", function()
 	end
 end)
 
+test("getLevelProgress measures XP from the level's start to the next level", function()
+	local start = Progression.getLevelProgress(0)
+	equal(start.level, 1)
+	equal(start.earned, 0)
+	equal(start.needed, 300)
+	equal(start.fraction, 0)
+
+	local partway = Progression.getLevelProgress(450)
+	equal(partway.level, 2)
+	equal(partway.earned, 150)
+	equal(partway.needed, 700)
+	equal(partway.fraction, 150 / 700)
+
+	local justUp = Progression.getLevelProgress(1000)
+	equal(justUp.level, 3)
+	equal(justUp.earned, 0)
+end)
+
+test("getLevelProgress is full at the top level", function()
+	local top = Progression.getLevelProgress(5000)
+	equal(top.level, 4)
+	equal(top.earned, 2000)
+	equal(top.needed, nil)
+	equal(top.fraction, 1)
+end)
+
 test("isUnlocked compares against the feature's level, and rejects unknown features", function()
 	equal(Progression.isUnlocked(1, "LimitOrders"), false)
 	equal(Progression.isUnlocked(2, "LimitOrders"), true)

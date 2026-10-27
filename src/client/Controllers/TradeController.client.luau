@@ -18,6 +18,7 @@ local OrderTicketModule = require(ReplicatedStorage.Modules.Trade.OrderTicketMod
 local ThesisPanelModule = require(ReplicatedStorage.Modules.Trade.ThesisPanelModule)
 local MarketPickerModule = require(ReplicatedStorage.Modules.Trade.MarketPickerModule)
 local GameBannerModule = require(ReplicatedStorage.Modules.Trade.GameBannerModule)
+local UIKit = require(ReplicatedStorage.UI.UIKit)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -45,6 +46,10 @@ local BuyButton = HeaderRow:WaitForChild("BuyButton")
 local SellButton = HeaderRow:WaitForChild("SellButton")
 local CompanyLabel = HeaderRow:WaitForChild("CompanyLabel")
 local TickerLabel = HeaderRow:WaitForChild("TickerLabel")
+local PriceLabel = HeaderRow:WaitForChild("PriceLabel")
+local ChangeLabel = HeaderRow:WaitForChild("ChangeLabel")
+local BidSizeLabel = HeaderRow:WaitForChild("BidSizeLabel")
+local AskSizeLabel = HeaderRow:WaitForChild("AskSizeLabel")
 local InputRow = TradeScreen:WaitForChild("InputRow")
 local TickerInput = InputRow:WaitForChild("TickerInput")
 local MiniChart = TradeScreen:WaitForChild("MiniChart")
@@ -80,6 +85,41 @@ local COLOR_TAB_INACTIVE = Theme.Colors.TextMuted
 
 local TWEEN_FAST = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local TWEEN_MED = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+
+-- Layout. The screen scrolls as one column of sections with even gaps, each
+-- sized to what it holds (the Studio canvas was three screens tall, and the
+-- sections fixed heights that clipped or left gaps).
+local SCREEN_PADDING = 12
+local SECTION_GAP = 10
+local SECTION_PADDING = 12
+local SECTION_TITLE_HEIGHT = 22
+local INPUT_ROW_HEIGHT = 32
+local HEADER_HEIGHT = 72
+local HEADER_GAP = 20
+local ACTION_BUTTON_WIDTH = 104
+local ACTION_BUTTON_HEIGHT = 34
+local ACTION_BUTTON_GAP = 8
+local PRICE_BLOCK_WIDTH = 170
+local SIZE_BLOCK_WIDTH = 110
+local PRICE_CHART_HEIGHT = 240
+local TAB_HEADER_HEIGHT = 30
+local OPTION_CHAIN_HEIGHT = 300
+local NEWS_MAX_HEIGHT = 300 -- about five headlines; more scroll inside
+
+-- Top to bottom: what it is, how it's moving, trade it, what you hold, the
+-- research, then the community
+local SECTION_ORDER = {
+	InputRow = 1,
+	HeaderRow = 2,
+	GameBanner = 3,
+	PriceChart = 4,
+	OrderTicket = 5,
+	PositionsTable = 6,
+	QuoteDetails = 7,
+	OptionChain = 8,
+	NewsFeed = 9,
+	Theses = 10,
+}
 
 local QUOTE_FIELDS = {
 	{ label = "Volume", key = "volume", format = "count" },
@@ -334,6 +374,109 @@ local function attachHover(button, baseColor, hoverColor)
 	end)
 end
 
+local function addPadding(parent, vertical, horizontal)
+	local padding = Instance.new("UIPadding")
+	padding.PaddingTop = UDim.new(0, vertical)
+	padding.PaddingBottom = UDim.new(0, vertical)
+	padding.PaddingLeft = UDim.new(0, horizontal or vertical)
+	padding.PaddingRight = UDim.new(0, horizontal or vertical)
+	padding.Parent = parent
+
+	return padding
+end
+
+-- A section's title, in the Community section's style
+local function makeSectionTitle(name, parent, text)
+	local title = UIKit.makeLabel(name, parent, Theme.Fonts.UIBold, Theme.TextSize.Title, Theme.Colors.Text)
+	title.Size = UDim2.new(1, 0, 0, SECTION_TITLE_HEIGHT)
+	title.TextYAlignment = Enum.TextYAlignment.Top
+	title.Text = text
+
+	return title
+end
+
+-- The header, laid out here: ticker and company on the left; the price,
+-- then Sell and Buy on the right, with the bid and ask sizes before the
+-- price when the quote has them. On a narrow screen (a phone) the buttons
+-- drop to a row of their own under the rest. The Studio layout overlapped,
+-- and its sizes read "XXX" for quotes without them (chart-only quotes never
+-- have them).
+local HEADER_COMPACT_HEIGHT = HEADER_HEIGHT + ACTION_BUTTON_GAP + ACTION_BUTTON_HEIGHT
+local HEADER_SIDE_PADDING = 16
+local HEADER_MIN_TICKER_WIDTH = 140 -- narrower than this and the header stacks
+local HEADER_PRICE_RIGHT = ACTION_BUTTON_WIDTH * 2 + ACTION_BUTTON_GAP + HEADER_GAP
+local HEADER_SIZES_RIGHT = HEADER_PRICE_RIGHT + PRICE_BLOCK_WIDTH + HEADER_GAP
+
+local headerHasSizes = false
+
+-- `hasSizes` is whether the quote has bid and ask sizes; nil keeps the last answer
+local function layoutHeader(hasSizes)
+	if hasSizes ~= nil then
+		headerHasSizes = hasSizes
+	end
+
+	local innerWidth = HeaderRow.AbsoluteSize.X - HEADER_SIDE_PADDING * 2
+	local priceEdge = HEADER_PRICE_RIGHT + PRICE_BLOCK_WIDTH + HEADER_GAP
+	local isCompact = innerWidth - priceEdge < HEADER_MIN_TICKER_WIDTH
+	local showSizes = headerHasSizes and not isCompact
+	local leftWidth = if isCompact
+		then PRICE_BLOCK_WIDTH + HEADER_GAP
+		elseif showSizes then HEADER_SIZES_RIGHT + SIZE_BLOCK_WIDTH + HEADER_GAP
+		else priceEdge
+
+	HeaderRow.Size = UDim2.new(1, 0, 0, isCompact and HEADER_COMPACT_HEIGHT or HEADER_HEIGHT)
+	TickerLabel.Size = UDim2.new(1, -leftWidth, 0, 30)
+	CompanyLabel.Size = UDim2.new(1, -leftWidth, 0, 16)
+	BidSizeLabel.Visible = showSizes
+	AskSizeLabel.Visible = showSizes
+
+	if isCompact then
+		-- Price at the top right, Sell and Buy splitting the row below
+		local buttonSize = UDim2.new(0.5, -ACTION_BUTTON_GAP / 2, 0, ACTION_BUTTON_HEIGHT)
+
+		PriceLabel.Position = UDim2.new(1, 0, 0, 15)
+		ChangeLabel.Position = UDim2.new(1, 0, 0, 38)
+		SellButton.Position = UDim2.new(0.5, -ACTION_BUTTON_GAP / 2, 1, -ACTION_BUTTON_HEIGHT / 2)
+		SellButton.Size = buttonSize
+		BuyButton.Position = UDim2.new(1, 0, 1, -ACTION_BUTTON_HEIGHT / 2)
+		BuyButton.Size = buttonSize
+	else
+		local buttonSize = UDim2.fromOffset(ACTION_BUTTON_WIDTH, ACTION_BUTTON_HEIGHT)
+
+		PriceLabel.Position = UDim2.new(1, -HEADER_PRICE_RIGHT, 0.5, -8)
+		ChangeLabel.Position = UDim2.new(1, -HEADER_PRICE_RIGHT, 0.5, 14)
+		SellButton.Position = UDim2.new(1, -(ACTION_BUTTON_WIDTH + ACTION_BUTTON_GAP), 0.5, 0)
+		SellButton.Size = buttonSize
+		BuyButton.Position = UDim2.fromScale(1, 0.5)
+		BuyButton.Size = buttonSize
+	end
+end
+
+addPadding(HeaderRow, SECTION_PADDING, HEADER_SIDE_PADDING)
+
+TickerLabel.Position = UDim2.fromOffset(0, 0)
+TickerLabel.TextTruncate = Enum.TextTruncate.AtEnd
+CompanyLabel.Position = UDim2.fromOffset(0, 31)
+CompanyLabel.TextTruncate = Enum.TextTruncate.AtEnd
+PriceLabel.Size = UDim2.fromOffset(PRICE_BLOCK_WIDTH, 28)
+ChangeLabel.Size = UDim2.fromOffset(PRICE_BLOCK_WIDTH, 16)
+BidSizeLabel.Position = UDim2.new(1, -HEADER_SIZES_RIGHT, 0.5, -9)
+BidSizeLabel.Size = UDim2.fromOffset(SIZE_BLOCK_WIDTH, 16)
+AskSizeLabel.Position = UDim2.new(1, -HEADER_SIZES_RIGHT, 0.5, 9)
+AskSizeLabel.Size = UDim2.fromOffset(SIZE_BLOCK_WIDTH, 16)
+
+-- Nothing loaded yet: no Studio placeholders ("XXXX", "Label"). The ticker
+-- stays empty: TutorialController counts any text there as a lookup.
+TickerLabel.Text = ""
+CompanyLabel.Text = "Pick a stock, crypto or Roblox game above"
+PriceLabel.Text = ""
+ChangeLabel.Text = ""
+layoutHeader(false)
+
+HeaderRow:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+	layoutHeader(nil)
+end)
+
 -- Header
 local function updateHeader(data, livePrice)
 	local price = livePrice or (data and data.price) or 0
@@ -356,18 +499,10 @@ local function updateHeader(data, livePrice)
 		end
 	end
 
-	local priceLabel = HeaderRow:FindFirstChild("PriceLabel")
-	local changeLabel = HeaderRow:FindFirstChild("ChangeLabel")
-
-	if priceLabel then
-		priceLabel.Text = string.format("%.2f", price)
-		priceLabel.TextColor3 = color
-	end
-
-	if changeLabel then
-		changeLabel.Text = string.format("%s%.2f (%.2f%%)", change >= 0 and "+" or "", change, changePct)
-		changeLabel.TextColor3 = color
-	end
+	PriceLabel.Text = string.format("%.2f", price)
+	PriceLabel.TextColor3 = color
+	ChangeLabel.Text = string.format("%s%.2f (%.2f%%)", change >= 0 and "+" or "", change, changePct)
+	ChangeLabel.TextColor3 = color
 
 	local bid = data and data.bid
 	local ask = data and data.ask
@@ -382,16 +517,14 @@ local function updateHeader(data, livePrice)
 		SellButton.Text = string.format("Sell  %.2f", bid)
 	end
 
-	local bidSizeLabel = HeaderRow:FindFirstChild("BidSizeLabel")
-	local askSizeLabel = HeaderRow:FindFirstChild("AskSizeLabel")
+	local hasSizes = bidSize ~= nil and askSize ~= nil
 
-	if bidSizeLabel and bidSize then
-		bidSizeLabel.Text = "Bid size: " .. bidSize
+	if hasSizes then
+		BidSizeLabel.Text = "Bid size " .. NumberModule.formatShares(bidSize)
+		AskSizeLabel.Text = "Ask size " .. NumberModule.formatShares(askSize)
 	end
 
-	if askSizeLabel and askSize then
-		askSizeLabel.Text = "Ask size: " .. askSize
-	end
+	layoutHeader(hasSizes)
 end
 
 -- UIGridLayout has no `Enabled` property (confirmed live - Studio throws
@@ -410,6 +543,25 @@ local function getGridLayout(container)
 	end
 
 	return cached or nil
+end
+
+-- The research tabs grow to the open tab's rows; at the Studio's fixed
+-- 120 px the fourth row of Quote Details and Fundamentals was cut off
+local RESEARCH_CONTENT_PADDING = 8
+local UNAVAILABLE_ROW_HEIGHT = 22
+
+local function fitQuoteDetails()
+	local content = TabContents[activeTabName]
+
+	if not content then
+		return
+	end
+
+	-- A tab showing its "unavailable" message has its grid detached
+	local layout = content:FindFirstChildWhichIsA("UIGridStyleLayout")
+	local height = layout and layout.AbsoluteContentSize.Y or UNAVAILABLE_ROW_HEIGHT
+
+	QuoteDetails.Size = UDim2.new(1, 0, 0, TAB_HEADER_HEIGHT + height + RESEARCH_CONTENT_PADDING * 2)
 end
 
 -- Renders a flat label/value grid into `container`, clearing any previous
@@ -466,6 +618,8 @@ local function renderFieldGrid(container, fields, data, prefix)
 		val.TextXAlignment = Enum.TextXAlignment.Right
 		val.Parent = row
 	end
+
+	fitQuoteDetails()
 end
 
 -- Shows a single centered message instead of a field grid - used when a
@@ -502,6 +656,8 @@ local function renderUnavailable(container, prefix, message)
 	lbl.TextSize = Theme.TextSize.Body
 	lbl.TextXAlignment = Enum.TextXAlignment.Center
 	lbl.Parent = row
+
+	fitQuoteDetails()
 end
 
 -- Builds a single TextLabel from a props table. Moved up here (ahead of its
@@ -787,6 +943,8 @@ local function switchTab(tabName)
 	for name, frame in pairs(TabContents) do
 		frame.Visible = (name == tabName)
 	end
+
+	fitQuoteDetails()
 end
 
 -- Row
@@ -1127,8 +1285,10 @@ end
 -- Collapse / expand
 local function setChainExpanded(expanded)
 	chainExpanded = expanded
-	print("ran")
-	local targetSize = expanded and UDim2.fromScale(1, 0.45) or UDim2.new(1, 0, 0, 30) -- collapsed to just the toggle bar
+
+	-- Collapsed to just the toggle bar. In pixels: a scale here would be of
+	-- the screen's canvas, which grows with its content.
+	local targetSize = UDim2.new(1, 0, 0, expanded and OPTION_CHAIN_HEIGHT or ChainToggle.Size.Y.Offset)
 
 	TweenService:Create(OptionChain, TWEEN_MED, { Size = targetSize }):Play()
 	ChainData.Visible = expanded
@@ -1160,7 +1320,14 @@ local function renderPositions(positions)
 	local emptyLabel = PositionsTable:FindFirstChild("EmptyLabel")
 
 	if not positions or #positions == 0 then
+		local header = PositionsTable:FindFirstChild("PosHeader")
+
+		if header then
+			header:Destroy()
+		end
+
 		if emptyLabel then
+			emptyLabel.Text = string.format("You don't own any %s yet. Buy with a preset above.", currentTicker)
 			emptyLabel.Visible = true
 		end
 
@@ -1210,7 +1377,15 @@ end
 local function renderNewsFeed(newsItems)
 	clearNewsFeed()
 
-	if not newsItems or #newsItems == 0 then
+	local emptyLabel = NewsFeed:FindFirstChild("EmptyLabel")
+	local isEmpty = not newsItems or #newsItems == 0
+
+	if emptyLabel then
+		emptyLabel.Text = newsItems and "No recent headlines." or "Headlines unavailable right now."
+		emptyLabel.Visible = isEmpty
+	end
+
+	if isEmpty then
 		return
 	end
 
@@ -1222,6 +1397,7 @@ end
 -- Mini Chart
 local MINI_CHART_GRADIENT_START = Theme.Colors.AccentSoft -- pale violet (older)
 local MINI_CHART_GRADIENT_END = Theme.Colors.Accent -- the UI accent (most recent)
+local MINI_CHART_PIXELS_PER_POINT = 3
 
 local function lerpColor(fromColor, toColor, t)
 	return Color3.new(
@@ -1235,10 +1411,16 @@ end
 -- (Roblox has no native polyline) so it reads as one continuous line rather
 -- than a series of disconnected height jumps, with a purple gradient running
 -- along it from oldest (pale) to most recent (vivid).
+local lastMiniChartData = nil -- redrawn on resize: segment lengths are in pixels
+local PriceChartCaption = nil -- built with the section, further down
+
 local function renderMiniChart(chartData)
 	MiniChart:ClearAllChildren()
+	lastMiniChartData = chartData
 
 	if not chartData or #chartData < 2 then
+		PriceChartCaption.Text = chartData and "Not enough recent prices to chart" or "Chart unavailable"
+
 		return
 	end
 
@@ -1261,10 +1443,41 @@ local function renderMiniChart(chartData)
 		range = 1
 	end
 
-	local count = #chartData
+	-- "5-min · Oct 21 – Oct 26 · H 191.20 · L 186.05"
+	local firstDay = os.date("%b %d", chartData[1].Timestamp)
+	local lastDay = os.date("%b %d", chartData[#chartData].Timestamp)
+
+	PriceChartCaption.Text = string.format(
+		"5-min · %s · H %.2f · L %.2f",
+		firstDay == lastDay and firstDay or (firstDay .. " – " .. lastDay),
+		high,
+		low
+	)
+
 	local absoluteSize = MiniChart.AbsoluteSize
 	local width = math.max(absoluteSize.X, 1)
 	local height = math.max(absoluteSize.Y, 1)
+
+	-- A week of 5-minute candles is ~1,000 points: more segments than the
+	-- width can show, each a Frame, redrawn on every resize. Every few
+	-- pixels' worth is enough; the latest point always stays.
+	local step = math.max(1, math.ceil(#chartData / (width / MINI_CHART_PIXELS_PER_POINT)))
+
+	if step > 1 then
+		local sampled = {}
+
+		for index = 1, #chartData, step do
+			table.insert(sampled, chartData[index])
+		end
+
+		if sampled[#sampled] ~= chartData[#chartData] then
+			table.insert(sampled, chartData[#chartData])
+		end
+
+		chartData = sampled
+	end
+
+	local count = #chartData
 
 	for i = 1, count - 1 do
 		local x1 = (i - 1) / (count - 1)
@@ -1350,6 +1563,8 @@ local function loadTicker(rawTicker)
 	clearContractSelection()
 	clearPositions()
 	clearNewsFeed()
+	renderMiniChart(nil)
+	PriceChartCaption.Text = "Loading…"
 
 	-- Core
 	local marketData = GetMarketDataEvent:InvokeServer(ticker)
@@ -1391,10 +1606,7 @@ local function loadTicker(rawTicker)
 	task.spawn(thesisPanel.load, thesisPanel, ticker)
 
 	-- MiniChart
-	local miniData = RequestChartEvent:InvokeServer(ticker, "5M")
-	if miniData then
-		renderMiniChart(miniData)
-	end
+	renderMiniChart(RequestChartEvent:InvokeServer(ticker, "5M"))
 
 	-- ── Options data ──────────────────────────────────────────────────────────
 	local optionData = GetOptionsDataEvent:InvokeServer(ticker)
@@ -1443,13 +1655,16 @@ local function isMarketOpen()
 	return Instruments.tradesAroundTheClock(currentTicker) or MarketHoursModule.getMarketStatus(os.time())
 end
 
+-- The header's Buy and Sell trade one share, or one contract of the option
+-- picked in the chain, at market. What happened shows in the order ticket's
+-- status line, right under the header (it only reached the output log).
 local function placeOrder(action)
 	if currentTicker == "" or isFetchingData then
 		return
 	end
 
 	if not isMarketOpen() then
-		print("[TradeController] Market is closed — cannot place order.") -- Add Toast
+		orderTicket:setStatus("The market is closed, so market orders can't fill right now.", RED)
 
 		return
 	end
@@ -1471,13 +1686,12 @@ local function placeOrder(action)
 	end
 
 	if not result or not result.success then
-		print(string.format("[TradeController] %s failed: %s", action, (result and result.message) or "Unknown error"))
+		orderTicket:setStatus((result and result.message) or "Order failed. Try again.", RED)
 
 		return
 	end
 
-	print("[TradeController] " .. result.message)
-
+	orderTicket:setStatus(result.message, GREEN)
 	refreshPositions()
 end
 
@@ -1539,16 +1753,131 @@ end
 Player:GetAttributeChangedSignal("Balance"):Connect(onBalanceChanged)
 Player:GetAttributeChangedSignal("NetWorth"):Connect(onBalanceChanged)
 
--- Code-built sections right under the header - a game's banner (hidden for
--- real-world tickers), then the order ticket - so the Studio-built sections
--- from QuoteDetails down move two slots further
-for _, section in ipairs(TradeScreen:GetChildren()) do
-	if section:IsA("GuiObject") and section.LayoutOrder >= 2 then
-		section.LayoutOrder += 2
+-- Screen and sections
+TradeScreen.CanvasSize = UDim2.new()
+TradeScreen.AutomaticCanvasSize = Enum.AutomaticSize.Y
+TradeScreen.VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar
+TradeScreen:FindFirstChildOfClass("UIListLayout").Padding = UDim.new(0, SECTION_GAP)
+addPadding(TradeScreen, SCREEN_PADDING)
+
+for name, layoutOrder in pairs(SECTION_ORDER) do
+	local section = TradeScreen:FindFirstChild(name)
+
+	if section then
+		section.LayoutOrder = layoutOrder
 	end
 end
 
-gameBanner = GameBannerModule.new({ parent = TradeScreen, layoutOrder = 2 })
+-- The screen's padding replaces the row's own
+InputRow.Size = UDim2.new(1, 0, 0, INPUT_ROW_HEIGHT)
+InputRow.BackgroundTransparency = 1
+InputRow:FindFirstChildOfClass("UIPadding"):Destroy()
+
+-- Price: the 5-minute line in a titled panel, captioned with its period and range
+local PriceChart = UIKit.makePanel("PriceChart", TradeScreen)
+PriceChart.LayoutOrder = SECTION_ORDER.PriceChart
+PriceChart.Size = UDim2.new(1, 0, 0, PRICE_CHART_HEIGHT)
+addPadding(PriceChart, SECTION_PADDING)
+makeSectionTitle("Title", PriceChart, "Price")
+
+PriceChartCaption =
+	UIKit.makeLabel("Caption", PriceChart, Theme.Fonts.Mono, Theme.TextSize.Caption, Theme.Colors.TextMuted)
+PriceChartCaption.AnchorPoint = Vector2.new(1, 0)
+PriceChartCaption.Position = UDim2.fromScale(1, 0)
+PriceChartCaption.Size = UDim2.new(1, -80, 0, SECTION_TITLE_HEIGHT)
+PriceChartCaption.TextXAlignment = Enum.TextXAlignment.Right
+PriceChartCaption.TextYAlignment = Enum.TextYAlignment.Top
+
+MiniChart.Parent = PriceChart
+MiniChart.Position = UDim2.fromOffset(0, SECTION_TITLE_HEIGHT + 8)
+MiniChart.Size = UDim2.new(1, 0, 1, -(SECTION_TITLE_HEIGHT + 8))
+MiniChart.BackgroundTransparency = 1
+
+MiniChart:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+	if lastMiniChartData then
+		renderMiniChart(lastMiniChartData)
+	end
+end)
+
+-- Your position: a title, the table or a line saying there's none, and a
+-- height that fits (the Studio frame was 160 px with a canvas twice that)
+local PositionsLayout = PositionsTable:FindFirstChildOfClass("UIListLayout")
+local POSITIONS_TABLE_WIDTH = 8 + TICKER_COL_WIDTH + 8
+
+for _, column in ipairs(POSITION_COLUMNS) do
+	POSITIONS_TABLE_WIDTH += column.width
+end
+
+PositionsTable.CanvasSize = UDim2.new()
+PositionsTable.AutomaticCanvasSize = Enum.AutomaticSize.X -- the columns scroll sideways on a narrow screen
+addPadding(PositionsTable, SECTION_PADDING)
+
+local PositionsTitle = makeSectionTitle("PosTitle", PositionsTable, "Your position")
+PositionsTitle.LayoutOrder = -2
+PositionsTitle.Size = UDim2.new(1, 0, 0, SECTION_TITLE_HEIGHT + 6)
+
+local PositionsEmpty =
+	UIKit.makeLabel("EmptyLabel", PositionsTable, Theme.Fonts.UI, Theme.TextSize.Body, Theme.Colors.TextMuted)
+PositionsEmpty.LayoutOrder = -1
+PositionsEmpty.Size = UDim2.new(1, 0, 0, ROW_HEIGHT_POS)
+PositionsEmpty.Text = "Load a ticker to see your position."
+
+local function fitPositions()
+	PositionsTable.Size = UDim2.new(1, 0, 0, PositionsLayout.AbsoluteContentSize.Y + SECTION_PADDING * 2)
+end
+
+PositionsLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(fitPositions)
+
+-- Wide enough for every column, so the canvas can scroll to them
+PositionsTable.ChildAdded:Connect(function(child)
+	if child:IsA("Frame") and (child.Name == "PosHeader" or string.match(child.Name, "^Pos_")) then
+		local constraint = Instance.new("UISizeConstraint")
+		constraint.MinSize = Vector2.new(POSITIONS_TABLE_WIDTH, 0)
+		constraint.Parent = child
+	end
+end)
+
+-- Research tabs: padded content, tabs inset from the edge
+addPadding(TabContentContainer, RESEARCH_CONTENT_PADDING, SECTION_PADDING)
+addPadding(TabHeaderContainer, 0, SECTION_PADDING)
+
+for _, content in pairs(TabContents) do
+	local layout = content:FindFirstChildWhichIsA("UIGridStyleLayout")
+
+	if layout then
+		layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(fitQuoteDetails)
+	end
+end
+
+-- Option chain: the toggle bar's text inset by padding rather than spaces
+addPadding(ChainToggle, 0, SECTION_PADDING)
+ChainData.CanvasSize = UDim2.new()
+ChainData.AutomaticCanvasSize = Enum.AutomaticSize.Y
+
+-- News: a title, the headlines or a line saying there are none, and a
+-- height that fits up to about five before scrolling
+local NewsLayout = NewsFeed:FindFirstChildOfClass("UIListLayout")
+
+NewsFeed.CanvasSize = UDim2.new()
+NewsFeed.AutomaticCanvasSize = Enum.AutomaticSize.Y
+addPadding(NewsFeed, SECTION_PADDING)
+
+local NewsTitle = makeSectionTitle("NewsTitle", NewsFeed, "News")
+NewsTitle.LayoutOrder = -2
+
+local NewsEmpty = UIKit.makeLabel("EmptyLabel", NewsFeed, Theme.Fonts.UI, Theme.TextSize.Body, Theme.Colors.TextMuted)
+NewsEmpty.LayoutOrder = -1
+NewsEmpty.Size = UDim2.new(1, 0, 0, 22)
+NewsEmpty.Text = "Load a ticker to see its headlines."
+
+local function fitNews()
+	NewsFeed.Size =
+		UDim2.new(1, 0, 0, math.min(NewsLayout.AbsoluteContentSize.Y, NEWS_MAX_HEIGHT) + SECTION_PADDING * 2)
+end
+
+NewsLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(fitNews)
+
+gameBanner = GameBannerModule.new({ parent = TradeScreen, layoutOrder = SECTION_ORDER.GameBanner })
 
 marketPicker = MarketPickerModule.new({
 	inputRow = InputRow,
@@ -1562,7 +1891,7 @@ marketPicker = MarketPickerModule.new({
 
 orderTicket = OrderTicketModule.new({
 	parent = TradeScreen,
-	layoutOrder = 3,
+	layoutOrder = SECTION_ORDER.OrderTicket,
 	getTicker = function()
 		return currentTicker
 	end,
@@ -1578,7 +1907,7 @@ orderTicket = OrderTicketModule.new({
 -- Theses go after the news, at the end of the research sections
 thesisPanel = ThesisPanelModule.new({
 	parent = TradeScreen,
-	layoutOrder = NewsFeed.LayoutOrder + 1,
+	layoutOrder = SECTION_ORDER.Theses,
 	getPrice = function()
 		return currentPrice
 	end,
@@ -1588,8 +1917,5 @@ switchTab("QuoteDetails")
 
 setChainExpanded(false)
 TableHeader.Visible = false
-
-print("[DEBUG] Script fully intitalized")
-
--- Preloading Ticker:
--- loadTicker("AAPL")
+fitPositions()
+fitNews()

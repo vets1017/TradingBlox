@@ -33,18 +33,18 @@ local PlayerGui = Player:WaitForChild("PlayerGui")
 local TerminalGui = PlayerGui:WaitForChild("TerminalGui")
 local MainBackground = TerminalGui:WaitForChild("MainBackground")
 local TopBar = MainBackground:WaitForChild("TopBar")
-local AccentLine = TopBar:WaitForChild("AccentLine")
-local AccentGradient = AccentLine:WaitForChild("AccentGradient")
+local AccentGradient = TopBar:WaitForChild("AccentLine"):WaitForChild("AccentGradient")
 local TabContainer = TopBar:WaitForChild("TabContainer")
 local ScreenContainer = MainBackground:WaitForChild("ScreenContainer")
 local DashboardScreen = ScreenContainer:WaitForChild("DashboardScreen")
 local GreetingBar = DashboardScreen:WaitForChild("GreetingBar")
 local GreetingText = GreetingBar:WaitForChild("GreetingText")
 local DateText = GreetingBar:WaitForChild("DateText")
-local DashboardGrid = DashboardScreen:WaitForChild("DashboardGrid")
-local MainWorkspace = DashboardGrid:WaitForChild("MainWorkspace")
-local TopRow = MainWorkspace:WaitForChild("TopRow")
-local CountdownWidget = TopRow:WaitForChild("CountdownWidget")
+-- Paths straight to what's used: this script is near Luau's 200-local limit
+local CountdownWidget = DashboardScreen:WaitForChild("DashboardGrid")
+	:WaitForChild("MainWorkspace")
+	:WaitForChild("TopRow")
+	:WaitForChild("CountdownWidget")
 local TimeContainer = CountdownWidget:WaitForChild("TimeContainer")
 local TitleText = CountdownWidget:WaitForChild("TitleText")
 local HoursNumber = TimeContainer.HoursBlock.Number
@@ -77,10 +77,10 @@ local ActiveTraderSellPresets = {
 local Sidebar = ChartsScreen:WaitForChild("Sidebar")
 local ToggleActiveTraderButton = Sidebar:WaitForChild("ToggleActiveTraderButton")
 local ToggleSymbolInfoButton = Sidebar:WaitForChild("ToggleSymbolInfoButton")
+local OpenInTradeButton = Sidebar:WaitForChild("PlaceholderButton") -- a placeholder in Studio
 local SymbolInfoPanel = ChartsScreen:WaitForChild("SymbolInfoPanel")
 local SymbolInfoTopBar = SymbolInfoPanel:WaitForChild("SymbolInfoTopBar")
 local SymbolInfoTickerLabel = SymbolInfoTopBar:WaitForChild("TickerNameLabel")
-local SymbolInfoContentArea = SymbolInfoPanel:WaitForChild("ContentArea")
 
 -- Symbol Info's rows top to bottom, with their Studio labels (a stock's
 -- fields). A Roblox game shows its own fields in them, under its own labels.
@@ -97,7 +97,7 @@ for _, rowName in ipairs({
 	"BetaRow",
 	"DividendYieldRow",
 }) do
-	local row = SymbolInfoContentArea:WaitForChild(rowName)
+	local row = SymbolInfoPanel:WaitForChild("ContentArea"):WaitForChild(rowName)
 	local label = row:WaitForChild("Label")
 
 	table.insert(SymbolInfoRows, { label = label, value = row:WaitForChild("Value"), stockLabel = label.Text })
@@ -703,6 +703,84 @@ local function getActiveIndicators(chartData)
 	return overlays, panes
 end
 
+-- While a trend line waits for its second point, its first point shows as a
+-- dot with a line to the cursor (the first click used to leave no trace).
+-- Above the drawings, below the flyouts. Scoped: this script is near Luau's
+-- 200-local limit.
+local updateTrendPreview
+local cancelTrendLine
+
+do
+	local DrawingPreview = UIKit.makeFrame("DrawingPreview", ChartCanvas)
+	DrawingPreview.Size = UDim2.fromScale(1, 1)
+	DrawingPreview.ZIndex = DrawingsContainer.ZIndex + 1
+	DrawingPreview.Visible = false
+
+	local PreviewLine = UIKit.makeFrame("Line", DrawingPreview)
+	PreviewLine.AnchorPoint = Vector2.new(0.5, 0.5)
+	PreviewLine.BackgroundTransparency = 0.35
+	PreviewLine.BackgroundColor3 = DrawingModule.DEFAULT_COLOR
+	PreviewLine.ZIndex = DrawingPreview.ZIndex
+
+	local PreviewAnchor = UIKit.makeDot("Anchor", DrawingPreview, 7, DrawingModule.DEFAULT_COLOR)
+	PreviewAnchor.ZIndex = DrawingPreview.ZIndex + 1
+
+	local previewMousePosition = nil -- the cursor's last screen position over the chart
+
+	-- A { timestamp, price } point's pixel position in ChartCanvas, or nil while
+	-- its candle is out of view
+	local function getPointPixels(point)
+		if not currentMinPrice or not currentMaxPrice then
+			return nil
+		end
+
+		local priceRange = currentMaxPrice - currentMinPrice
+		local canvasSize = ChartCanvas.AbsoluteSize
+
+		for index, candle in ipairs(currentChartData) do
+			if candle.Timestamp == point.timestamp then
+				return Vector2.new(
+					(index - 0.5) / #currentChartData * canvasSize.X,
+					(currentMaxPrice - point.price) / (priceRange ~= 0 and priceRange or 1) * canvasSize.Y
+				)
+			end
+		end
+
+		return nil
+	end
+
+	function updateTrendPreview(mousePosition)
+		previewMousePosition = mousePosition or previewMousePosition
+
+		local start = pendingTrendLineStart and getPointPixels(pendingTrendLineStart)
+
+		if not start then
+			DrawingPreview.Visible = false
+
+			return
+		end
+
+		local finish = start
+
+		if previewMousePosition then
+			finish = Vector2.new(previewMousePosition.X, previewMousePosition.Y) - ChartCanvas.AbsolutePosition
+		end
+
+		local delta = finish - start
+
+		PreviewAnchor.Position = UDim2.fromOffset(start.X, start.Y)
+		PreviewLine.Position = UDim2.fromOffset((start.X + finish.X) / 2, (start.Y + finish.Y) / 2)
+		PreviewLine.Size = UDim2.fromOffset(math.max(delta.Magnitude, 1), 2)
+		PreviewLine.Rotation = math.deg(math.atan2(delta.Y, delta.X))
+		DrawingPreview.Visible = true
+	end
+
+	function cancelTrendLine()
+		pendingTrendLineStart = nil
+		DrawingPreview.Visible = false
+	end
+end
+
 local function renderChart(ticker, chartData)
 	local liveCandle = #masterChartData > 0 and masterChartData[#masterChartData] or nil
 	local overlays, panes = getActiveIndicators(chartData)
@@ -732,8 +810,12 @@ local function renderChart(ticker, chartData)
 
 		DrawingModule.render({
 			DrawingsContainer = DrawingsContainer,
-			MainChart = MainChart,
 		}, chartData, minPrice, maxPrice, drawingsByTicker[ticker])
+	end
+
+	-- The chart moved or rescaled under a pending trend line
+	if pendingTrendLineStart then
+		updateTrendPreview(nil)
 	end
 end
 
@@ -807,8 +889,8 @@ end
 
 for button, name in pairs({
 	[CursorToolButton] = "Cursor",
-	[TrendLineToolButton] = "Trend line",
-	[HorizontalLineToolButton] = "Horizontal line",
+	[TrendLineToolButton] = "Trend line · click two points, right-click cancels",
+	[HorizontalLineToolButton] = "Horizontal line · click a price",
 	[ClearDrawingsButton] = "Clear drawings",
 }) do
 	button.Text = ""
@@ -828,7 +910,7 @@ colorIcon(ClearDrawingsButton, COLOR_INACTIVE_TEXT)
 
 local function setDrawingTool(tool)
 	currentDrawingTool = tool
-	pendingTrendLineStart = nil
+	cancelTrendLine()
 
 	for toolName, button in pairs(DRAWING_TOOL_BUTTONS) do
 		local isActive = toolName == tool
@@ -901,6 +983,7 @@ local function handleDrawingClick(mousePosition)
 	if currentDrawingTool == "trendline" then
 		if not pendingTrendLineStart then
 			pendingTrendLineStart = point
+			updateTrendPreview(mousePosition)
 		else
 			table.insert(drawings.trendLines, {
 				t1 = pendingTrendLineStart.timestamp,
@@ -908,7 +991,7 @@ local function handleDrawingClick(mousePosition)
 				t2 = point.timestamp,
 				p2 = point.price,
 			})
-			pendingTrendLineStart = nil
+			cancelTrendLine()
 			renderChart(currentDisplayedTicker, currentChartData)
 		end
 
@@ -1009,6 +1092,157 @@ end
 
 local ACTIVE_TRADER_DISABLED_COLOR = Theme.Colors.TextDisabled
 
+-- Sidebar. Its buttons are 25 px wide, so each label runs down its button
+-- (the Studio text ran off the edge) and an accent edge marks the open
+-- flyout. Open in Trade dims while nothing is charted. Scoped, like the
+-- flyout fixes after it: this script is near Luau's 200-local limit.
+local updateSidebar
+
+do
+	local SIDEBAR_LABEL_HEIGHT = 18
+	local FLYOUT_BAR_HEIGHT = 26 -- every flyout's title bar; Active Trader's was 15
+	local CLOSE_BUTTON_SIZE = 22
+
+	local sidebarParts = {} -- [button] = { label, edge }
+
+	for button, text in pairs({
+		[ToggleActiveTraderButton] = "Active Trader",
+		[ToggleSymbolInfoButton] = "Symbol Info",
+		[ToggleWatchlistButton] = "Watchlist",
+		[OpenInTradeButton] = "Open in Trade",
+	}) do
+		button.Text = ""
+
+		local label =
+			UIKit.makeLabel("Label", button, Theme.Fonts.UISemibold, Theme.TextSize.Caption, COLOR_INACTIVE_TEXT)
+		label.AnchorPoint = Vector2.new(0.5, 0.5)
+		label.Position = UDim2.fromScale(0.5, 0.5)
+		-- Turned a quarter, so its width runs along the button's height
+		label.Size = UDim2.fromOffset(button.Size.Y.Offset, SIDEBAR_LABEL_HEIGHT)
+		label.Rotation = 90
+		label.TextXAlignment = Enum.TextXAlignment.Center
+		label.TextTruncate = Enum.TextTruncate.None
+		label.ZIndex = button.ZIndex + 1
+		label.Text = text
+
+		local edge = UIKit.makeFrame("ActiveEdge", button)
+		edge.AnchorPoint = Vector2.new(0, 0.5)
+		edge.Position = UDim2.fromScale(0, 0.5)
+		edge.Size = UDim2.new(0, 2, 1, -16)
+		edge.BackgroundTransparency = 0
+		edge.BackgroundColor3 = Theme.Colors.Accent
+		edge.ZIndex = button.ZIndex + 1
+		edge.Visible = false
+
+		sidebarParts[button] = { label = label, edge = edge }
+	end
+
+	function updateSidebar()
+		local isOpen = {
+			[ToggleActiveTraderButton] = isActiveTradeVisible,
+			[ToggleSymbolInfoButton] = isSymbolInfoVisible,
+			[ToggleWatchlistButton] = isWatchlistVisible,
+		}
+		local hasChart = currentDisplayedTicker ~= ""
+
+		for button, parts in pairs(sidebarParts) do
+			local open = isOpen[button] == true
+			local enabled = button ~= OpenInTradeButton or hasChart
+
+			parts.edge.Visible = open
+			parts.label.TextColor3 = open and COLOR_ACTIVE_BACKGROUND
+				or enabled and Theme.Colors.Text
+				or Theme.Colors.TextDisabled
+		end
+
+		OpenInTradeButton.AutoButtonColor = hasChart
+	end
+
+	-- Flyouts. TerminalGui sorts ZIndex globally, so a flyout's contents have to
+	-- sit above the panel's own background: Symbol Info's rows and Active
+	-- Trader's title bar (ZIndex 1 in Studio) were drawn under it, leaving
+	-- Symbol Info blank.
+	local function liftAbove(panel)
+		local function lift(parent, depth)
+			for _, child in ipairs(parent:GetChildren()) do
+				if child:IsA("GuiObject") then
+					child.ZIndex = math.max(child.ZIndex, panel.ZIndex + depth)
+					lift(child, depth + 1)
+				end
+			end
+		end
+
+		lift(panel, 1)
+	end
+
+	ActiveTraderTopBar.Size = UDim2.new(1, 0, 0, FLYOUT_BAR_HEIGHT)
+	ActiveTraderContentArea.Position = UDim2.fromOffset(0, FLYOUT_BAR_HEIGHT)
+	ActiveTraderContentArea.Size = UDim2.new(1, 0, 1, -FLYOUT_BAR_HEIGHT)
+
+	-- Each title leaves room for a close button at the bar's right end
+	for _, title in ipairs({
+		ActiveTraderTopBar:WaitForChild("TextLabel"),
+		SymbolInfoTickerLabel,
+		WatchlistTopBar:WaitForChild("TitleLabel"),
+	}) do
+		title.Position = UDim2.fromOffset(10, 0)
+		title.Size = UDim2.new(1, -(10 + CLOSE_BUTTON_SIZE + 6), 1, 0)
+		title.TextTruncate = Enum.TextTruncate.AtEnd
+	end
+
+	for _, panel in ipairs({ ActiveTraderPanel, SymbolInfoPanel, WatchlistPanel }) do
+		liftAbove(panel)
+	end
+
+	local function addCloseButton(topBar, isOpen, close)
+		local button = Instance.new("TextButton")
+		button.Name = "CloseButton"
+		button.AnchorPoint = Vector2.new(1, 0.5)
+		button.Position = UDim2.new(1, -2, 0.5, 0)
+		button.Size = UDim2.fromOffset(CLOSE_BUTTON_SIZE, CLOSE_BUTTON_SIZE)
+		button.BackgroundTransparency = 1
+		button.AutoButtonColor = false
+		button.FontFace = Theme.Fonts.UISemibold
+		button.TextSize = Theme.TextSize.Title
+		button.TextColor3 = Theme.Colors.TextMuted
+		button.Text = "×"
+		button.ZIndex = topBar.ZIndex + 2
+		button.Parent = topBar
+
+		button.MouseEnter:Connect(function()
+			button.TextColor3 = Theme.Colors.Text
+		end)
+
+		button.MouseLeave:Connect(function()
+			button.TextColor3 = Theme.Colors.TextMuted
+		end)
+
+		button.MouseButton1Click:Connect(function()
+			if isOpen() then
+				close()
+			end
+		end)
+	end
+
+	addCloseButton(ActiveTraderTopBar, function()
+		return isActiveTradeVisible
+	end, function()
+		toggleActiveTrader()
+	end)
+
+	addCloseButton(SymbolInfoTopBar, function()
+		return isSymbolInfoVisible
+	end, function()
+		toggleSymbolInfo()
+	end)
+
+	addCloseButton(WatchlistTopBar, function()
+		return isWatchlistVisible
+	end, function()
+		toggleWatchlist()
+	end)
+end
+
 -- Toggle for ActiveTrader window. Mutually exclusive with Symbol Info and
 -- Watchlist - all three flyouts share the same anchored screen slot.
 toggleActiveTrader = function()
@@ -1027,11 +1261,7 @@ toggleActiveTrader = function()
 	local slideTween = TweenService:Create(ActiveTraderPanel, SLIDE_EASING, { Position = targetPosition })
 	slideTween:Play() -- Tween slide for ActiveTrader window
 
-	if isActiveTradeVisible then
-		ToggleActiveTraderButton.Text = "Hide Active Trader"
-	else
-		ToggleActiveTraderButton.Text = "Show Active Trader"
-	end
+	updateSidebar()
 
 	if isActiveTradeVisible then
 		updateSymbolData()
@@ -1057,11 +1287,7 @@ toggleSymbolInfo = function()
 	local slideTween = TweenService:Create(SymbolInfoPanel, SLIDE_EASING, { Position = targetPosition })
 	slideTween:Play()
 
-	if isSymbolInfoVisible then
-		ToggleSymbolInfoButton.Text = "Hide Symbol Info"
-	else
-		ToggleSymbolInfoButton.Text = "Symbol Info"
-	end
+	updateSidebar()
 
 	if isSymbolInfoVisible then
 		updateSymbolData()
@@ -1086,11 +1312,7 @@ toggleWatchlist = function()
 	local slideTween = TweenService:Create(WatchlistPanel, SLIDE_EASING, { Position = targetPosition })
 	slideTween:Play()
 
-	if isWatchlistVisible then
-		ToggleWatchlistButton.Text = "Hide Watchlist"
-	else
-		ToggleWatchlistButton.Text = "Watchlist"
-	end
+	updateSidebar()
 
 	if isWatchlistVisible then
 		refreshWatchlist()
@@ -1519,7 +1741,7 @@ loadTicker = function(ticker)
 
 	-- A pending trend-line first point belongs to whatever ticker's candle
 	-- series was showing when it was placed - discard it on ticker switch.
-	pendingTrendLineStart = nil
+	cancelTrendLine()
 
 	isFetchingData = true
 
@@ -1539,6 +1761,7 @@ loadTicker = function(ticker)
 		updateViewport()
 		updateSymbolData()
 		updateActiveTraderPosition()
+		updateSidebar()
 	else
 		TickerInput.Text = " . . . "
 		flashLegend("Couldn't load " .. targetTicker)
@@ -1578,7 +1801,7 @@ for button, data in pairs(TimeDropdownOptions) do
 		local previousTimeframe = currentTimeframe
 
 		setTimeframe(data.query)
-		pendingTrendLineStart = nil
+		cancelTrendLine()
 
 		if currentDisplayedTicker == "" then
 			return
@@ -1822,6 +2045,17 @@ ChartCanvas.InputBegan:Connect(function(input)
 		return
 	end
 
+	-- Right-click drops a half-placed trend line, then puts the tool down
+	if input.UserInputType == Enum.UserInputType.MouseButton2 then
+		if pendingTrendLineStart then
+			cancelTrendLine()
+		elseif currentDrawingTool ~= "cursor" then
+			setDrawingTool("cursor")
+		end
+
+		return
+	end
+
 	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 		if handleDrawingClick(input.Position) then
 			return
@@ -1869,6 +2103,10 @@ ChartCanvas.InputChanged:Connect(function(input)
 			scheduleViewportUpdate()
 		end
 		return
+	end
+
+	if pendingTrendLineStart and input.UserInputType == Enum.UserInputType.MouseMovement then
+		updateTrendPreview(input.Position)
 	end
 
 	if not isCrosshairActive then
@@ -2107,11 +2345,8 @@ ToggleActiveTraderButton.MouseButton1Click:Connect(toggleActiveTrader)
 ToggleSymbolInfoButton.MouseButton1Click:Connect(toggleSymbolInfo)
 ToggleWatchlistButton.MouseButton1Click:Connect(toggleWatchlist)
 
--- The Sidebar's fourth button (a placeholder in Studio) opens what's charted
--- on the Trade tab, for the order ticket and research
-local OpenInTradeButton = Sidebar:WaitForChild("PlaceholderButton")
-
-OpenInTradeButton.Text = "Trade"
+-- The Sidebar's fourth button opens what's charted on the Trade tab, for the
+-- order ticket and research
 OpenInTradeButton.MouseButton1Click:Connect(function()
 	if currentDisplayedTicker ~= "" then
 		Navigation.openTicker(currentDisplayedTicker)
@@ -2136,7 +2371,7 @@ ClearDrawingsButton.MouseButton1Click:Connect(function()
 	end
 
 	drawingsByTicker[currentDisplayedTicker] = { horizontalLines = {}, trendLines = {} }
-	pendingTrendLineStart = nil
+	cancelTrendLine()
 	renderChart(currentDisplayedTicker, currentChartData)
 end)
 
@@ -2204,6 +2439,7 @@ Player:GetAttributeChangedSignal("Level"):Connect(updateIndicatorLock)
 switchTab("Dashboard")
 updateIndicatorLock()
 setDrawingTool(currentDrawingTool) -- the Studio defaults no longer show which tool is active
+updateSidebar() -- Open in Trade starts dimmed: nothing is charted yet
 setTimeframe(currentTimeframe) -- the Studio button reads the bare query, "H"
 updateGreeting()
 updateActiveTraderPosition() -- grays out Sell presets until a position exists

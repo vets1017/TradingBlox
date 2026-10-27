@@ -86,6 +86,24 @@ function Progression.getLevel(xp: number): number
 	return level
 end
 
+-- How far `xp` is through its level, for an XP bar: the XP earned since the
+-- level began and the XP the next level takes. At the top level `needed` is
+-- nil and `fraction` is 1.
+function Progression.getLevelProgress(xp: number): { level: number, earned: number, needed: number?, fraction: number }
+	local level = Progression.getLevel(xp)
+	local floor = Progression.LEVELS[level].xp
+	local nextLevel = Progression.LEVELS[level + 1]
+
+	if not nextLevel then
+		return { level = level, earned = xp - floor, needed = nil, fraction = 1 }
+	end
+
+	local needed = nextLevel.xp - floor
+	local earned = xp - floor
+
+	return { level = level, earned = earned, needed = needed, fraction = earned / needed }
+end
+
 function Progression.isUnlocked(level: number, feature: string): boolean
 	local requiredLevel = Progression.FEATURES[feature]
 

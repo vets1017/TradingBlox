@@ -41,6 +41,10 @@ and on pull requests. There's no package manager (no Wally).
 
 Source folders map directly to the Roblox DataModel:
 
+- `src/first` → `ReplicatedFirst` — `StartScreen.client.luau`, the loading screen and start menu. It replaces
+  Roblox's default loading screen, follows the real loading steps (game, terminal UI preload, the player's
+  `Balance`/`Level` attributes), then shows the title screen (level and XP bar, net worth, market hours, Start
+  trading / Leaderboards / How to play) over a drifting candlestick backdrop, and lifts away onto the terminal.
 - `src/server` → `ServerScriptService`
 - `src/client` → `StarterPlayer.StarterPlayerScripts`
 - `src/shared` → `ReplicatedStorage`
@@ -51,6 +55,12 @@ over `src/gui/TerminalGui.rbxmx`; Studio-only edits are lost the next time Rojo 
 
 Server scripts (`*.server.luau`) and client scripts (`*.client.luau`) run automatically when Rojo syncs them
 into their respective services; plain `.luau` files under `Modules/` are `require`d libraries.
+
+`rojo serve` doesn't pick up changes to `default.project.json` (such as a new root folder): restart it.
+
+**`TerminalController` sits close to Luau's 200-local limit** for its main chunk. Past it, the whole script fails
+to compile ("Out of local registers") and every tab stops working, and selene doesn't catch it. Put new code in
+`do ... end` blocks (forward-declare only what the rest of the script calls), or in a module.
 
 ### Client/server split
 
